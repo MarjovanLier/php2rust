@@ -9,7 +9,8 @@
 //! it: `reassigned` counts back edges, so an inline `let` in the loop body would get
 //! rustc's unused_mut (see flow.rs). Where the `let` goes and whether it needs `mut` are
 //! known only at the end of the body, so those lines carry a mark until
-//! [`Converter::finish_variables`] replaces it.
+//! [`Converter::finish_variables`] replaces it. So is the type of a variable whose first
+//! write is `[]`: a later read or write gives it (P2R-21).
 //!
 //! A later step changes this file. A `foreach` binding that reuses a PHP name is a new
 //! entry: `lookup` must then find the binding, and the P2R-31 check in `declare` must
@@ -63,7 +64,9 @@ enum Pending {
     /// A variable's first write: `let x = v;`, or `x = v;` when its `let` is in a slot.
     First {
         var: Var,
-        annotation: String,
+        /// The `let` names the variable's type, which `[]` gets only from a later read or
+        /// write (P2R-21).
+        typed: bool,
         value: String,
     },
 }
@@ -92,6 +95,9 @@ struct Entry {
     first: usize,
     /// The innermost block that holds every read and write.
     common: usize,
+    /// The variable holds `[]` and has no type yet; `ty` is `None` until a later read or
+    /// write gives it (P2R-21).
+    empty: bool,
 }
 
 /// The variables of the body being converted, a function or `fn main()`, and the state
@@ -150,6 +156,7 @@ impl Variables {
                 value: None,
                 first: 0,
                 common: 0,
+                empty: false,
             });
         }
         variables
@@ -312,12 +319,15 @@ impl Converter<'_> {
             return None;
         };
         self.variables.read(var, variable.span);
+        if self.variables.entries[var].empty && self.empty_list(variable) {
+            // The converter needs the read's type, and no read or write has given it yet.
+            self.fail(var, variable, lists::UNKNOWN_ELEMENT.to_owned());
+            return None;
+        }
+        self.settle(var, variable);
         let entry = &self.variables.entries[var];
         let known = entry.ty.clone()?;
-        let checked = self
-            .site_type(variable)
-            .and_then(|found| same_type(&entry.php_name, &known, found));
-        match checked {
+        match self.later_type(var, &known, variable) {
             Ok(ty) => {
                 let name = entry.rust_name.clone();
                 let read = match self.variables.value(var) {
@@ -415,6 +425,16 @@ impl Converter<'_> {
             self.refuse(expression, message);
             return None;
         };
+        // `[]` has no element type of its own: it has the variable's list type, which
+        // `write` finds now or a later read or write gives (P2R-21).
+        if operator == Some("=") && value.is_some_and(lists::is_empty_literal) {
+            let (var, declares) = self.write(variable, expression)?;
+            if !declares {
+                let name = &self.variables.entries[var].rust_name;
+                return Some(format!("{name} = Vec::new();"));
+            }
+            return Some(self.first_write(var, true, "Vec::new()".to_owned()));
+        }
         // PHP evaluates the value first. Every operator but `=` then reads the variable
         // before it writes it.
         let source = value;
@@ -456,7 +476,7 @@ impl Converter<'_> {
             );
             return None;
         }
-        let (var, declares, ty) = self.write(variable, expression)?;
+        let (var, declares) = self.write(variable, expression)?;
         // The value the variable now holds, when rustc can work it out (P2R-50).
         let value = match (current, operation(operator)) {
             (Some((current, _)), Some(op)) => {
@@ -493,7 +513,10 @@ impl Converter<'_> {
             };
             ("+=", self.borrowed(expr, &value_type))
         } else if let Some(source) = source {
-            (operator, self.stored(source, expr, &ty, expression.span()))
+            (
+                operator,
+                self.stored(source, expr, &value_type, expression.span()),
+            )
         } else {
             (operator, expr)
         };
@@ -503,17 +526,17 @@ impl Converter<'_> {
             return Some(format!("{name} {operator} {rendered};"));
         }
         // A literal alone would make Rust infer i32 (P2R-49).
-        let annotation = if printer::anchored(&expr) {
-            String::new()
-        } else {
-            format!(": {}", ty.owned())
-        };
-        self.variables.pending.push(Pending::First {
-            var,
-            annotation,
-            value: rendered,
-        });
-        Some(format!("{MARK}{}", self.variables.pending.len() - 1))
+        Some(self.first_write(var, !printer::anchored(&expr), rendered))
+    }
+
+    /// The pending line of the first write of `var`, whose `let` names the type when
+    /// `typed`. The type is the one the variable has at the end of the body, which a later
+    /// read or write gives a variable that holds `[]` (P2R-21).
+    fn first_write(&mut self, var: Var, typed: bool, value: String) -> String {
+        self.variables
+            .pending
+            .push(Pending::First { var, typed, value });
+        format!("{MARK}{}", self.variables.pending.len() - 1)
     }
 
     /// `$a[] = x`, a change of the list in `$a`: PHP evaluates the value, then reads the list
@@ -539,7 +562,7 @@ impl Converter<'_> {
         }
         // Mago types the `$a` of `$a[]` as the list after the append, so a value of another
         // type shows as a type change.
-        let (var, _, _) = self.write(list, list)?;
+        let (var, _) = self.write(list, list)?;
         let value = self.stored(source, value, &value_type, expression.span());
         let name = &self.variables.entries[var].rust_name;
         // rustfmt lays out the arguments of a method call as those of a call (P2R-51).
@@ -548,12 +571,9 @@ impl Converter<'_> {
     }
 
     /// Records a write of `variable` by `node` and checks the type Mago gives the write.
-    /// Gives the variable, whether this write declares it, and its type.
-    fn write(
-        &mut self,
-        variable: &DirectVariable<'_>,
-        node: &impl HasSpan,
-    ) -> Option<(Var, bool, RustType)> {
+    /// Gives the variable and whether this write declares it.
+    fn write(&mut self, variable: &DirectVariable<'_>, node: &impl HasSpan) -> Option<(Var, bool)> {
+        let empty = self.empty_list(node);
         let found = self.site_type(node);
         let (var, declared) = self.record_write(variable);
         let entry = &self.variables.entries[var];
@@ -572,16 +592,25 @@ impl Converter<'_> {
         let checked = match declared {
             // The name problem is recorded.
             Some(false) => return None,
+            // `[]` has no element type: a later read or write gives it (P2R-21).
+            Some(true) if empty => {
+                self.variables.entries[var].empty = true;
+                return Some((var, true));
+            }
             Some(true) => found,
             None => {
-                let known = entry.ty.clone()?;
-                found.and_then(|found| same_type(&entry.php_name, &known, found))
+                self.settle(var, node);
+                if self.variables.entries[var].empty {
+                    return Some((var, false));
+                }
+                let known = self.variables.entries[var].ty.clone()?;
+                self.later_type(var, &known, node)
             }
         };
         match checked.and_then(built_yet) {
             Ok(ty) => {
-                self.variables.entries[var].ty = Some(ty.clone());
-                Some((var, declared.is_some(), ty))
+                self.variables.entries[var].ty = Some(ty);
+                Some((var, declared.is_some()))
             }
             Err(message) => {
                 self.fail(var, node, message);
@@ -673,6 +702,7 @@ impl Converter<'_> {
             value: None,
             first: self.variables.scope,
             common: self.variables.scope,
+            empty: false,
         });
         (self.variables.entries.len() - 1, named)
     }
@@ -692,13 +722,54 @@ impl Converter<'_> {
             .artifacts
             .get_expression_type(node)
             .ok_or_else(|| "Mago found no type here (P2R-34)".to_owned())?;
-        types::rust_type(union).map_err(|name| format!("the type {name} has no Rust type (P2R-22)"))
+        types::rust_type(&lists::without_empty(union))
+            .map_err(|name| format!("the type {name} has no Rust type (P2R-22)"))
+    }
+
+    /// True when Mago types `node` as `[]` only, which has no element type (P2R-21).
+    pub(super) fn empty_list(&self, node: &impl HasSpan) -> bool {
+        self.artifacts
+            .get_expression_type(node)
+            .is_some_and(lists::only_empty)
+    }
+
+    /// The type of a later read or write of `var` at `node`, refused when it differs from
+    /// the variable's type `known` (P2R-34). `[]` fits a list of any element type (P2R-21).
+    fn later_type(
+        &self,
+        var: Var,
+        known: &RustType,
+        node: &impl HasSpan,
+    ) -> Result<RustType, String> {
+        if matches!(known, RustType::Vec(_)) && self.empty_list(node) {
+            return Ok(known.clone());
+        }
+        let php_name = &self.variables.entries[var].php_name;
+        self.site_type(node)
+            .and_then(|found| same_type(php_name, known, found))
+    }
+
+    /// Gives a variable that holds `[]` the list type Mago finds at `node`, a later read or
+    /// write of it (P2R-21). Nothing changes while that type is still `[]`.
+    fn settle(&mut self, var: Var, node: &impl HasSpan) {
+        if !self.variables.entries[var].empty || self.empty_list(node) {
+            return;
+        }
+        match self.site_type(node).and_then(built_yet) {
+            Ok(ty) => {
+                let entry = &mut self.variables.entries[var];
+                entry.ty = Some(ty);
+                entry.empty = false;
+            }
+            Err(message) => self.fail(var, node, message),
+        }
     }
 
     /// Records a problem with a variable's type. Later uses of the variable convert to
     /// nothing, so one problem is reported per variable.
     fn fail(&mut self, var: Var, node: &impl HasSpan, message: String) {
         self.variables.entries[var].ty = None;
+        self.variables.entries[var].empty = false;
         self.refuse(node, message);
     }
 
@@ -772,24 +843,23 @@ impl Converter<'_> {
                         }
                     }
                 }
-                Some((
-                    at,
-                    _,
-                    Pending::First {
-                        var,
-                        annotation,
-                        value,
-                    },
-                )) => {
+                Some((at, _, Pending::First { var, typed, value })) => {
                     let indent = &line[..at];
-                    let name = &entries[*var].rust_name;
+                    let entry = &entries[*var];
+                    let name = &entry.rust_name;
+                    // A variable whose type never came is refused where it is read
+                    // (P2R-21), or it is never read (P2R-35).
+                    let annotation = match (typed, &entry.ty) {
+                        (true, Some(ty)) => format!(": {}", ty.owned()),
+                        _ => String::new(),
+                    };
                     let text = match slots[*var] {
                         Some(_) => format!("{indent}{name} = {value};"),
                         None => {
                             format!("{indent}{}{name}{annotation} = {value};", let_keyword(*var))
                         }
                     };
-                    finished.push((entries[*var].assigned, text));
+                    finished.push((entry.assigned, text));
                 }
                 None => finished.push((None, line)),
             }

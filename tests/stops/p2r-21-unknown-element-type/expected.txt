@@ -1,0 +1,2 @@
+input.php:6:12: the element type of this empty list is not known (P2R-21)
+input.php:6:23: the element type of this empty list is not known (P2R-21)

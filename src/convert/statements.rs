@@ -70,9 +70,9 @@ impl Converter<'_> {
                 return;
             }
             (Context::Function(None), None) => "return;".to_owned(),
-            (Context::Function(Some(_)), Some(value)) => {
+            (Context::Function(Some(returns)), Some(value)) => {
                 // Mago reports a value that does not match the declared return type (P2R-11).
-                let Some((expr, ty)) = self.expression(value) else {
+                let Some((expr, ty)) = self.value(value, Some(returns)) else {
                     return;
                 };
                 let expr = self.owned(expr, &ty);

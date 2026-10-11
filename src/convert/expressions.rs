@@ -65,7 +65,7 @@ impl Converter<'_> {
                 self.refuse(null, "the type null has no Rust type (P2R-22)");
                 None
             }
-            Expression::Array(array) => self.list(array),
+            Expression::Array(array) => self.list(array, None),
             Expression::ArrayAccess(access) => self.index(access),
             other => {
                 self.record_refused(other);
@@ -192,11 +192,12 @@ impl Converter<'_> {
         };
         let mut arguments = Vec::new();
         let mut converted = true;
-        for argument in call.argument_list.arguments.iter() {
+        for (position, argument) in call.argument_list.arguments.iter().enumerate() {
             match argument {
                 // Mago reports an argument whose type does not match the parameter (P2R-11).
                 Argument::Positional(positional) if positional.ellipsis.is_none() => {
-                    match self.expression(positional.value) {
+                    let parameter = signature.parameters.get(position).map(|p| &p.ty);
+                    match self.value(positional.value, parameter) {
                         Some((expr, ty)) => arguments.push(self.borrowed(expr, &ty)),
                         None => converted = false,
                     }

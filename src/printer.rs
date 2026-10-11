@@ -206,7 +206,7 @@ fn render(expr: &RExpr, anchor: bool, min_precedence: u8) -> Result<String, TooW
             let mut left = render(left, anchor, precedence + 1)?;
             // rustc reads `as i64 <` as the start of generic arguments, so a left operand
             // that ends in a cast gets parentheses.
-            if *op == BinOp::Lt && left.ends_with(" as i64") {
+            if *op == BinOp::Lt && (left.ends_with(" as i64") || left.ends_with(" as f64")) {
                 left = format!("({left})");
             }
             let text = format!(
@@ -265,12 +265,15 @@ fn render(expr: &RExpr, anchor: bool, min_precedence: u8) -> Result<String, TooW
         // as the same value, and always a float literal (`1.0`, `1e300`).
         RExpr::Float(value) if *value == f64::INFINITY => "f64::INFINITY".into(),
         RExpr::Float(value) => format!("{value:?}"),
-        // `x as f64 < y` parses `<` as generic arguments, so an operand gets parentheses,
-        // as with `len`. The int inside is anchored, or literals alone would be i32.
-        RExpr::ToFloat(inner) if min_precedence > 0 => {
-            format!("({} as f64)", render(inner, true, CAST)?)
+        // The int inside is anchored, or literals alone would be i32.
+        RExpr::ToFloat(inner) => {
+            let text = format!("{} as f64", render(inner, true, CAST)?);
+            if CAST < min_precedence {
+                format!("({text})")
+            } else {
+                text
+            }
         }
-        RExpr::ToFloat(inner) => format!("{} as f64", render(inner, true, CAST)?),
     })
 }
 
@@ -539,17 +542,19 @@ mod tests {
     }
 
     #[test]
-    fn casts_to_float_are_operands_in_parentheses() {
+    fn casts_to_float_get_parentheses_only_where_rust_needs_them() {
         let cast = |inner: RExpr| RExpr::ToFloat(Box::new(inner));
         let n = || RExpr::Var("n".into());
         assert_eq!(expr(&cast(n()), false).unwrap(), "n as f64");
+        let quotient = binary(RExpr::Float(1.0), BinOp::Div, cast(n()));
+        assert_eq!(expr(&quotient, false).unwrap(), "1.0 / n as f64");
         // `1.0 / n as f64 < x` does not parse: `<` reads as generic arguments of `f64`.
-        let e = binary(
-            binary(RExpr::Float(1.0), BinOp::Mul, cast(n())),
-            BinOp::Lt,
-            RExpr::Var("x".into()),
+        let e = binary(quotient, BinOp::Lt, RExpr::Var("x".into()));
+        assert_eq!(expr(&e, false).unwrap(), "(1.0 / n as f64) < x");
+        assert_eq!(
+            expr(&RExpr::Neg(Box::new(cast(n()))), false).unwrap(),
+            "-(n as f64)"
         );
-        assert_eq!(expr(&e, false).unwrap(), "1.0 * (n as f64) < x");
         let sum = cast(binary(RExpr::Int(2), BinOp::Add, RExpr::Int(3)));
         assert_eq!(expr(&sum, false).unwrap(), "(2_i64 + 3) as f64");
         let negated = cast(RExpr::Neg(Box::new(n())));

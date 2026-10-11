@@ -16,8 +16,8 @@ fn main() {
     let n: i64 = 3;
     check(7.0 / 2.0 == 3.5);
     check(rate(1.0, 4.0) == 0.25);
-    check((n as f64) / 2.0 == 1.5);
-    check(1.0 / (n as f64) < 0.5);
+    check(n as f64 / 2.0 == 1.5);
+    check((1.0 / n as f64) < 0.5);
     check(2.0 * (1.0 / 4.0) == 0.5);
     check(1.0 / 0.0 > 1e308);
     check(-1.0 / 0.0 < -1e308);

@@ -1,5 +1,5 @@
 //! Variables: reads, assignments, `++` and `--`, and the `let` and `mut` they need
-//! (P2R-20 to P2R-22, P2R-31, P2R-34, P2R-35, P2R-43, P2R-50).
+//! (P2R-20 to P2R-22, P2R-31, P2R-34, P2R-35, P2R-43, P2R-44, P2R-50).
 //!
 //! A variable is declared by a `let` at its first write in the source. Whether that `let`
 //! needs `mut` is known only at the end of the body, so the line carries a mark until
@@ -87,6 +87,22 @@ impl Converter<'_> {
             self.emit(statement, depth, text)
         };
         body.push(line);
+    }
+
+    /// Refuses an assignment, `++` or `--` used as a value (P2R-44). Its write still
+    /// counts, so a later read is not reported as unassigned.
+    pub(super) fn change_as_value(
+        &mut self,
+        expression: &Expression<'_>,
+    ) -> Option<(RExpr, RustType)> {
+        self.change(expression);
+        let message = if matches!(expression, Expression::Assignment(_)) {
+            "an assignment used as a value is not supported (P2R-44)"
+        } else {
+            "++ and -- used as a value are not supported (P2R-44)"
+        };
+        self.refuse(expression, message);
+        None
     }
 
     /// A read of a variable (P2R-34).

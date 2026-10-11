@@ -4,6 +4,7 @@ use mago_span::HasSpan;
 use mago_syntax::cst::*;
 
 use super::Converter;
+use super::variables::changes_variable;
 use crate::printer::{self, BinOp, RExpr};
 use crate::types::RustType;
 
@@ -43,6 +44,7 @@ impl Converter<'_> {
                     None
                 }
             },
+            other if changes_variable(other) => self.change_as_value(other),
             other => {
                 self.refuse(
                     other,

@@ -1,0 +1,2 @@
+input.php:5:6: an assignment used as a value is not supported (P2R-44)
+input.php:8:6: ++ and -- used as a value are not supported (P2R-44)

@@ -1,0 +1,1 @@
+input.php:6:1: only a plain variable can be a foreach key or value (P2R-07)

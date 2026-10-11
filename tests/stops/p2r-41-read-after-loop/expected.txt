@@ -1,0 +1,3 @@
+input.php:6:21: $key is read after its foreach loop, where PHP keeps the last value (P2R-41)
+input.php:10:21: $value is read after its foreach loop, where PHP keeps the last value (P2R-41)
+input.php:18:24: $x is read after its foreach loop, where PHP keeps the last value (P2R-41)

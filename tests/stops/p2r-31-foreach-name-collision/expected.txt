@@ -1,0 +1,2 @@
+input.php:10:17: value is already the Rust name of a function or variable (P2R-31)
+input.php:15:17: my_item is already the Rust name of a function or variable (P2R-31)

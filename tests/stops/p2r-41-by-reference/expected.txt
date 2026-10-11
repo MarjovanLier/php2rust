@@ -1,0 +1,1 @@
+input.php:6:1: a by-reference foreach is not supported (P2R-41)

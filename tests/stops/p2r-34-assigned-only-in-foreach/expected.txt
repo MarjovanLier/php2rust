@@ -1,0 +1,1 @@
+input.php:11:12: the variable $last is not assigned on every path to this read (P2R-34)

@@ -1,0 +1,2 @@
+input.php:5:20: the value assigned to $key is never read (P2R-35)
+input.php:5:28: the value assigned to $value is never read (P2R-35)

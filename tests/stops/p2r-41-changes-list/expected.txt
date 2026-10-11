@@ -1,0 +1,2 @@
+input.php:7:5: the body of a foreach cannot change the list it iterates (P2R-41)
+input.php:12:9: the body of a foreach cannot change the list it iterates (P2R-41)

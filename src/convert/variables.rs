@@ -49,9 +49,12 @@ use crate::types::{self, RustType};
 /// output text holds it.
 const MARK: char = '\u{1}';
 
-/// Stands after a string variable that an assignment moves, for its `.clone()` when the
-/// variable is read again (P2R-26).
-const COPY: char = '\u{2}';
+/// Stands after a string or list variable that a statement moves, for its `.clone()` when
+/// the variable is read again (P2R-26). The mark is this character, six hex digits and
+/// this character: as wide as `.clone()`, so the widths `printer` checks inside a
+/// `vec![..]` or a call with the mark in place are never smaller than the final ones. A
+/// line that holds a mark is measured at the end of the body, once the mark is resolved.
+pub(super) const COPY: char = '\u{2}';
 
 /// A line whose text is known only at the end of the body.
 enum Pending {
@@ -98,7 +101,7 @@ pub(super) struct Variables {
     /// hashing (P2R-06).
     entries: Vec<Entry>,
     pub(super) flow: Flow,
-    /// By copy mark: the read the assignment moves, and the assignment.
+    /// By copy mark: the read that moves, and the statement that holds it.
     copies: Vec<(Span, Span)>,
     /// The Rust blocks, indexed from 0, the body itself.
     scopes: Vec<Scope>,
@@ -204,10 +207,10 @@ impl Variables {
         self.entries[var].value = value;
     }
 
-    /// The copy mark for an assignment that moves the variable read at `read`.
-    fn copy_mark(&mut self, read: Span, assignment: Span) -> String {
-        self.copies.push((read, assignment));
-        format!("{COPY}{}{COPY}", self.copies.len() - 1)
+    /// The copy mark for a statement that moves the variable read at `read`.
+    fn copy_mark(&mut self, read: Span, statement: Span) -> String {
+        self.copies.push((read, statement));
+        format!("{COPY}{:06x}{COPY}", self.copies.len() - 1)
     }
 
     /// True when `rust_name` is a parameter: a string parameter is a `&str` (P2R-24).
@@ -329,6 +332,28 @@ impl Converter<'_> {
                 self.variables.read_problems.push((variable.span, message));
                 None
             }
+        }
+    }
+
+    /// `expr`, converted from `value`, as a value that `statement` stores: assigns,
+    /// appends or puts in a list. `owned` gives the owned form Rust needs, and a string or
+    /// list variable read alone moves, with a copy mark for the `.clone()` it needs when it
+    /// is read again (P2R-26).
+    pub(super) fn stored(
+        &mut self,
+        value: &Expression<'_>,
+        expr: RExpr,
+        ty: &RustType,
+        statement: Span,
+    ) -> RExpr {
+        match (self.owned(expr, ty), strings::sole_read(value)) {
+            (RExpr::Var(name), Some(read)) if matches!(ty, RustType::String | RustType::Vec(_)) => {
+                // The mark rides in the variable's text, so it lands right after the
+                // variable wherever the value is rendered.
+                let mark = self.variables.copy_mark(read, statement);
+                RExpr::Var(format!("{name}{mark}"))
+            }
+            (expr, _) => expr,
         }
     }
 
@@ -458,7 +483,6 @@ impl Converter<'_> {
             );
             return None;
         }
-        let mut moved = None;
         let (operator, expr) = if operator == ".=" {
             // `s += &s` borrows `s` twice, which rustc rejects (E0502).
             let expr = if read_itself {
@@ -467,21 +491,12 @@ impl Converter<'_> {
                 expr
             };
             ("+=", self.borrowed(expr, &value_type))
-        } else if ty == RustType::String {
-            let expr = self.owned(expr, &ty);
-            // A string variable assigned alone moves; whether it needs a copy is known
-            // at the end of the body (P2R-26).
-            if matches!(expr, RExpr::Var(_)) {
-                moved = source.and_then(strings::sole_read);
-            }
-            (operator, expr)
+        } else if let Some(source) = source {
+            (operator, self.stored(source, expr, &ty, expression.span()))
         } else {
             (operator, expr)
         };
-        let mut rendered = self.render(expression, &expr, false)?;
-        if let Some(read) = moved {
-            rendered.push_str(&self.variables.copy_mark(read, expression.span()));
-        }
+        let rendered = self.render(expression, &expr, false)?;
         let name = &self.variables.entries[var].rust_name;
         if !declares {
             return Some(format!("{name} {operator} {rendered};"));
@@ -508,9 +523,10 @@ impl Converter<'_> {
         list: &DirectVariable<'_>,
         value: &Expression<'_>,
     ) -> Option<String> {
+        let source = value;
         let value = self.expression(value);
         let current = self.variable(list);
-        let (Some((value, _)), Some((_, current_type))) = (value, current) else {
+        let (Some((value, value_type)), Some((_, current_type))) = (value, current) else {
             // The write still counts, so later reads see it.
             self.record_write(list);
             return None;
@@ -523,6 +539,7 @@ impl Converter<'_> {
         // Mago types the `$a` of `$a[]` as the list after the append, so a value of another
         // type shows as a type change.
         let (var, _, _) = self.write(list, list)?;
+        let value = self.stored(source, value, &value_type, expression.span());
         let name = &self.variables.entries[var].rust_name;
         // rustfmt lays out the arguments of a method call as those of a call (P2R-51).
         let push = RExpr::Call(format!("{name}.push"), vec![value]);
@@ -877,19 +894,24 @@ impl<'ast, 'arena> Walker<'ast, 'arena, Vec<&'ast DirectVariable<'arena>>> for W
     }
 }
 
-/// Replaces the copy mark of an assignment with `.clone()` when the variable it moves is
-/// read again, or with nothing, and gives the assignment (P2R-26).
+/// Replaces each copy mark with `.clone()` when the variable it moves is read again, or
+/// with nothing, and gives the statement of the first mark (P2R-26). A list literal can
+/// move several variables on one line.
 fn resolve_copy(
     line: &mut String,
     copies: &[(Span, Span)],
     read_again: &[(Var, Span)],
 ) -> Option<Span> {
-    let start = line.find(COPY)?;
-    let end = start + 1 + line[start + 1..].find(COPY)?;
-    let (read, assignment) = *copies.get(line[start + 1..end].parse::<usize>().ok()?)?;
-    let again = read_again.iter().any(|&(_, span)| span == read);
-    line.replace_range(start..=end, if again { ".clone()" } else { "" });
-    Some(assignment)
+    let mut first = None;
+    while let Some(start) = line.find(COPY) {
+        let end = start + 1 + line[start + 1..].find(COPY)?;
+        let number = usize::from_str_radix(&line[start + 1..end], 16).ok()?;
+        let (read, statement) = *copies.get(number)?;
+        let again = read_again.iter().any(|&(_, span)| span == read);
+        line.replace_range(start..=end, if again { ".clone()" } else { "" });
+        first.get_or_insert(statement);
+    }
+    first
 }
 
 /// A variable that a refused expression reads or writes.

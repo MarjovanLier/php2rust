@@ -253,10 +253,10 @@ impl<'c> Converter<'c> {
     }
 
     /// One output line at `depth` levels of indentation, refused when rustfmt would split
-    /// it (P2R-51).
+    /// it (P2R-51). A line that holds a copy mark is measured at the end of the body.
     fn emit(&mut self, node: &impl HasSpan, depth: usize, text: String) -> String {
         let line = format!("{}{text}", "    ".repeat(depth));
-        if line.len() > printer::MAX_WIDTH {
+        if line.len() > printer::MAX_WIDTH && !line.contains(variables::COPY) {
             self.refuse(node, "this statement is too long for one line (P2R-51)");
         }
         line

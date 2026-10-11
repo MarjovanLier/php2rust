@@ -61,6 +61,10 @@ impl Converter<'_> {
             RExpr::Var(name) if *ty == RustType::String && self.variables.is_parameter(&name) => {
                 RExpr::Method(Box::new(RExpr::Var(name)), "to_string")
             }
+            // Rust cannot move a string or list out of a list.
+            RExpr::Index(..) if matches!(ty, RustType::String | RustType::Vec(_)) => {
+                RExpr::Method(Box::new(expr), "clone")
+            }
             other => other,
         }
     }

@@ -1,6 +1,8 @@
-//! Lists: literals, reads by index and `count()` (P2R-20, P2R-47, P2R-48). An append is a
-//! change of its variable, so it sits with the other changes in `variables.rs`.
+//! Lists: literals, reads by index, `count()` and copies (P2R-20, P2R-26, P2R-47, P2R-48).
+//! An append is a change of its variable, so it sits with the other changes in
+//! `variables.rs`.
 
+use mago_span::HasSpan;
 use mago_syntax::cst::*;
 
 use super::Converter;
@@ -35,10 +37,14 @@ impl Converter<'_> {
                 return None;
             }
         };
-        // Every element converts, so the problems in each are reported.
+        // Every element converts, so the problems in each are reported. PHP copies each
+        // into the list (P2R-26).
         let items: Vec<Option<RExpr>> = values
             .into_iter()
-            .map(|value| self.expression(value).map(|(expr, _)| expr))
+            .map(|value| {
+                let (expr, element) = self.expression(value)?;
+                Some(self.stored(value, expr, &element, array.span()))
+            })
             .collect();
         let items = items.into_iter().collect::<Option<Vec<RExpr>>>()?;
         Some((RExpr::List(items), ty))

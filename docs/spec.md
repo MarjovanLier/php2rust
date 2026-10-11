@@ -218,7 +218,10 @@ requirement IDs.
   `rustc --edition 2024 -D warnings` from the pinned toolchain (P2R-83): as a
   program when it has `fn main()`, as a library (`--crate-type lib`)
   otherwise. When the tool cannot produce such code for an input, it MUST
-  stop instead. The output MUST NOT contain `allow` or `expect` attributes.
+  stop instead. Int arithmetic that the tool can prove overflows, and `%` by
+  a divisor it can prove is 0, MUST stop the conversion: rustc rejects many
+  such cases at compile time, and whether it does depends on how the value
+  is used later. The output MUST NOT contain `allow` or `expect` attributes.
   Clippy is not required on the output.
 - **P2R-51** The output MUST be unchanged by `rustfmt --edition 2024 --check`
   from the pinned toolchain. The tool MUST NOT run rustfmt or any other

@@ -6,7 +6,10 @@
 //! [`Converter::finish_variables`] replaces it.
 //!
 //! Two later steps change this file. A variable first written inside a block, and read
-//! after it, needs its declaration moved above that block. A `foreach` binding
+//! after it, needs its declaration moved above that block. A variable first
+//! written inside a loop needs a typed `let` above the outermost loop that holds that
+//! write, even when only the loop reads it: `reassigned` counts back edges, so an inline
+//! `let` in the loop body would get rustc's unused_mut (see flow.rs). A `foreach` binding
 //! that reuses a PHP name is a new entry: `lookup` must then find the binding, and the
 //! P2R-31 check in `declare` must allow an earlier entry with the same PHP name.
 //!
@@ -19,9 +22,16 @@
 //! wider, so the output never depends on that. The values must never be weaker than
 //! rustc's, because a missed value lets through code that rustc rejects. In straight-line
 //! code the latest write in source order gives the value, and a call between does not
-//! change it. With branches and loops, a variable written once from a known
-//! value keeps that value everywhere; any other variable has a known value after a join
-//! only when every path into the join gives the same value.
+//! change it. the control flow code keeps the values right at loops and joins with `lookup`,
+//! `Variables::value` and `Variables::set_value`:
+//! - Before it converts a loop's condition, body and step, it clears the value of every
+//!   variable written anywhere in that loop (a pre-scan), and keeps all other values.
+//!   Clearing more would be weaker than rustc: `let x = 0; while c() { print!("{}", 10 %
+//!   x); }` is a rustc error.
+//! - At an `if` join, a value stays only when every path that reaches the join agrees.
+//!   Paths that end in `return`, `break` or `continue` do not count.
+//! - After a loop, the value is the meet of the value at the loop head and at every
+//!   `break`.
 
 use mago_span::{HasSpan, Span};
 use mago_syntax::cst::*;

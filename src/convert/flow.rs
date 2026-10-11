@@ -8,7 +8,7 @@
 //!
 //! The events sit in blocks of straight-line code, and edges join the blocks into a
 //! control-flow graph. [`Flow::finish`] runs three data-flow analyses over the graph until
-//! nothing changes, so its answers hold for any graph, loops included:
+//! nothing changes, so loops need no special case:
 //! - definite assignment (forward, intersection at joins): a read is refused unless every
 //!   path to it writes the variable first (P2R-34);
 //! - liveness (backward, union at joins): a write is refused when no path from it reads the
@@ -17,16 +17,29 @@
 //! - possible assignment (forward, union at joins): a variable needs `mut` when one of its
 //!   writes can run while it may already hold a value.
 //!
-//! Every condition counts as unknown, so every edge can be taken. A block with no
-//! successor is an exit of the body.
+//! A block with no successor is an exit of the body.
 //!
 //! Version 1 so far has straight-line code only, so a body is one block. Branches and
-//! loops add three methods and leave `finish` as it is: `block()` adds an empty
-//! block, `edge(from, to)` lets control pass from one block to another, and `enter(block)`
-//! makes later events land in that block. A `return`, `break` or `continue` gives its
-//! block no edge to the next statement. A `foreach` key or value is a new
-//! variable id written at the start of the loop body, so a later loop that reuses the PHP
-//! name gets a variable of its own (P2R-41).
+//! loops add three methods: `block()` adds an empty block, `edge(from, to)` lets
+//! control pass from one block to another, and `enter(block)` makes later events land in
+//! that block. `finish` needs no change, but its answers are right only when the graph
+//! keeps these rules:
+//! - Every loop head is its own new `block()`, and a back edge goes only to a loop head.
+//!   Block 0 holds the parameter writes, so a back edge to it would run them again and
+//!   give a false P2R-35 on `while ($n > 0) { $n--; }`.
+//! - The head of `while (true)` or `for (;;)` gets no exit edge: only `break` leaves it,
+//!   as with rustc's `loop`. Every other condition counts as unknown, so both of its
+//!   edges can be taken, because rustc does not fold `if false` either.
+//! - A `return`, `break` or `continue` gives its block no edge to the next statement.
+//!
+//! `reassigned` counts back edges. So a variable first written inside a loop needs a
+//! typed `let` above the outermost loop that holds that write: `let mut t: i64;` before
+//! `while c() { t = 1; ... }` compiles clean under rustc 1.99, while an inline
+//! `let mut t = 1;` in the loop body gets "variable does not need to be mutable".
+//!
+//! A `foreach` key or value is a new variable id written at the start of the
+//! loop body, so a later loop that reuses the PHP name gets a variable of its own
+//! (P2R-41).
 
 use mago_span::Span;
 

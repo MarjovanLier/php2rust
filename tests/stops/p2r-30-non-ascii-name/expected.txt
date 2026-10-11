@@ -1,0 +1,3 @@
+input.php:5:10: the name größe has no Rust form (P2R-30)
+input.php:10:21: the name x² has no Rust form (P2R-30)
+input.php:15:1: the name а has no Rust form (P2R-30)

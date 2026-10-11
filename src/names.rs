@@ -18,13 +18,23 @@ const FORBIDDEN: &[&str] = &["self", "super", "crate", ""];
 /// cannot use it.
 pub fn rust_name(php: &str) -> Option<String> {
     let snake = php.to_snake_case();
-    if FORBIDDEN.contains(&snake.as_str()) {
+    if FORBIDDEN.contains(&snake.as_str()) || !ascii_identifier(&snake) {
         return None;
     }
     if KEYWORDS.contains(&snake.as_str()) {
         return Some(format!("r#{snake}"));
     }
     Some(snake)
+}
+
+/// A letter or `_` first, then only ASCII letters, digits and `_`. heck turns `_2` into
+/// `2`, and a non-ASCII name trips rustc's confusable-name lints (P2R-30).
+fn ascii_identifier(name: &str) -> bool {
+    let mut chars = name.chars();
+    chars
+        .next()
+        .is_some_and(|first| first.is_ascii_alphabetic() || first == '_')
+        && chars.all(|c| c.is_ascii_alphanumeric() || c == '_')
 }
 
 #[cfg(test)]
@@ -53,5 +63,14 @@ mod tests {
         assert_eq!(rust_name("Self"), None);
         assert_eq!(rust_name("crate"), None);
         assert_eq!(rust_name("_"), None);
+    }
+
+    #[test]
+    fn names_that_are_not_ascii_identifiers_are_refused() {
+        assert_eq!(rust_name("_2"), None);
+        assert_eq!(rust_name("_3d"), None);
+        assert_eq!(rust_name("x\u{b2}"), None);
+        assert_eq!(rust_name("\u{430}"), None);
+        assert_eq!(rust_name("_x2").as_deref(), Some("x2"));
     }
 }

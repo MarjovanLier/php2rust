@@ -125,12 +125,14 @@ impl Converter<'_> {
             return None;
         }
         let ty = self.declared_type(parameter, declared)?;
-        if !matches!(ty, RustType::I64 | RustType::Bool | RustType::String)
-            && !lists::list_built(&ty)
+        if !matches!(
+            ty,
+            RustType::I64 | RustType::F64 | RustType::Bool | RustType::String
+        ) && !lists::list_built(&ty)
         {
             self.refuse(
                 parameter,
-                "only int, bool, string and list parameters are built so far (P2R-20)",
+                "only int, float, bool, string and list parameters are built so far (P2R-20)",
             );
             return None;
         }
@@ -162,12 +164,14 @@ impl Converter<'_> {
             return Some(None);
         }
         let ty = self.declared_type(hint, declared)?;
-        if !matches!(ty, RustType::I64 | RustType::Bool | RustType::String)
-            && !lists::list_built(&ty)
+        if !matches!(
+            ty,
+            RustType::I64 | RustType::F64 | RustType::Bool | RustType::String
+        ) && !lists::list_built(&ty)
         {
             self.refuse(
                 hint,
-                "only int, bool, string, list and void return types are built so far (P2R-20)",
+                "only int, float, bool, string, list and void return types are built so far (P2R-20)",
             );
             return None;
         }

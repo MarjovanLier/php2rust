@@ -4,7 +4,7 @@ use mago_span::HasSpan;
 use mago_syntax::cst::*;
 
 use super::variables::changes_variable;
-use super::{Converter, strings};
+use super::{Converter, numbers, strings};
 use crate::printer::{self, BinOp, RExpr};
 use crate::types::RustType;
 
@@ -30,11 +30,14 @@ impl Converter<'_> {
                 if matches!(unary.operator, UnaryPrefixOperator::Negation(_)) =>
             {
                 let (operand, ty) = self.expression(unary.operand)?;
-                if ty != RustType::I64 {
-                    self.refuse(unary, "unary minus is built for int only so far (P2R-43)");
-                    return None;
+                match ty {
+                    RustType::I64 => self.checked_constant(unary, RExpr::Neg(Box::new(operand))),
+                    RustType::F64 => Some((RExpr::Neg(Box::new(operand)), ty)),
+                    _ => {
+                        self.refuse(unary, "unary minus needs an int or float operand (P2R-43)");
+                        None
+                    }
                 }
-                self.checked_constant(unary, RExpr::Neg(Box::new(operand)))
             }
             Expression::Binary(binary) => self.binary(binary),
             Expression::CompositeString(CompositeString::Interpolated(_)) => {
@@ -67,6 +70,9 @@ impl Converter<'_> {
             }
             Expression::Array(array) => self.list(array, None),
             Expression::ArrayAccess(access) => self.index(access),
+            Expression::Literal(Literal::Float(float)) => {
+                Some((RExpr::Float(*float.value), RustType::F64))
+            }
             other => {
                 self.record_refused(other);
                 self.refuse(
@@ -126,12 +132,14 @@ impl Converter<'_> {
         let left = self.expression(binary.lhs);
         let right = self.expression(binary.rhs);
         let ((left, left_type), (right, right_type)) = (left?, right?);
-        if left_type != RustType::I64 || right_type != RustType::I64 {
-            self.refuse(
-                binary,
-                "arithmetic is built for int operands only so far (P2R-43)",
-            );
+        if let Some(message) = numbers::arithmetic_refusal(op, &left_type, &right_type) {
+            self.refuse(binary, message);
             return None;
+        }
+        // Float arithmetic never panics, so the P2R-50 checks below are for int only.
+        if left_type == RustType::F64 {
+            let expr = RExpr::Binary(Box::new(left), op, Box::new(right));
+            return Some((expr, left_type));
         }
         // P2R-50 stops `%` by a divisor the tool can prove is 0, a literal or a variable
         // that holds 0. rustc rejects many such cases at compile time (unconditional_panic).

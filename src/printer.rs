@@ -91,6 +91,8 @@ pub enum RExpr {
     List(Vec<RExpr>),
     /// A list read by index (P2R-47).
     Index(Box<RExpr>, Box<RExpr>),
+    /// A float literal, written by value (P2R-49).
+    Float(f64),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -253,6 +255,10 @@ fn render(expr: &RExpr, anchor: bool, min_precedence: u8) -> Result<String, TooW
                 _ => format!("{list}[{} as usize]", render(index, true, CAST)?),
             }
         }
+        // Rust has no literal for infinity. Debug gives the shortest text that reads back
+        // as the same value, and always a float literal (`1.0`, `1e300`).
+        RExpr::Float(value) if *value == f64::INFINITY => "f64::INFINITY".into(),
+        RExpr::Float(value) => format!("{value:?}"),
     })
 }
 
@@ -303,6 +309,8 @@ pub fn anchored(expr: &RExpr) -> bool {
         RExpr::Bool(_) | RExpr::Not(_) => true,
         RExpr::List(items) => items.iter().any(anchored),
         RExpr::Index(list, _) => anchored(list),
+        // A float literal without a suffix is f64.
+        RExpr::Float(_) => true,
     }
 }
 
@@ -335,6 +343,7 @@ pub fn literal_value(expr: &RExpr) -> Option<i64> {
         RExpr::Format(..) | RExpr::Ref(_) | RExpr::Method(..) | RExpr::Len(_) => None,
         RExpr::Bool(_) | RExpr::Not(_) => None,
         RExpr::List(_) | RExpr::Index(..) => None,
+        RExpr::Float(_) => None,
     }
 }
 
@@ -503,5 +512,16 @@ mod tests {
         assert!(expr(&at_limit, false).is_ok());
         let one_literal = RExpr::Call("f".into(), vec![RExpr::Str("s".repeat(80))]);
         assert!(expr(&one_literal, false).is_ok());
+    }
+
+    #[test]
+    fn floats_are_written_by_value() {
+        let text = |value: f64| expr(&RExpr::Float(value), true).unwrap();
+        assert_eq!(text(1.0), "1.0");
+        assert_eq!(text(0.0), "0.0");
+        assert_eq!(text(0.1), "0.1");
+        assert_eq!(text(1e300), "1e300");
+        assert_eq!(text(9_223_372_036_854_775_808.0), "9.223372036854776e18");
+        assert_eq!(text(f64::INFINITY), "f64::INFINITY");
     }
 }

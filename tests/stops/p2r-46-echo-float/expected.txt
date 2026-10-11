@@ -1,0 +1,2 @@
+input.php:7:10: echo of a float or bool is not supported (P2R-46)
+input.php:10:6: echo of a float or bool is not supported (P2R-46)

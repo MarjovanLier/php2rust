@@ -1,0 +1,4 @@
+input.php:7:12: arithmetic that mixes int and float is not supported (P2R-44)
+input.php:12:12: arithmetic that mixes int and float is not supported (P2R-44)
+input.php:17:5: arithmetic that mixes int and float is not supported (P2R-44)
+input.php:23:12: a comparison that mixes int and float is not supported (P2R-44)

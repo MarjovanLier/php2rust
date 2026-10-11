@@ -41,7 +41,7 @@ use mago_syntax::walker::Walker;
 
 use super::control::Loop;
 use super::flow::{Flow, Var};
-use super::{Converter, ParameterSignature, lists, strings};
+use super::{Converter, ParameterSignature, lists, numbers, strings};
 use crate::printer::{self, BinOp, RExpr};
 use crate::types::{self, RustType};
 
@@ -444,6 +444,11 @@ impl Converter<'_> {
             None => Some((RExpr::Int(1), RustType::I64)),
         };
         let current = (operator != Some("=")).then(|| self.variable(variable));
+        // `++` and `--` on a float add or take away 1.0 (P2R-43).
+        let value = match (source, &current) {
+            (None, Some(Some((_, RustType::F64)))) => Some((RExpr::Float(1.0), RustType::F64)),
+            _ => value,
+        };
         let converted = match (operator, value, current) {
             (Some(operator), Some(value), None) => Some((operator, value, None)),
             (Some(operator), Some(value), Some(Some(current))) => {
@@ -465,15 +470,11 @@ impl Converter<'_> {
         };
         // The value of `.=` is a joined string; the type of its variable is checked as a
         // write (P2R-34).
-        if operator != ".="
-            && let Some((_, current_type)) = &current
-            && (*current_type != RustType::I64 || value_type != RustType::I64)
+        if let (Some(op), Some((_, current_type))) = (operation(operator), &current)
+            && let Some(message) = numbers::arithmetic_refusal(op, current_type, &value_type)
         {
             self.record_write(variable);
-            self.refuse(
-                expression,
-                "compound assignment is built for int operands only so far (P2R-43)",
-            );
+            self.refuse(expression, message);
             return None;
         }
         let (var, declares) = self.write(variable, expression)?;
@@ -1092,10 +1093,14 @@ fn same_type(php_name: &[u8], known: &RustType, found: RustType) -> Result<RustT
     ))
 }
 
-/// Only int, bool, string and list variables are written so far; the other types follow
-/// in later steps (P2R-20).
+/// Only int, float, bool, string and list variables are written so far; the other types
+/// follow in later steps (P2R-20).
 fn built_yet(ty: RustType) -> Result<RustType, String> {
-    if matches!(ty, RustType::I64 | RustType::Bool | RustType::String) || lists::list_built(&ty) {
+    if matches!(
+        ty,
+        RustType::I64 | RustType::F64 | RustType::Bool | RustType::String
+    ) || lists::list_built(&ty)
+    {
         return Ok(ty);
     }
     Err(format!(

@@ -14,7 +14,12 @@ pub fn quote(text: &str) -> String {
             '\r' => out.push_str("\\r"),
             '\t' => out.push_str("\\t"),
             '\0' => out.push_str("\\0"),
-            c if c.is_control() => out.push_str(&format!("\\u{{{:x}}}", u32::from(c))),
+            // rustc's text_direction_codepoint_in_literal rejects these unescaped.
+            c if c.is_control()
+                || matches!(c, '\u{202a}'..='\u{202e}' | '\u{2066}'..='\u{2069}') =>
+            {
+                out.push_str(&format!("\\u{{{:x}}}", u32::from(c)))
+            }
             c => out.push(c),
         }
     }
@@ -373,6 +378,10 @@ mod tests {
         assert_eq!(
             quote("a\"b\\c\nd\te\u{1b}"),
             "\"a\\\"b\\\\c\\nd\\te\\u{1b}\""
+        );
+        assert_eq!(
+            quote("a\u{202e}b\u{2066}c\u{2069}"),
+            "\"a\\u{202e}b\\u{2066}c\\u{2069}\""
         );
     }
 

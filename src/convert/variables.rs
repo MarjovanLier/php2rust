@@ -4,6 +4,11 @@
 //! A variable is declared by a `let` at its first write in the source. Whether that `let`
 //! needs `mut` is known only at the end of the body, so the line carries a mark until
 //! [`Converter::finish_variables`] replaces it.
+//!
+//! Two later steps change this file. A variable first written inside a block, and read
+//! after it, needs its declaration moved above that block. A `foreach` binding
+//! that reuses a PHP name is a new entry: `lookup` must then find the binding, and the
+//! P2R-31 check in `declare` must allow an earlier entry with the same PHP name.
 
 use mago_span::{HasSpan, Span};
 use mago_syntax::cst::*;

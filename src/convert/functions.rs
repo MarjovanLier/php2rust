@@ -7,7 +7,7 @@ use mago_codex::ttype::union::TUnion;
 use mago_span::HasSpan;
 use mago_syntax::cst::*;
 
-use super::{Context, Converter, ParameterSignature, Signature, Variables};
+use super::{Context, Converter, ParameterSignature, Signature, Variables, lists};
 use crate::names;
 use crate::types::{self, RustType};
 
@@ -125,10 +125,12 @@ impl Converter<'_> {
             return None;
         }
         let ty = self.declared_type(parameter, declared)?;
-        if !matches!(ty, RustType::I64 | RustType::Bool | RustType::String) {
+        if !matches!(ty, RustType::I64 | RustType::Bool | RustType::String)
+            && !lists::list_built(&ty)
+        {
             self.refuse(
                 parameter,
-                "only int, bool and string parameters are built so far (P2R-20)",
+                "only int, bool, string and list parameters are built so far (P2R-20)",
             );
             return None;
         }
@@ -160,10 +162,12 @@ impl Converter<'_> {
             return Some(None);
         }
         let ty = self.declared_type(hint, declared)?;
-        if !matches!(ty, RustType::I64 | RustType::Bool | RustType::String) {
+        if !matches!(ty, RustType::I64 | RustType::Bool | RustType::String)
+            && !lists::list_built(&ty)
+        {
             self.refuse(
                 hint,
-                "only int, bool, string and void return types are built so far (P2R-20)",
+                "only int, bool, string, list and void return types are built so far (P2R-20)",
             );
             return None;
         }

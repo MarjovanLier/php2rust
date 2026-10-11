@@ -213,7 +213,8 @@ impl Variables {
         format!("{COPY}{:06x}{COPY}", self.copies.len() - 1)
     }
 
-    /// True when `rust_name` is a parameter: a string parameter is a `&str` (P2R-24).
+    /// True when `rust_name` is a parameter: a string parameter is a `&str` and a list
+    /// parameter a `&[T]` (P2R-24).
     pub(super) fn is_parameter(&self, rust_name: &str) -> bool {
         self.entries
             .iter()

@@ -78,7 +78,7 @@ pub enum RExpr {
     /// A joined string: the format text with its braces doubled, and one value per `{}`
     /// (P2R-45).
     Format(String, Vec<RExpr>),
-    /// `&value`, where Rust takes a `&str`.
+    /// `&value`, where Rust takes a `&str` or a `&[T]`.
     Ref(Box<RExpr>),
     /// `value.method()`, for the copies PHP makes (P2R-26).
     Method(Box<RExpr>, &'static str),
@@ -225,7 +225,11 @@ fn render(expr: &RExpr, anchor: bool, min_precedence: u8) -> Result<String, TooW
         }
         RExpr::Known(name, _) => name.clone(),
         RExpr::Format(text, values) => format!("format!({})", format_arguments(text, values)?),
-        RExpr::Ref(inner) => format!("&{}", render(inner, false, UNARY)?),
+        // The parameter type fixes the element type, so a list literal needs no `vec!`.
+        RExpr::Ref(inner) => match &**inner {
+            RExpr::List(items) => format!("&[{}]", elements(items, false)?),
+            other => format!("&{}", render(other, false, UNARY)?),
+        },
         RExpr::Method(inner, method) => {
             format!("{}.{method}()", render(inner, false, POSTFIX)?)
         }
@@ -240,20 +244,7 @@ fn render(expr: &RExpr, anchor: bool, min_precedence: u8) -> Result<String, TooW
         RExpr::Bool(value) => value.to_string(),
         RExpr::Not(inner) => format!("!{}", render(inner, false, UNARY)?),
         RExpr::List(items) if items.is_empty() => "Vec::new()".to_owned(),
-        RExpr::List(items) => {
-            let first = anchor && !anchored(expr);
-            let parts = items
-                .iter()
-                .enumerate()
-                .map(|(i, item)| render(item, first && i == 0, 0))
-                .collect::<Result<Vec<_>, _>>()?;
-            let joined = parts.join(", ");
-            // rustfmt's `array_width` is 60 as well: wider elements go one per line.
-            if joined.len() > ARGS_WIDTH {
-                return Err(TooWide);
-            }
-            format!("vec![{joined}]")
-        }
+        RExpr::List(items) => format!("vec![{}]", elements(items, anchor && !anchored(expr))?),
         RExpr::Index(list, index) => {
             let list = render(list, anchor, POSTFIX)?;
             match **index {
@@ -277,6 +268,21 @@ pub fn format_arguments(text: &str, values: &[RExpr]) -> Result<String, TooWide>
         return Err(TooWide);
     }
     Ok(arguments)
+}
+
+/// The elements of a list literal on one line, the first with `anchor`. rustfmt's
+/// `array_width` is 60 as well: wider elements go one per line (P2R-51).
+fn elements(items: &[RExpr], anchor: bool) -> Result<String, TooWide> {
+    let parts = items
+        .iter()
+        .enumerate()
+        .map(|(i, item)| render(item, anchor && i == 0, 0))
+        .collect::<Result<Vec<_>, _>>()?;
+    let joined = parts.join(", ");
+    if joined.len() > ARGS_WIDTH {
+        return Err(TooWide);
+    }
+    Ok(joined)
 }
 
 /// True when a variable or a call fixes the expression's Rust type without its literals.

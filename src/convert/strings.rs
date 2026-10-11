@@ -52,14 +52,20 @@ impl Converter<'_> {
         Some((RExpr::Len(Box::new(expr)), RustType::I64))
     }
 
-    /// A value where Rust needs an owned `String`: an assignment or a return. A literal
-    /// and a parameter are copied into one (P2R-26). A variable read moves; the caller
-    /// decides whether it needs a copy.
+    /// A value where Rust needs an owned `String` or `Vec`: an assignment or a return. A
+    /// literal and a parameter are copied into one (P2R-26). A variable read moves; the
+    /// caller decides whether it needs a copy.
     pub(super) fn owned(&self, expr: RExpr, ty: &RustType) -> RExpr {
         match expr {
             RExpr::Str(_) => RExpr::Call("String::from".into(), vec![expr]),
             RExpr::Var(name) if *ty == RustType::String && self.variables.is_parameter(&name) => {
                 RExpr::Method(Box::new(RExpr::Var(name)), "to_string")
+            }
+            // A slice cannot move into a `Vec`.
+            RExpr::Var(name)
+                if matches!(ty, RustType::Vec(_)) && self.variables.is_parameter(&name) =>
+            {
+                RExpr::Method(Box::new(RExpr::Var(name)), "to_vec")
             }
             // Rust cannot move a string or list out of a list.
             RExpr::Index(..) if matches!(ty, RustType::String | RustType::Vec(_)) => {
@@ -69,14 +75,15 @@ impl Converter<'_> {
         }
     }
 
-    /// A value where Rust takes a `&str`: a call argument or the right side of `.=`.
+    /// A value where Rust takes a `&str` or a `&[T]`: a call argument or the right side of
+    /// `.=`.
     pub(super) fn borrowed(&self, expr: RExpr, ty: &RustType) -> RExpr {
-        let is_str = match &expr {
+        let is_reference = match &expr {
             RExpr::Str(_) => true,
             RExpr::Var(name) => self.variables.is_parameter(name),
             _ => false,
         };
-        if *ty == RustType::String && !is_str {
+        if matches!(ty, RustType::String | RustType::Vec(_)) && !is_reference {
             RExpr::Ref(Box::new(expr))
         } else {
             expr

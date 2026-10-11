@@ -1,4 +1,5 @@
-//! Statements inside `fn main()` and function bodies (P2R-40, P2R-46).
+//! Statements inside `fn main()` and function bodies (P2R-40, P2R-46). Block statements
+//! are in control.rs.
 
 use mago_syntax::cst::*;
 
@@ -15,14 +16,31 @@ impl Converter<'_> {
         context: Context<'_>,
         body: &mut Vec<String>,
     ) {
+        if self.unreachable(statement) {
+            return;
+        }
         match statement {
             Statement::Echo(echo) => self.echo(echo, depth, body),
-            Statement::Return(ret) => self.return_statement(ret, depth, context, body),
-            Statement::Expression(expression) if changes_variable(expression.expression) => {
-                self.assignment_statement(expression, depth, body)
+            Statement::Return(ret) => {
+                self.return_statement(ret, depth, context, body);
+                // A return refused in `fn main()` does not end the path, so the lines after
+                // it are not refused as well (P2R-03).
+                if matches!(context, Context::Function(_)) {
+                    self.leave("return");
+                }
             }
-            Statement::Expression(expression) => self.expression_statement(expression, depth, body),
+            Statement::Expression(expression) if changes_variable(expression.expression) => {
+                self.assignment_statement(expression.expression, depth, body)
+            }
+            Statement::Expression(expression) => {
+                self.expression_statement(expression.expression, depth, body)
+            }
             Statement::Noop(_) => {}
+            Statement::If(r#if) => self.if_statement(r#if, depth, context, body),
+            Statement::While(r#while) => self.while_statement(r#while, depth, context, body),
+            Statement::For(r#for) => self.for_statement(r#for, depth, context, body),
+            Statement::Break(r#break) => self.break_statement(r#break, depth, body),
+            Statement::Continue(r#continue) => self.continue_statement(r#continue, depth, body),
             Statement::Declare(_) => {
                 self.refuse(
                     statement,
@@ -75,27 +93,28 @@ impl Converter<'_> {
         body.push(line);
     }
 
+    /// A call as a statement, or as a `for` initialisation or step (P2R-43).
     pub(super) fn expression_statement(
         &mut self,
-        statement: &ExpressionStatement<'_>,
+        expression: &Expression<'_>,
         depth: usize,
         body: &mut Vec<String>,
     ) {
-        let Expression::Call(Call::Function(call)) = statement.expression else {
-            self.record_refused(statement.expression);
+        let Expression::Call(Call::Function(call)) = expression else {
+            self.record_refused(expression);
             self.refuse(
-                statement,
+                expression,
                 "this expression statement is not supported (P2R-43)",
             );
             return;
         };
-        let Some((expr, _)) = self.call(call, statement.expression) else {
+        let Some((expr, _)) = self.call(call, expression) else {
             return;
         };
-        let Some(rendered) = self.render(statement.expression, &expr, false) else {
+        let Some(rendered) = self.render(expression, &expr, false) else {
             return;
         };
-        let line = self.emit(statement, depth, format!("{rendered};"));
+        let line = self.emit(expression, depth, format!("{rendered};"));
         body.push(line);
     }
 

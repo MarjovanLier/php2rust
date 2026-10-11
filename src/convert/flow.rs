@@ -19,11 +19,10 @@
 //!
 //! A block with no successor is an exit of the body.
 //!
-//! Version 1 so far has straight-line code only, so a body is one block. Branches and
-//! loops add three methods: `block()` adds an empty block, `edge(from, to)` lets
-//! control pass from one block to another, and `enter(block)` makes later events land in
-//! that block. `finish` needs no change, but its answers are right only when the graph
-//! keeps these rules:
+//! Branches and loops (control.rs) use three methods: `block()` adds an empty block,
+//! `edge(from, to)` lets control pass from one block to another, and `enter(block)` makes
+//! later events land in that block. `finish` is right only when the graph keeps these
+//! rules:
 //! - Every loop head is its own new `block()`, and a back edge goes only to a loop head.
 //!   Block 0 holds the parameter writes, so a back edge to it would run them again and
 //!   give a false P2R-35 on `while ($n > 0) { $n--; }`.
@@ -101,6 +100,26 @@ impl Flow {
         self.blocks[self.current]
             .events
             .push(Event::Write(var, span));
+    }
+
+    /// Adds an empty block with no edges.
+    pub fn block(&mut self) -> usize {
+        self.blocks.push(Block::default());
+        self.blocks.len() - 1
+    }
+
+    pub fn edge(&mut self, from: usize, to: usize) {
+        self.blocks[from].next.push(to);
+    }
+
+    /// Makes later events land in `block`.
+    pub fn enter(&mut self, block: usize) {
+        self.current = block;
+    }
+
+    /// The block that new events go into.
+    pub fn current(&self) -> usize {
+        self.current
     }
 
     /// Runs the analyses for variables `0..vars`.

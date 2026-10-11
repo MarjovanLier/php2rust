@@ -84,6 +84,8 @@ pub enum RExpr {
     Method(Box<RExpr>, &'static str),
     /// The byte length of a string as `i64` (P2R-48).
     Len(Box<RExpr>),
+    Bool(bool),
+    Not(Box<RExpr>),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -92,6 +94,14 @@ pub enum BinOp {
     Sub,
     Mul,
     Rem,
+    Eq,
+    Ne,
+    Lt,
+    Gt,
+    Le,
+    Ge,
+    And,
+    Or,
 }
 
 impl BinOp {
@@ -101,16 +111,33 @@ impl BinOp {
             Self::Sub => "-",
             Self::Mul => "*",
             Self::Rem => "%",
+            Self::Eq => "==",
+            Self::Ne => "!=",
+            Self::Lt => "<",
+            Self::Gt => ">",
+            Self::Le => "<=",
+            Self::Ge => ">=",
+            Self::And => "&&",
+            Self::Or => "||",
         }
     }
 
     /// Rust precedence, which matches PHP for these operators: `*` and `%` bind tighter
-    /// than `+` and `-`.
+    /// than `+` and `-`, then the comparisons, then `&&`, then `||`. Above them come `as`
+    /// at 6, unary operators at 7 and method calls and indexing at 8.
     fn precedence(self) -> u8 {
         match self {
-            Self::Mul | Self::Rem => 2,
-            Self::Add | Self::Sub => 1,
+            Self::Mul | Self::Rem => 5,
+            Self::Add | Self::Sub => 4,
+            Self::Eq | Self::Ne | Self::Lt | Self::Gt | Self::Le | Self::Ge => 3,
+            Self::And => 2,
+            Self::Or => 1,
         }
+    }
+
+    /// True for `==`, `!=`, `<`, `>`, `<=` and `>=`.
+    pub fn compares(self) -> bool {
+        self.precedence() == 3
     }
 }
 
@@ -118,8 +145,8 @@ impl BinOp {
 #[derive(Debug)]
 pub struct TooWide;
 
-/// Unary minus binds tighter than every binary operator.
-const UNARY: u8 = 3;
+/// Unary minus and `!` bind tighter than every binary operator and `as`.
+const UNARY: u8 = 7;
 
 /// Lays out `expr` on one line with only the parentheses Rust needs (P2R-43). With
 /// `anchor`, an expression made only of literals gets `_i64` on its first literal, so Rust
@@ -152,6 +179,23 @@ fn render(expr: &RExpr, anchor: bool, min_precedence: u8) -> Result<String, TooW
             format!("-({})", render(inner, anchor, 0)?)
         }
         RExpr::Neg(inner) => format!("-{}", render(inner, anchor, UNARY)?),
+        // Rust comparisons do not chain, so an operand that is a comparison gets
+        // parentheses. Both operands share one type, which literals alone would make i32.
+        RExpr::Binary(left, op, right) if op.compares() => {
+            let precedence = op.precedence();
+            let anchor = !anchored(left) && !anchored(right);
+            let text = format!(
+                "{} {} {}",
+                render(left, anchor, precedence + 1)?,
+                op.text(),
+                render(right, false, precedence + 1)?
+            );
+            if precedence < min_precedence {
+                format!("({text})")
+            } else {
+                text
+            }
+        }
         RExpr::Binary(left, op, right) => {
             let precedence = op.precedence();
             let left = render(left, anchor && !anchored(expr), precedence)?;
@@ -173,6 +217,8 @@ fn render(expr: &RExpr, anchor: bool, min_precedence: u8) -> Result<String, TooW
             format!("({}.len() as i64)", render(inner, false, 0)?)
         }
         RExpr::Len(inner) => format!("{}.len() as i64", render(inner, false, 0)?),
+        RExpr::Bool(value) => value.to_string(),
+        RExpr::Not(inner) => format!("!{}", render(inner, false, UNARY)?),
     })
 }
 
@@ -196,9 +242,16 @@ pub fn anchored(expr: &RExpr) -> bool {
         RExpr::Int(_) | RExpr::Str(_) => false,
         RExpr::Var(_) | RExpr::Call(..) => true,
         RExpr::Neg(inner) => anchored(inner),
-        RExpr::Binary(left, _, right) => anchored(left) || anchored(right),
+        // A comparison or a logic operator always gives a bool.
+        RExpr::Binary(left, op, right) => {
+            op.compares()
+                || matches!(op, BinOp::And | BinOp::Or)
+                || anchored(left)
+                || anchored(right)
+        }
         RExpr::Known(..) => true,
         RExpr::Format(..) | RExpr::Ref(_) | RExpr::Method(..) | RExpr::Len(_) => true,
+        RExpr::Bool(_) | RExpr::Not(_) => true,
     }
 }
 
@@ -216,11 +269,20 @@ pub fn literal_value(expr: &RExpr) -> Option<i64> {
                 BinOp::Sub => left.checked_sub(right),
                 BinOp::Mul => left.checked_mul(right),
                 BinOp::Rem => left.checked_rem(right),
+                BinOp::Eq
+                | BinOp::Ne
+                | BinOp::Lt
+                | BinOp::Gt
+                | BinOp::Le
+                | BinOp::Ge
+                | BinOp::And
+                | BinOp::Or => None,
             }
         }
         RExpr::Str(_) | RExpr::Var(_) | RExpr::Call(..) => None,
         RExpr::Known(_, value) => Some(*value),
         RExpr::Format(..) | RExpr::Ref(_) | RExpr::Method(..) | RExpr::Len(_) => None,
+        RExpr::Bool(_) | RExpr::Not(_) => None,
     }
 }
 
@@ -302,6 +364,51 @@ mod tests {
         );
         assert_eq!(literal_value(&RExpr::Neg(int(5))), Some(-5));
         assert_eq!(literal_value(&RExpr::Var("n".into())), None);
+    }
+
+    fn binary(left: RExpr, op: BinOp, right: RExpr) -> RExpr {
+        RExpr::Binary(Box::new(left), op, Box::new(right))
+    }
+
+    #[test]
+    fn comparisons_and_logic_follow_rust_precedence() {
+        let n = || RExpr::Var("n".into());
+        // (n < 2) == (2 < n): Rust comparisons do not chain.
+        let e = binary(
+            binary(n(), BinOp::Lt, RExpr::Int(2)),
+            BinOp::Eq,
+            binary(RExpr::Int(2), BinOp::Lt, n()),
+        );
+        assert_eq!(expr(&e, false).unwrap(), "(n < 2) == (2 < n)");
+        // n * 2 + 1 > 3 && !(n >= 4) || true needs no parentheses but those of `!`.
+        let sum = binary(
+            binary(n(), BinOp::Mul, RExpr::Int(2)),
+            BinOp::Add,
+            RExpr::Int(1),
+        );
+        let not = RExpr::Not(Box::new(binary(n(), BinOp::Ge, RExpr::Int(4))));
+        let and = binary(binary(sum, BinOp::Gt, RExpr::Int(3)), BinOp::And, not);
+        let e = binary(and.clone(), BinOp::Or, RExpr::Bool(true));
+        assert_eq!(
+            expr(&e, false).unwrap(),
+            "n * 2 + 1 > 3 && !(n >= 4) || true"
+        );
+        // (a || b) && c keeps its parentheses.
+        let e = binary(
+            binary(RExpr::Bool(false), BinOp::Or, RExpr::Bool(true)),
+            BinOp::And,
+            RExpr::Var("c".into()),
+        );
+        assert_eq!(expr(&e, false).unwrap(), "(false || true) && c");
+    }
+
+    #[test]
+    fn literal_only_comparisons_are_anchored_to_i64() {
+        let e = binary(RExpr::Int(3_000_000_000), BinOp::Lt, RExpr::Int(1));
+        assert_eq!(expr(&e, false).unwrap(), "3000000000_i64 < 1");
+        let e = binary(RExpr::Int(1), BinOp::Lt, RExpr::Var("n".into()));
+        assert_eq!(expr(&e, false).unwrap(), "1 < n");
+        assert!(anchored(&e));
     }
 
     #[test]

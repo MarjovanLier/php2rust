@@ -1,0 +1,1 @@
+input.php:14:5: a statement after an if whose every branch leaves never runs, and rustc rejects it (P2R-40)

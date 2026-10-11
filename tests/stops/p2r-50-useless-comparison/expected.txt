@@ -1,0 +1,2 @@
+input.php:7:9: this comparison gives the same result for every i64, and rustc rejects it (P2R-50)
+input.php:10:9: this comparison gives the same result for every i64, and rustc rejects it (P2R-50)

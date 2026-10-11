@@ -125,10 +125,10 @@ impl Converter<'_> {
             return None;
         }
         let ty = self.declared_type(parameter, declared)?;
-        if !matches!(ty, RustType::I64 | RustType::String) {
+        if !matches!(ty, RustType::I64 | RustType::Bool | RustType::String) {
             self.refuse(
                 parameter,
-                "only int and string parameters are built so far (P2R-20)",
+                "only int, bool and string parameters are built so far (P2R-20)",
             );
             return None;
         }
@@ -160,10 +160,10 @@ impl Converter<'_> {
             return Some(None);
         }
         let ty = self.declared_type(hint, declared)?;
-        if !matches!(ty, RustType::I64 | RustType::String) {
+        if !matches!(ty, RustType::I64 | RustType::Bool | RustType::String) {
             self.refuse(
                 hint,
-                "only int, string and void return types are built so far (P2R-20)",
+                "only int, bool, string and void return types are built so far (P2R-20)",
             );
             return None;
         }
@@ -210,17 +210,7 @@ impl Converter<'_> {
             Variables::with_parameters(&signature.parameters),
         );
         let mut body = Vec::new();
-        let mut returned = false;
         for statement in function.body.statements.iter() {
-            // rustc rejects code after return under -D warnings (unreachable_code).
-            if returned && !matches!(statement, Statement::Noop(_)) {
-                self.refuse(
-                    statement,
-                    "a statement after return never runs, and rustc rejects it (P2R-40)",
-                );
-                continue;
-            }
-            returned = matches!(statement, Statement::Return(_));
             self.statement(
                 statement,
                 1,
@@ -228,19 +218,15 @@ impl Converter<'_> {
                 &mut body,
             );
         }
-        let parameters = self.finish_variables(&mut body);
-        self.variables = outer;
-        if signature.returns.is_some()
-            && !matches!(
-                function.body.statements.iter().last(),
-                Some(Statement::Return(_))
-            )
-        {
+        // rustc rejects a function with a return type whose end a path reaches.
+        if signature.returns.is_some() && self.variables.left.is_none() {
             self.refuse(
                 &function.name,
-                "a function with a return type must end with return (P2R-50)",
+                "a function with a return type must return on every path (P2R-50)",
             );
         }
+        let parameters = self.finish_variables(&mut body);
+        self.variables = outer;
         let returns = signature
             .returns
             .as_ref()

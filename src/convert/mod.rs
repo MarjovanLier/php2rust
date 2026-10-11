@@ -27,6 +27,8 @@ use crate::problem::{self, Origin, Problem};
 use crate::types::RustType;
 use variables::Variables;
 
+mod booleans;
+mod control;
 mod expressions;
 mod flow;
 mod functions;

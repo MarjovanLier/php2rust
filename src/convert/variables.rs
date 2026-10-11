@@ -1,17 +1,19 @@
 //! Variables: reads, assignments, `++` and `--`, and the `let` and `mut` they need
 //! (P2R-20 to P2R-22, P2R-31, P2R-34, P2R-35, P2R-43, P2R-44, P2R-50).
 //!
-//! A variable is declared by a `let` at its first write in the source. Whether that `let`
-//! needs `mut` is known only at the end of the body, so the line carries a mark until
+//! A variable is declared by a `let`, at its first write in the source when that write
+//! sits in the Rust block that holds every read and write of it. Otherwise a typed `let`
+//! without a value goes in that block, on a slot line before the block statement that
+//! holds the first write (P2R-34). A variable first written inside a loop gets its typed
+//! `let` above the outermost loop that holds that write, even when only the loop reads
+//! it: `reassigned` counts back edges, so an inline `let` in the loop body would get
+//! rustc's unused_mut (see flow.rs). Where the `let` goes and whether it needs `mut` are
+//! known only at the end of the body, so those lines carry a mark until
 //! [`Converter::finish_variables`] replaces it.
 //!
-//! Two later steps change this file. A variable first written inside a block, and read
-//! after it, needs its declaration moved above that block. A variable first
-//! written inside a loop needs a typed `let` above the outermost loop that holds that
-//! write, even when only the loop reads it: `reassigned` counts back edges, so an inline
-//! `let` in the loop body would get rustc's unused_mut (see flow.rs). A `foreach` binding
-//! that reuses a PHP name is a new entry: `lookup` must then find the binding, and the
-//! P2R-31 check in `declare` must allow an earlier entry with the same PHP name.
+//! A later step changes this file. A `foreach` binding that reuses a PHP name is a new
+//! entry: `lookup` must then find the binding, and the P2R-31 check in `declare` must
+//! allow an earlier entry with the same PHP name.
 //!
 //! P2R-50 stops int arithmetic that the tool can prove overflows, and `%` by a divisor it
 //! can prove is 0. So each entry keeps the latest value of its variable when it is known,
@@ -22,8 +24,7 @@
 //! wider, so the output never depends on that. The values must never be weaker than
 //! rustc's, because a missed value lets through code that rustc rejects. In straight-line
 //! code the latest write in source order gives the value, and a call between does not
-//! change it. the control flow code keeps the values right at loops and joins with `lookup`,
-//! `Variables::value` and `Variables::set_value`:
+//! change it. control.rs keeps the values right at loops and joins:
 //! - Before it converts a loop's condition, body and step, it clears the value of every
 //!   variable written anywhere in that loop (a pre-scan), and keeps all other values.
 //!   Clearing more would be weaker than rustc: `let x = 0; while c() { print!("{}", 10 %
@@ -37,18 +38,39 @@ use mago_span::{HasSpan, Span};
 use mago_syntax::cst::*;
 use mago_syntax::walker::Walker;
 
+use super::control::Loop;
 use super::flow::{Flow, Var};
 use super::{Converter, ParameterSignature, strings};
 use crate::printer::{self, BinOp, RExpr};
 use crate::types::{self, RustType};
 
-/// Stands in a `let` line for its `mut `. `printer::quote` escapes every control
-/// character, so no other output text holds it.
+/// Starts a line whose text is known only at the end of the body, followed by its index
+/// in `Variables::pending`. `printer::quote` escapes every control character, so no other
+/// output text holds it.
 const MARK: char = '\u{1}';
 
 /// Stands after a string variable that an assignment moves, for its `.clone()` when the
 /// variable is read again (P2R-26).
 const COPY: char = '\u{2}';
+
+/// A line whose text is known only at the end of the body.
+enum Pending {
+    /// The typed `let` lines of the variables declared before a block statement.
+    Slot,
+    /// A variable's first write: `let x = v;`, or `x = v;` when its `let` is in a slot.
+    First {
+        var: Var,
+        annotation: String,
+        value: String,
+    },
+}
+
+/// A Rust block of the body: the body itself, a branch or a loop body.
+struct Scope {
+    /// The enclosing block, and the slot before the statement that opens this one.
+    parent: Option<(usize, usize)>,
+    looped: bool,
+}
 
 struct Entry {
     /// The PHP name without `$`.
@@ -63,17 +85,51 @@ struct Entry {
     assigned: Option<Span>,
     /// The value the variable holds here, when rustc knows it too (P2R-50).
     value: Option<i64>,
+    /// The block of the first write.
+    first: usize,
+    /// The innermost block that holds every read and write.
+    common: usize,
 }
 
-/// The variables of the body being converted, a function or `fn main()`.
-#[derive(Default)]
+/// The variables of the body being converted, a function or `fn main()`, and the state
+/// of its control flow.
 pub(super) struct Variables {
     /// Indexed by [`Var`] in order of first write, so the output never depends on
     /// hashing (P2R-06).
     entries: Vec<Entry>,
-    flow: Flow,
+    pub(super) flow: Flow,
     /// By copy mark: the read the assignment moves, and the assignment.
     copies: Vec<(Span, Span)>,
+    /// The Rust blocks, indexed from 0, the body itself.
+    scopes: Vec<Scope>,
+    /// The Rust block that new lines go into.
+    pub(super) scope: usize,
+    pending: Vec<Pending>,
+    /// Type problems of reads, reported at the end unless the read may be unassigned.
+    read_problems: Vec<(Span, String)>,
+    /// Why no path reaches the next statement; `None` while one does (P2R-40).
+    pub(super) left: Option<&'static str>,
+    /// The loops around the statement being converted, innermost last.
+    pub(super) loops: Vec<Loop>,
+}
+
+impl Default for Variables {
+    fn default() -> Self {
+        Self {
+            entries: Vec::new(),
+            flow: Flow::default(),
+            copies: Vec::new(),
+            scopes: vec![Scope {
+                parent: None,
+                looped: false,
+            }],
+            scope: 0,
+            pending: Vec::new(),
+            read_problems: Vec::new(),
+            left: None,
+            loops: Vec::new(),
+        }
+    }
 }
 
 impl Variables {
@@ -89,9 +145,53 @@ impl Variables {
                 parameter: Some(parameter.snake.clone()),
                 assigned: None,
                 value: None,
+                first: 0,
+                common: 0,
             });
         }
         variables
+    }
+
+    fn read(&mut self, var: Var, span: Span) {
+        self.flow.read(var, span);
+        self.touch(var);
+    }
+
+    fn write(&mut self, var: Var, span: Option<Span>) {
+        self.flow.write(var, span);
+        self.touch(var);
+    }
+
+    /// Widens the block that must hold the `let` of `var` to the current one.
+    fn touch(&mut self, var: Var) {
+        let common = common(&self.scopes, self.entries[var].common, self.scope);
+        self.entries[var].common = common;
+    }
+
+    /// Starts a block of the statement after `slot`, a loop body when `looped`. Gives the
+    /// block to return to with [`Variables::close`].
+    pub(super) fn open(&mut self, slot: usize, looped: bool) -> usize {
+        self.scopes.push(Scope {
+            parent: Some((self.scope, slot)),
+            looped,
+        });
+        std::mem::replace(&mut self.scope, self.scopes.len() - 1)
+    }
+
+    pub(super) fn close(&mut self, outer: usize) {
+        self.scope = outer;
+    }
+
+    /// The known value of every variable (P2R-50).
+    pub(super) fn values(&self) -> Vec<Option<i64>> {
+        self.entries.iter().map(|entry| entry.value).collect()
+    }
+
+    /// Sets every value from `values`; a variable added since they were taken is unknown.
+    pub(super) fn set_values(&mut self, values: &[Option<i64>]) {
+        for (var, entry) in self.entries.iter_mut().enumerate() {
+            entry.value = values.get(var).copied().flatten();
+        }
     }
 
     /// The value `var` holds here, when it is known (P2R-50).
@@ -99,8 +199,7 @@ impl Variables {
         self.entries[var].value
     }
 
-    /// Sets the value `var` holds here; `None` forgets it. the control flow code clears and meets values
-    /// with this at loops and joins (see the module doc).
+    /// Sets the value `var` holds here; `None` forgets it.
     pub(super) fn set_value(&mut self, var: Var, value: Option<i64>) {
         self.entries[var].value = value;
     }
@@ -132,24 +231,57 @@ pub(super) fn changes_variable(expression: &Expression<'_>) -> bool {
 }
 
 impl Converter<'_> {
-    /// An assignment, `++` or `--` as a statement (P2R-43).
+    /// An assignment, `++` or `--` as a statement, or as a `for` initialisation or step
+    /// (P2R-43).
     pub(super) fn assignment_statement(
         &mut self,
-        statement: &ExpressionStatement<'_>,
+        expression: &Expression<'_>,
         depth: usize,
         body: &mut Vec<String>,
     ) {
-        let Some(text) = self.change(statement.expression) else {
+        let Some(text) = self.change(expression) else {
             return;
         };
         let line = if text.contains([MARK, COPY]) {
-            // A `let` or a move is measured at the end of the body, once its `mut` and its
-            // `.clone()` are known (P2R-51).
+            // A first write or a move is measured at the end of the body, once its `let`
+            // and its `.clone()` are known (P2R-51).
             format!("{}{text}", "    ".repeat(depth))
         } else {
-            self.emit(statement, depth, text)
+            self.emit(expression, depth, text)
         };
         body.push(line);
+    }
+
+    /// Writes the slot line where the typed `let` of a variable first written inside the
+    /// block statement that follows goes (P2R-34). Gives the slot.
+    pub(super) fn slot(&mut self, depth: usize, body: &mut Vec<String>) -> usize {
+        self.variables.pending.push(Pending::Slot);
+        let slot = self.variables.pending.len() - 1;
+        body.push(format!("{}{MARK}{slot}", "    ".repeat(depth)));
+        slot
+    }
+
+    /// Forgets the value of every variable that `statement` writes, before the loop that
+    /// holds it converts (P2R-50).
+    pub(super) fn forget_writes(&mut self, statement: &Statement<'_>) {
+        let mut written = Vec::new();
+        Written.walk_statement(statement, &mut written);
+        self.forget(written);
+    }
+
+    /// The same for a loop condition or a `for` step.
+    pub(super) fn forget_writes_in(&mut self, expression: &Expression<'_>) {
+        let mut written = Vec::new();
+        Written.walk_expression(expression, &mut written);
+        self.forget(written);
+    }
+
+    fn forget(&mut self, written: Vec<&DirectVariable<'_>>) {
+        for variable in written {
+            if let Some(var) = self.lookup(variable) {
+                self.variables.set_value(var, None);
+            }
+        }
     }
 
     /// Refuses an assignment, `++` or `--` used as a value (P2R-44). Its write still
@@ -175,7 +307,7 @@ impl Converter<'_> {
             self.refuse(variable, unassigned(&variable.name[1..]));
             return None;
         };
-        self.variables.flow.read(var, variable.span);
+        self.variables.read(var, variable.span);
         let entry = &self.variables.entries[var];
         let known = entry.ty.clone()?;
         let checked = self
@@ -191,7 +323,10 @@ impl Converter<'_> {
                 Some((read, ty))
             }
             Err(message) => {
-                self.fail(var, variable, message);
+                // Mago types a read that may be unassigned as mixed, so the P2R-34 problem
+                // found at the end of the body replaces this one.
+                self.variables.entries[var].ty = None;
+                self.variables.read_problems.push((variable.span, message));
                 None
             }
         }
@@ -347,9 +482,12 @@ impl Converter<'_> {
         } else {
             format!(": {}", ty.owned())
         };
-        Some(format!(
-            "let {MARK}{var}{MARK}{name}{annotation} = {rendered};"
-        ))
+        self.variables.pending.push(Pending::First {
+            var,
+            annotation,
+            value: rendered,
+        });
+        Some(format!("{MARK}{}", self.variables.pending.len() - 1))
     }
 
     /// Records a write of `variable` by `node` and checks the type Mago gives the write.
@@ -407,7 +545,7 @@ impl Converter<'_> {
                 (var, Some(named))
             }
         };
-        self.variables.flow.write(var, Some(variable.span));
+        self.variables.write(var, Some(variable.span));
         self.variables.entries[var]
             .assigned
             .get_or_insert(variable.span);
@@ -439,7 +577,7 @@ impl Converter<'_> {
                 // A read of a variable with no write yet is not reported: the refusal is.
                 Access::Read(variable) => {
                     if let Some(var) = self.lookup(variable) {
-                        self.variables.flow.read(var, variable.span);
+                        self.variables.read(var, variable.span);
                     }
                 }
                 Access::Write(variable) => {
@@ -476,6 +614,8 @@ impl Converter<'_> {
             parameter: None,
             assigned: None,
             value: None,
+            first: self.variables.scope,
+            common: self.variables.scope,
         });
         (self.variables.entries.len() - 1, named)
     }
@@ -508,13 +648,22 @@ impl Converter<'_> {
     /// Ends the body: refuses reads that may be unassigned and values that are never
     /// read, writes each `mut`, and gives a function's parameter list, with a leading `_`
     /// on an unused parameter so rustc does not warn (P2R-34, P2R-35).
-    pub(super) fn finish_variables(&mut self, body: &mut [String]) -> Vec<String> {
+    pub(super) fn finish_variables(&mut self, body: &mut Vec<String>) -> Vec<String> {
         let Variables {
             entries,
             flow,
             copies,
+            scopes,
+            pending,
+            read_problems,
+            ..
         } = std::mem::take(&mut self.variables);
         let facts = flow.finish(entries.len());
+        for (span, message) in read_problems {
+            if !facts.unassigned.iter().any(|&(_, read)| read == span) {
+                self.refuse(&span, message);
+            }
+        }
         for (var, span) in facts.unassigned {
             self.refuse(&span, unassigned(&entries[var].php_name));
         }
@@ -534,16 +683,70 @@ impl Converter<'_> {
                 (None, None) => unused[var] = true,
             }
         }
-        for line in body.iter_mut() {
-            let moved = resolve_copy(line, &copies, &facts.read_again);
-            let declared =
-                resolve_mark(line, &facts.reassigned).and_then(|var| entries[var].assigned);
-            if line.len() > printer::MAX_WIDTH
-                && let Some(span) = declared.or(moved)
-            {
-                self.refuse(&span, "this statement is too long for one line (P2R-51)");
+        let slots: Vec<Option<usize>> = entries
+            .iter()
+            .map(|entry| slot(&scopes, entry.first, entry.common))
+            .collect();
+        let let_keyword = |var: Var| {
+            if facts.reassigned[var] {
+                "let mut "
+            } else {
+                "let "
+            }
+        };
+        let mut lines = Vec::with_capacity(body.len());
+        for line in body.drain(..) {
+            // Each line, with the first write it declares, whose span a width problem uses.
+            let mut finished: Vec<(Option<Span>, String)> = Vec::new();
+            let marked = line
+                .find(MARK)
+                .and_then(|at| Some((at, line[at + 1..].parse::<usize>().ok()?)));
+            match marked.and_then(|(at, index)| Some((at, index, pending.get(index)?))) {
+                Some((at, index, Pending::Slot)) => {
+                    let indent = &line[..at];
+                    for (var, entry) in entries.iter().enumerate() {
+                        if let (Some(ty), None) = (&entry.ty, &entry.parameter)
+                            && slots[var] == Some(index)
+                        {
+                            let name = &entry.rust_name;
+                            let text =
+                                format!("{indent}{}{name}: {};", let_keyword(var), ty.owned());
+                            finished.push((entry.assigned, text));
+                        }
+                    }
+                }
+                Some((
+                    at,
+                    _,
+                    Pending::First {
+                        var,
+                        annotation,
+                        value,
+                    },
+                )) => {
+                    let indent = &line[..at];
+                    let name = &entries[*var].rust_name;
+                    let text = match slots[*var] {
+                        Some(_) => format!("{indent}{name} = {value};"),
+                        None => {
+                            format!("{indent}{}{name}{annotation} = {value};", let_keyword(*var))
+                        }
+                    };
+                    finished.push((entries[*var].assigned, text));
+                }
+                None => finished.push((None, line)),
+            }
+            for (declared, mut text) in finished {
+                let moved = resolve_copy(&mut text, &copies, &facts.read_again);
+                if text.len() > printer::MAX_WIDTH
+                    && let Some(span) = declared.or(moved)
+                {
+                    self.refuse(&span, "this statement is too long for one line (P2R-51)");
+                }
+                lines.push(text);
             }
         }
+        *body = lines;
         entries
             .iter()
             .enumerate()
@@ -562,14 +765,77 @@ impl Converter<'_> {
     }
 }
 
-/// Replaces the mark of a `let` line with `mut ` or with nothing, and gives the variable
-/// the line declares.
-fn resolve_mark(line: &mut String, reassigned: &[bool]) -> Option<Var> {
-    let start = line.find(MARK)?;
-    let end = start + 1 + line[start + 1..].find(MARK)?;
-    let var: Var = line[start + 1..end].parse().ok()?;
-    line.replace_range(start..=end, if reassigned[var] { "mut " } else { "" });
-    Some(var)
+/// The blocks from `block` out to the body, `block` first.
+fn chain(scopes: &[Scope], mut block: usize) -> Vec<usize> {
+    let mut chain = vec![block];
+    while let Some((parent, _)) = scopes[block].parent {
+        chain.push(parent);
+        block = parent;
+    }
+    chain
+}
+
+/// The innermost block that holds both `a` and `b`.
+fn common(scopes: &[Scope], a: usize, b: usize) -> usize {
+    let outer = chain(scopes, a);
+    chain(scopes, b)
+        .into_iter()
+        .find(|block| outer.contains(block))
+        .unwrap_or(0)
+}
+
+/// The slot that holds the typed `let` of a variable first written in block `first` and
+/// used in blocks under `common`, or `None` when its first write declares it. The `let`
+/// goes in `common`, or above the outermost loop that holds the first write when that
+/// is further out (see the module doc).
+fn slot(scopes: &[Scope], first: usize, common: usize) -> Option<usize> {
+    let chain = chain(scopes, first);
+    let mut home = chain.iter().position(|&block| block == common)?;
+    if let Some(looped) = chain.iter().rposition(|&block| scopes[block].looped) {
+        home = home.max(looped + 1);
+    }
+    let inner = chain[home.checked_sub(1)?];
+    scopes[inner].parent.map(|(_, slot)| slot)
+}
+
+/// Collects the variables that an assignment, `++` or `--` writes, for the loop pre-scan
+/// of the P2R-50 values. Reads are left out: forgetting their values would make the tool
+/// weaker than rustc.
+struct Written;
+
+impl<'ast, 'arena> Walker<'ast, 'arena, Vec<&'ast DirectVariable<'arena>>> for Written {
+    fn walk_in_assignment(
+        &self,
+        assignment: &'ast Assignment<'arena>,
+        written: &mut Vec<&'ast DirectVariable<'arena>>,
+    ) {
+        if let Expression::Variable(Variable::Direct(variable)) = assignment.lhs {
+            written.push(variable);
+        }
+    }
+
+    fn walk_in_unary_prefix(
+        &self,
+        unary: &'ast UnaryPrefix<'arena>,
+        written: &mut Vec<&'ast DirectVariable<'arena>>,
+    ) {
+        if let UnaryPrefixOperator::PreIncrement(_) | UnaryPrefixOperator::PreDecrement(_) =
+            unary.operator
+            && let Expression::Variable(Variable::Direct(variable)) = unary.operand
+        {
+            written.push(variable);
+        }
+    }
+
+    fn walk_in_unary_postfix(
+        &self,
+        unary: &'ast UnaryPostfix<'arena>,
+        written: &mut Vec<&'ast DirectVariable<'arena>>,
+    ) {
+        if let Expression::Variable(Variable::Direct(variable)) = unary.operand {
+            written.push(variable);
+        }
+    }
 }
 
 /// Replaces the copy mark of an assignment with `.clone()` when the variable it moves is
@@ -694,10 +960,10 @@ fn same_type(php_name: &[u8], known: &RustType, found: RustType) -> Result<RustT
     ))
 }
 
-/// Only int and string variables are written so far; the other types follow in later
-/// steps (P2R-20).
+/// Only int, bool and string variables are written so far; the other types follow in
+/// later steps (P2R-20).
 fn built_yet(ty: RustType) -> Result<RustType, String> {
-    if matches!(ty, RustType::I64 | RustType::String) {
+    if matches!(ty, RustType::I64 | RustType::Bool | RustType::String) {
         return Ok(ty);
     }
     Err(format!(

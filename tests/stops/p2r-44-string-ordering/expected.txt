@@ -1,0 +1,2 @@
+input.php:7:9: <, >, <= and >= on strings are not supported in version 1 (P2R-44)
+input.php:10:9: <, >, <= and >= on strings are not supported in version 1 (P2R-44)

@@ -1,0 +1,2 @@
+input.php:11:10: % by zero always fails (P2R-50)
+input.php:18:10: % by zero always fails (P2R-50)

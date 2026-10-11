@@ -1,0 +1,4 @@
+input.php:7:9: this value is i64, not bool, and PHP truthiness is not supported (P2R-42)
+input.php:10:18: this value is i64, not bool, and PHP truthiness is not supported (P2R-42)
+input.php:13:9: this value is String, not bool, and PHP truthiness is not supported (P2R-42)
+input.php:16:10: this value is i64, not bool, and PHP truthiness is not supported (P2R-42)

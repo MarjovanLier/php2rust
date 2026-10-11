@@ -51,6 +51,13 @@ impl Converter<'_> {
                 }
             },
             other if changes_variable(other) => self.change_as_value(other),
+            Expression::Literal(Literal::True(_)) => Some((RExpr::Bool(true), RustType::Bool)),
+            Expression::Literal(Literal::False(_)) => Some((RExpr::Bool(false), RustType::Bool)),
+            Expression::UnaryPrefix(unary)
+                if matches!(unary.operator, UnaryPrefixOperator::Not(_)) =>
+            {
+                self.not(unary)
+            }
             Expression::Literal(Literal::Null(null)) => {
                 self.refuse(null, "the type null has no Rust type (P2R-22)");
                 None
@@ -80,6 +87,24 @@ impl Converter<'_> {
                     binary,
                     "/ gives an int or a float depending on the values; use intdiv() (P2R-44)",
                 );
+                return None;
+            }
+            BinaryOperator::Identical(_) | BinaryOperator::Equal(_) => {
+                return self.comparison(binary, BinOp::Eq);
+            }
+            BinaryOperator::NotIdentical(_)
+            | BinaryOperator::NotEqual(_)
+            | BinaryOperator::AngledNotEqual(_) => return self.comparison(binary, BinOp::Ne),
+            BinaryOperator::LessThan(_) => return self.comparison(binary, BinOp::Lt),
+            BinaryOperator::GreaterThan(_) => return self.comparison(binary, BinOp::Gt),
+            BinaryOperator::LessThanOrEqual(_) => return self.comparison(binary, BinOp::Le),
+            BinaryOperator::GreaterThanOrEqual(_) => return self.comparison(binary, BinOp::Ge),
+            BinaryOperator::And(_) => return self.logic(binary, BinOp::And),
+            BinaryOperator::Or(_) => return self.logic(binary, BinOp::Or),
+            BinaryOperator::Spaceship(_) => {
+                self.record_refused(binary.lhs);
+                self.record_refused(binary.rhs);
+                self.refuse(binary, "<=> is not supported in version 1 (P2R-44)");
                 return None;
             }
             _ => {

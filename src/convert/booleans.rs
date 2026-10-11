@@ -1,0 +1,134 @@
+//! Bools, comparisons and logic (P2R-20, P2R-42 to P2R-44, P2R-50).
+
+use mago_syntax::cst::*;
+
+use super::Converter;
+use crate::printer::{BinOp, RExpr};
+use crate::types::RustType;
+
+impl Converter<'_> {
+    /// A condition of `if`, `while` or `for`, or an operand of `&&`, `||` or `!`. PHP
+    /// truthiness has no Rust form, so the value must be a bool (P2R-42).
+    pub(super) fn condition(&mut self, expression: &Expression<'_>) -> Option<RExpr> {
+        let (expr, ty) = self.expression(expression)?;
+        if ty != RustType::Bool {
+            self.refuse(
+                expression,
+                format!(
+                    "this value is {}, not bool, and PHP truthiness is not supported (P2R-42)",
+                    ty.owned()
+                ),
+            );
+            return None;
+        }
+        Some(expr)
+    }
+
+    /// `!` (P2R-42).
+    pub(super) fn not(&mut self, unary: &UnaryPrefix<'_>) -> Option<(RExpr, RustType)> {
+        let operand = self.condition(unary.operand)?;
+        Some((RExpr::Not(Box::new(operand)), RustType::Bool))
+    }
+
+    /// `&&` and `||` (P2R-42).
+    pub(super) fn logic(&mut self, binary: &Binary<'_>, op: BinOp) -> Option<(RExpr, RustType)> {
+        // Both sides convert first, so problems on both sides are reported.
+        let left = self.condition(binary.lhs);
+        let right = self.condition(binary.rhs);
+        let expr = RExpr::Binary(Box::new(left?), op, Box::new(right?));
+        Some((expr, RustType::Bool))
+    }
+
+    /// `===`, `!==`, `==`, `!=`, `<>`, `<`, `>`, `<=` and `>=` (P2R-43, P2R-44).
+    pub(super) fn comparison(
+        &mut self,
+        binary: &Binary<'_>,
+        op: BinOp,
+    ) -> Option<(RExpr, RustType)> {
+        let left = self.expression(binary.lhs);
+        let right = self.expression(binary.rhs);
+        let ((left, left_type), (right, right_type)) = (left?, right?);
+        let strict = matches!(
+            binary.operator,
+            BinaryOperator::Identical(_) | BinaryOperator::NotIdentical(_)
+        );
+        if let Some(message) = refusal(op, strict, &left_type, &right_type) {
+            self.refuse(binary, message);
+            return None;
+        }
+        if always_the_same(&left, op, &right) {
+            self.refuse(
+                binary,
+                "this comparison gives the same result for every i64, and rustc rejects it (P2R-50)",
+            );
+            return None;
+        }
+        let expr = RExpr::Binary(Box::new(left), op, Box::new(right));
+        Some((expr, RustType::Bool))
+    }
+}
+
+/// Why a comparison of these operand types does not convert, or `None` when it does.
+fn refusal(op: BinOp, strict: bool, left: &RustType, right: &RustType) -> Option<&'static str> {
+    let numbers = |ty: &RustType| matches!(ty, RustType::I64 | RustType::F64);
+    if left != right {
+        return Some(if numbers(left) && numbers(right) {
+            "a comparison that mixes int and float is not supported (P2R-44)"
+        } else {
+            "a comparison needs two operands of the same type (P2R-43)"
+        });
+    }
+    let ordering = matches!(op, BinOp::Lt | BinOp::Gt | BinOp::Le | BinOp::Ge);
+    match left {
+        RustType::I64 | RustType::F64 => None,
+        RustType::String if ordering => {
+            Some("<, >, <= and >= on strings are not supported in version 1 (P2R-44)")
+        }
+        // PHP compares two numeric strings as numbers: "1e3" == "1000" is true.
+        RustType::String if !strict => {
+            Some("== and != on strings are not supported in version 1; use === or !== (P2R-44)")
+        }
+        RustType::Bool if ordering => {
+            Some("<, >, <= and >= are built for int and float only (P2R-43)")
+        }
+        RustType::String | RustType::Bool => None,
+        RustType::Vec(_) => Some("a comparison of lists is not supported in version 1 (P2R-07)"),
+    }
+}
+
+/// True when rustc's unused_comparisons lint, an error under -D warnings, fires: the
+/// comparison holds for every i64 or for none (P2R-50). The lint looks at the left
+/// operand when it is an int literal, otherwise at the right one; a literal here is never
+/// negative, so only `i64::MAX` with `<=` or `>` on the literal's other side fires.
+fn always_the_same(left: &RExpr, op: BinOp, right: &RExpr) -> bool {
+    match (left, right) {
+        // A negative value prints as unary minus, which the lint does not read.
+        (RExpr::Int(value), _) if *value >= 0 => {
+            *value == i64::MAX && matches!(op, BinOp::Ge | BinOp::Lt)
+        }
+        (_, RExpr::Int(value)) if *value >= 0 => {
+            *value == i64::MAX && matches!(op, BinOp::Le | BinOp::Gt)
+        }
+        _ => false,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The cases probed with rustc 1.99: only the literal rustc reads, at `i64::MAX`.
+    #[test]
+    fn useless_comparisons_match_rustc() {
+        let max = || RExpr::Int(i64::MAX);
+        let n = || RExpr::Var("n".into());
+        assert!(always_the_same(&n(), BinOp::Le, &max()));
+        assert!(always_the_same(&n(), BinOp::Gt, &max()));
+        assert!(always_the_same(&max(), BinOp::Lt, &n()));
+        assert!(always_the_same(&max(), BinOp::Ge, &RExpr::Int(5)));
+        assert!(!always_the_same(&RExpr::Int(5), BinOp::Le, &max()));
+        assert!(!always_the_same(&max(), BinOp::Gt, &max()));
+        assert!(!always_the_same(&n(), BinOp::Lt, &max()));
+        assert!(!always_the_same(&n(), BinOp::Eq, &max()));
+    }
+}

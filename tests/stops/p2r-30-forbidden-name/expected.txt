@@ -1,0 +1,1 @@
+input.php:5:19: the name self has no Rust form (P2R-30)

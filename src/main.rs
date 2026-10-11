@@ -1,6 +1,8 @@
 mod convert;
+mod names;
 mod printer;
 mod problem;
+mod types;
 
 use std::fs;
 use std::path::{Path, PathBuf};

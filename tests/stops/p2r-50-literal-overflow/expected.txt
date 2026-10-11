@@ -1,0 +1,1 @@
+input.php:5:6: this int arithmetic overflows, and rustc rejects it (P2R-50)

@@ -1,0 +1,2 @@
+input.php:5:18: a parameter needs a declared type (P2R-23)
+input.php:10:10: a function needs a declared return type (P2R-23)

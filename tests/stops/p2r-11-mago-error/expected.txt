@@ -1,0 +1,1 @@
+input.php:10:12: Invalid argument type for argument #1 of `twice`: expected `int`, but found `string('4')`. (invalid-argument)

@@ -1,0 +1,1 @@
+input.php:8:5: a statement after return never runs, and rustc rejects it (P2R-40)

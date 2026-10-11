@@ -1,0 +1,1 @@
+input.php:5:6: calls to str_repeat are not supported (P2R-48)

@@ -1,15 +1,19 @@
 //! Walks the Mago syntax tree and writes Rust (docs/spec.md sections 2 to 5).
 
 use std::borrow::Cow;
+use std::collections::{HashMap, HashSet};
 
+use heck::ToSnakeCase;
 use mago_allocator::LocalArena;
 use mago_analyzer::Analyzer;
 use mago_analyzer::analysis_result::AnalysisResult;
 use mago_analyzer::plugin::registry::PluginRegistry;
 use mago_analyzer::settings::Settings;
+use mago_codex::metadata::CodebaseMetadata;
 use mago_codex::populator::populate_codebase;
 use mago_codex::reference::SymbolReferences;
 use mago_codex::scanner::scan_program;
+use mago_codex::ttype::union::TUnion;
 use mago_database::file::File;
 use mago_names::resolver::NameResolver;
 use mago_php_version::PHPVersion;
@@ -19,8 +23,10 @@ use mago_span::HasSpan;
 use mago_syntax::cst::*;
 use mago_syntax::parser::parse_file;
 
-use crate::printer;
+use crate::names;
+use crate::printer::{self, BinOp, RExpr, TooWide};
 use crate::problem::{self, Origin, Problem};
+use crate::types::{self, RustType};
 
 /// The first line of every output (P2R-52).
 pub const HEADER: &str =
@@ -84,9 +90,7 @@ pub fn convert(path: &str, source: Vec<u8>) -> Result<String, Failure> {
         .filter(|issue| reported(issue))
         .filter_map(mago_problem)
         .collect();
-    let mut converter = Converter {
-        problems: Vec::new(),
-    };
+    let mut converter = Converter::new(&codebase);
     let rust = converter.program(program);
     problems.append(&mut converter.problems);
     if problems.is_empty() {
@@ -187,11 +191,50 @@ fn statement_kind(statement: &Statement<'_>) -> &'static str {
     }
 }
 
-struct Converter {
-    problems: Vec<Problem>,
+/// A function declared in the file, as Rust sees it.
+#[derive(Clone)]
+struct Signature {
+    rust_name: String,
+    parameters: Vec<ParameterSignature>,
+    returns: Option<RustType>,
 }
 
-impl Converter {
+#[derive(Clone)]
+struct ParameterSignature {
+    /// The PHP name without `$`.
+    php_name: Vec<u8>,
+    rust_name: String,
+    /// The snake_case name without `r#`, for the `_` prefix of an unused parameter.
+    snake: String,
+    ty: RustType,
+}
+
+/// Where a statement sits: `fn main()`, or a function with this return type.
+#[derive(Clone, Copy)]
+enum Context<'t> {
+    Main,
+    Function(Option<&'t RustType>),
+}
+
+struct Converter<'c> {
+    codebase: &'c CodebaseMetadata,
+    problems: Vec<Problem>,
+    /// Declared functions by lowercase PHP name, because PHP function names ignore case (P2R-32).
+    functions: HashMap<Vec<u8>, Signature>,
+    /// Parameters of the function being converted, and whether the body reads each one.
+    scope: Vec<(ParameterSignature, bool)>,
+}
+
+impl<'c> Converter<'c> {
+    fn new(codebase: &'c CodebaseMetadata) -> Self {
+        Self {
+            codebase,
+            problems: Vec::new(),
+            functions: HashMap::new(),
+            scope: Vec::new(),
+        }
+    }
+
     fn refuse(&mut self, node: &impl HasSpan, message: impl Into<String>) {
         self.problems
             .push(spanned(node, Origin::Tool, message.into()));
@@ -207,7 +250,20 @@ impl Converter {
         line
     }
 
+    /// Lays out an expression on one line, refused when rustfmt would split it (P2R-51).
+    fn render(&mut self, node: &impl HasSpan, expr: &RExpr, anchor: bool) -> Option<String> {
+        match printer::expr(expr, anchor) {
+            Ok(text) => Some(text),
+            Err(TooWide) => {
+                self.refuse(node, "this statement is too long for one line (P2R-51)");
+                None
+            }
+        }
+    }
+
     fn program(&mut self, program: &Program<'_>) -> String {
+        self.register(program);
+        let mut items: Vec<Vec<String>> = Vec::new();
         let mut main: Vec<String> = Vec::new();
         let mut declared = false;
         let mut started = false;
@@ -234,7 +290,14 @@ impl Converter {
                         );
                     }
                     started = true;
-                    self.statement(other, 1, &mut main);
+                    match other {
+                        Statement::Function(function) => {
+                            if let Some(item) = self.function(function) {
+                                items.push(item);
+                            }
+                        }
+                        _ => self.statement(other, 1, Context::Main, &mut main),
+                    }
                 }
             }
             after_closing_tag = matches!(statement, Statement::ClosingTag(_));
@@ -247,12 +310,279 @@ impl Converter {
                 message: "the file must start with declare(strict_types=1); (P2R-12)".into(),
             });
         }
-        assemble(Vec::new(), main)
+        assemble(items, main)
     }
 
-    fn statement(&mut self, statement: &Statement<'_>, depth: usize, body: &mut Vec<String>) {
+    /// Registers every top-level function before any body converts, because PHP lets a
+    /// call come before the declaration (P2R-33).
+    fn register(&mut self, program: &Program<'_>) {
+        let mut named: Vec<(&Function<'_>, String)> = Vec::new();
+        let mut taken: HashSet<String> = HashSet::new();
+        for statement in program.statements.iter() {
+            let Statement::Function(function) = statement else {
+                continue;
+            };
+            let Some(rust_name) = self.rust_name(function.name.value, &function.name) else {
+                continue;
+            };
+            if rust_name == "main" {
+                self.refuse(
+                    &function.name,
+                    "a function named main is not supported (P2R-31)",
+                );
+                continue;
+            }
+            if !taken.insert(rust_name.clone()) {
+                let text = String::from_utf8_lossy(function.name.value).into_owned();
+                self.refuse(
+                    &function.name,
+                    format!("{text} gives the same Rust name as another function (P2R-31)"),
+                );
+                continue;
+            }
+            named.push((function, rust_name));
+        }
+        for (function, rust_name) in named {
+            if let Some(signature) = self.signature(function, rust_name, &taken) {
+                self.functions
+                    .insert(function.name.value.to_ascii_lowercase(), signature);
+            }
+        }
+    }
+
+    fn signature(
+        &mut self,
+        function: &Function<'_>,
+        rust_name: String,
+        taken: &HashSet<String>,
+    ) -> Option<Signature> {
+        let codebase = self.codebase;
+        let Some(metadata) = codebase.get_function(function.name.value) else {
+            self.refuse(
+                &function.name,
+                "Mago has no signature for this function (P2R-23)",
+            );
+            return None;
+        };
+        let mut parameters: Vec<ParameterSignature> = Vec::new();
+        let mut converted = true;
+        for (parameter, meta) in function
+            .parameter_list
+            .parameters
+            .iter()
+            .zip(metadata.parameters.iter())
+        {
+            let declared = meta.get_type_metadata().map(|t| &t.type_union);
+            match self.parameter(parameter, declared, taken, &parameters) {
+                Some(signature) => parameters.push(signature),
+                None => converted = false,
+            }
+        }
+        let returns = self.return_type(
+            function,
+            metadata
+                .return_type_metadata
+                .as_ref()
+                .map(|t| &t.type_union),
+        );
+        match returns {
+            Some(returns) if converted => Some(Signature {
+                rust_name,
+                parameters,
+                returns,
+            }),
+            _ => None,
+        }
+    }
+
+    fn parameter(
+        &mut self,
+        parameter: &FunctionLikeParameter<'_>,
+        declared: Option<&TUnion>,
+        taken: &HashSet<String>,
+        earlier: &[ParameterSignature],
+    ) -> Option<ParameterSignature> {
+        if parameter.ampersand.is_some()
+            || parameter.ellipsis.is_some()
+            || parameter.default_value.is_some()
+        {
+            self.refuse(
+                parameter,
+                "by-reference, variadic and default parameters are not supported (P2R-07)",
+            );
+            return None;
+        }
+        if parameter.hint.is_none() {
+            self.refuse(parameter, "a parameter needs a declared type (P2R-23)");
+            return None;
+        }
+        let php_name = &parameter.variable.name[1..];
+        let rust_name = self.rust_name(php_name, &parameter.variable)?;
+        if taken.contains(&rust_name) || earlier.iter().any(|p| p.rust_name == rust_name) {
+            self.refuse(
+                &parameter.variable,
+                format!("{rust_name} is already the Rust name of a function or parameter (P2R-31)"),
+            );
+            return None;
+        }
+        let ty = self.declared_type(parameter, declared)?;
+        if !matches!(ty, RustType::I64 | RustType::String) {
+            self.refuse(
+                parameter,
+                "only int and string parameters are built so far (P2R-20)",
+            );
+            return None;
+        }
+        let snake = std::str::from_utf8(php_name)
+            .unwrap_or_default()
+            .to_snake_case();
+        Some(ParameterSignature {
+            php_name: php_name.to_vec(),
+            rust_name,
+            snake,
+            ty,
+        })
+    }
+
+    /// `Some(None)` is a `void` function; `None` means a problem was recorded.
+    fn return_type(
+        &mut self,
+        function: &Function<'_>,
+        declared: Option<&TUnion>,
+    ) -> Option<Option<RustType>> {
+        let Some(hint) = &function.return_type_hint else {
+            self.refuse(
+                &function.name,
+                "a function needs a declared return type (P2R-23)",
+            );
+            return None;
+        };
+        if matches!(hint.hint, Hint::Void(_)) {
+            return Some(None);
+        }
+        let ty = self.declared_type(hint, declared)?;
+        if ty != RustType::I64 {
+            self.refuse(
+                hint,
+                "only int and void return types are built so far (P2R-20)",
+            );
+            return None;
+        }
+        Some(Some(ty))
+    }
+
+    fn declared_type(
+        &mut self,
+        node: &impl HasSpan,
+        declared: Option<&TUnion>,
+    ) -> Option<RustType> {
+        let Some(union) = declared else {
+            self.refuse(node, "Mago found no type here (P2R-23)");
+            return None;
+        };
+        match types::rust_type(union) {
+            Ok(ty) => Some(ty),
+            Err(name) => {
+                self.refuse(node, format!("the type {name} has no Rust type (P2R-22)"));
+                None
+            }
+        }
+    }
+
+    fn rust_name(&mut self, php: &[u8], node: &impl HasSpan) -> Option<String> {
+        let text = std::str::from_utf8(php)
+            .unwrap_or_default()
+            .trim_start_matches('$');
+        let name = names::rust_name(text);
+        if name.is_none() {
+            self.refuse(node, format!("the name {text} has no Rust form (P2R-30)"));
+        }
+        name
+    }
+
+    fn function(&mut self, function: &Function<'_>) -> Option<Vec<String>> {
+        let signature = self
+            .functions
+            .get(&function.name.value.to_ascii_lowercase())?
+            .clone();
+        self.scope = signature
+            .parameters
+            .iter()
+            .map(|p| (p.clone(), false))
+            .collect();
+        let mut body = Vec::new();
+        let mut returned = false;
+        for statement in function.body.statements.iter() {
+            // rustc rejects code after return under -D warnings (unreachable_code).
+            if returned && !matches!(statement, Statement::Noop(_)) {
+                self.refuse(
+                    statement,
+                    "a statement after return never runs, and rustc rejects it (P2R-40)",
+                );
+                continue;
+            }
+            returned = matches!(statement, Statement::Return(_));
+            self.statement(
+                statement,
+                1,
+                Context::Function(signature.returns.as_ref()),
+                &mut body,
+            );
+        }
+        if signature.returns.is_some()
+            && !matches!(
+                function.body.statements.iter().last(),
+                Some(Statement::Return(_))
+            )
+        {
+            self.refuse(
+                &function.name,
+                "a function with a return type must end with return (P2R-50)",
+            );
+        }
+        // An unused parameter gets a leading `_`, so rustc does not warn (P2R-35).
+        let parameters: Vec<String> = std::mem::take(&mut self.scope)
+            .into_iter()
+            .map(|(p, read)| {
+                let name = if read {
+                    p.rust_name
+                } else {
+                    format!("_{}", p.snake)
+                };
+                format!("{name}: {}", p.ty.parameter())
+            })
+            .collect();
+        let returns = signature
+            .returns
+            .as_ref()
+            .map(|t| format!(" -> {}", t.owned()))
+            .unwrap_or_default();
+        let open = format!(
+            "pub fn {}({}){returns} {{",
+            signature.rust_name,
+            parameters.join(", ")
+        );
+        if body.is_empty() {
+            // rustfmt writes an empty body as `{}` on the same line.
+            return Some(vec![self.emit(&function.name, 0, format!("{open}}}"))]);
+        }
+        let mut lines = vec![self.emit(&function.name, 0, open)];
+        lines.extend(body);
+        lines.push("}".to_owned());
+        Some(lines)
+    }
+
+    fn statement(
+        &mut self,
+        statement: &Statement<'_>,
+        depth: usize,
+        context: Context<'_>,
+        body: &mut Vec<String>,
+    ) {
         match statement {
             Statement::Echo(echo) => self.echo(echo, depth, body),
+            Statement::Return(ret) => self.return_statement(ret, depth, context, body),
+            Statement::Expression(expression) => self.expression_statement(expression, depth, body),
             Statement::Noop(_) => {}
             Statement::Declare(_) => {
                 self.refuse(
@@ -270,6 +600,64 @@ impl Converter {
         }
     }
 
+    fn return_statement(
+        &mut self,
+        ret: &Return<'_>,
+        depth: usize,
+        context: Context<'_>,
+        body: &mut Vec<String>,
+    ) {
+        let text = match (context, ret.value) {
+            (Context::Main, _) => {
+                self.refuse(ret, "return outside a function is not supported (P2R-07)");
+                return;
+            }
+            (Context::Function(None), None) => "return;".to_owned(),
+            (Context::Function(Some(_)), Some(value)) => {
+                // Mago reports a value that does not match the declared return type (P2R-11).
+                let Some((expr, _)) = self.expression(value) else {
+                    return;
+                };
+                let Some(rendered) = self.render(value, &expr, false) else {
+                    return;
+                };
+                format!("return {rendered};")
+            }
+            _ => {
+                self.refuse(
+                    ret,
+                    "this return does not match the declared return type (P2R-23)",
+                );
+                return;
+            }
+        };
+        let line = self.emit(ret, depth, text);
+        body.push(line);
+    }
+
+    fn expression_statement(
+        &mut self,
+        statement: &ExpressionStatement<'_>,
+        depth: usize,
+        body: &mut Vec<String>,
+    ) {
+        let Expression::Call(Call::Function(call)) = statement.expression else {
+            self.refuse(
+                statement,
+                "this expression statement is not supported (P2R-43)",
+            );
+            return;
+        };
+        let Some((expr, _)) = self.call(call, statement.expression) else {
+            return;
+        };
+        let Some(rendered) = self.render(statement.expression, &expr, false) else {
+            return;
+        };
+        let line = self.emit(statement, depth, format!("{rendered};"));
+        body.push(line);
+    }
+
     fn echo(&mut self, echo: &Echo<'_>, depth: usize, body: &mut Vec<String>) {
         for &value in echo.values.iter() {
             if let Some(text) = self.print_statement(value) {
@@ -281,15 +669,197 @@ impl Converter {
 
     /// One `print!` per echo argument, in source order (P2R-46).
     fn print_statement(&mut self, value: &Expression<'_>) -> Option<String> {
-        if let Expression::Literal(Literal::String(string)) = value {
-            let text = self.string_literal(string)?;
-            return Some(format!("print!({});", printer::format_text(&text)));
+        let (expr, ty) = self.expression(value)?;
+        match expr {
+            RExpr::Str(text) => Some(format!("print!({});", printer::format_text(&text))),
+            // PHP and Rust print an int the same way, so a literal goes into the format string.
+            RExpr::Int(value) => Some(format!("print!(\"{value}\");")),
+            expr if matches!(ty, RustType::I64 | RustType::String) => {
+                let arguments = format!("\"{{}}\", {}", self.render(value, &expr, true)?);
+                if arguments.len() > printer::ARGS_WIDTH {
+                    self.refuse(value, "this statement is too long for one line (P2R-51)");
+                    return None;
+                }
+                Some(format!("print!({arguments});"))
+            }
+            _ => {
+                self.refuse(value, "echo of a float or bool is not supported (P2R-46)");
+                None
+            }
         }
-        self.refuse(
-            value,
-            "this expression is not supported in version 1 (P2R-07)",
-        );
-        None
+    }
+
+    /// Converts an expression and gives its Rust type, or records why it cannot.
+    fn expression(&mut self, expression: &Expression<'_>) -> Option<(RExpr, RustType)> {
+        match expression {
+            Expression::Parenthesized(inner) => self.expression(inner.expression),
+            Expression::Literal(Literal::Integer(integer)) => {
+                match integer.value.and_then(|v| i64::try_from(v).ok()) {
+                    Some(value) => Some((RExpr::Int(value), RustType::I64)),
+                    None => {
+                        self.refuse(integer, "an integer literal above PHP_INT_MAX is a float, and floats are not built yet (P2R-49)");
+                        None
+                    }
+                }
+            }
+            Expression::Literal(Literal::String(string)) => {
+                Some((RExpr::Str(self.string_literal(string)?), RustType::String))
+            }
+            Expression::Variable(Variable::Direct(variable)) => self.variable(variable),
+            Expression::UnaryPrefix(unary)
+                if matches!(unary.operator, UnaryPrefixOperator::Negation(_)) =>
+            {
+                let (operand, ty) = self.expression(unary.operand)?;
+                if ty != RustType::I64 {
+                    self.refuse(unary, "unary minus is built for int only so far (P2R-43)");
+                    return None;
+                }
+                self.checked_constant(unary, RExpr::Neg(Box::new(operand)))
+            }
+            Expression::Binary(binary) => self.binary(binary),
+            Expression::Call(Call::Function(call)) => match self.call(call, expression)? {
+                (call, Some(ty)) => Some((call, ty)),
+                (_, None) => {
+                    self.refuse(expression, "a void function has no value (P2R-20)");
+                    None
+                }
+            },
+            other => {
+                self.refuse(
+                    other,
+                    "this expression is not supported in version 1 (P2R-07)",
+                );
+                None
+            }
+        }
+    }
+
+    fn binary(&mut self, binary: &Binary<'_>) -> Option<(RExpr, RustType)> {
+        let op = match binary.operator {
+            BinaryOperator::Addition(_) => BinOp::Add,
+            BinaryOperator::Subtraction(_) => BinOp::Sub,
+            BinaryOperator::Multiplication(_) => BinOp::Mul,
+            BinaryOperator::Modulo(_) => BinOp::Rem,
+            BinaryOperator::Division(_) => {
+                self.refuse(
+                    binary,
+                    "/ gives an int or a float depending on the values; use intdiv() (P2R-44)",
+                );
+                return None;
+            }
+            _ => {
+                self.refuse(
+                    binary,
+                    "this operator is not supported in version 1 (P2R-07)",
+                );
+                return None;
+            }
+        };
+        // Both sides convert first, so problems on both sides are reported.
+        let left = self.expression(binary.lhs);
+        let right = self.expression(binary.rhs);
+        let ((left, left_type), (right, right_type)) = (left?, right?);
+        if left_type != RustType::I64 || right_type != RustType::I64 {
+            self.refuse(
+                binary,
+                "arithmetic is built for int operands only so far (P2R-43)",
+            );
+            return None;
+        }
+        // rustc rejects a constant zero divisor at compile time (unconditional_panic).
+        if op == BinOp::Rem && printer::literal_value(&right) == Some(0) {
+            self.refuse(
+                binary,
+                "% by zero always fails, and rustc rejects it (P2R-50)",
+            );
+            return None;
+        }
+        self.checked_constant(binary, RExpr::Binary(Box::new(left), op, Box::new(right)))
+    }
+
+    /// An int expression made only of literals must not overflow, because rustc evaluates it
+    /// at compile time and rejects the overflow (arithmetic_overflow, P2R-50).
+    fn checked_constant(&mut self, node: &impl HasSpan, expr: RExpr) -> Option<(RExpr, RustType)> {
+        if !printer::anchored(&expr) && printer::literal_value(&expr).is_none() {
+            self.refuse(
+                node,
+                "this int arithmetic overflows, and rustc rejects it (P2R-50)",
+            );
+            return None;
+        }
+        Some((expr, RustType::I64))
+    }
+
+    fn variable(&mut self, variable: &DirectVariable<'_>) -> Option<(RExpr, RustType)> {
+        let php_name = &variable.name[1..];
+        let found = self
+            .scope
+            .iter_mut()
+            .find(|(p, _)| p.php_name == php_name)
+            .map(|(p, read)| {
+                *read = true;
+                (RExpr::Var(p.rust_name.clone()), p.ty.clone())
+            });
+        if found.is_none() {
+            self.refuse(
+                variable,
+                "variables other than parameters are not built yet (P2R-34)",
+            );
+        }
+        found
+    }
+
+    /// A call to a function declared in this file, with its return type (`None` for void).
+    fn call(
+        &mut self,
+        call: &FunctionCall<'_>,
+        node: &Expression<'_>,
+    ) -> Option<(RExpr, Option<RustType>)> {
+        let Expression::Identifier(Identifier::Local(name)) = call.function else {
+            self.refuse(
+                node,
+                "only calls by plain function name are supported (P2R-07)",
+            );
+            return None;
+        };
+        let Some(signature) = self
+            .functions
+            .get(&name.value.to_ascii_lowercase())
+            .cloned()
+        else {
+            let text = String::from_utf8_lossy(name.value).into_owned();
+            self.refuse(node, format!("calls to {text} are not supported (P2R-48)"));
+            return None;
+        };
+        let mut arguments = Vec::new();
+        let mut converted = true;
+        for argument in call.argument_list.arguments.iter() {
+            match argument {
+                // Mago reports an argument whose type does not match the parameter (P2R-11).
+                Argument::Positional(positional) if positional.ellipsis.is_none() => {
+                    match self.expression(positional.value) {
+                        Some((expr, _)) => arguments.push(expr),
+                        None => converted = false,
+                    }
+                }
+                other => {
+                    self.refuse(
+                        other,
+                        "named and spread arguments are not supported (P2R-07)",
+                    );
+                    converted = false;
+                }
+            }
+        }
+        // PHP accepts extra arguments to a user function; Rust does not.
+        if converted && arguments.len() != signature.parameters.len() {
+            self.refuse(node, "a call must pass one argument per parameter (P2R-07)");
+            converted = false;
+        }
+        converted.then_some((
+            RExpr::Call(signature.rust_name, arguments),
+            signature.returns,
+        ))
     }
 
     /// The text of a PHP string literal, decoded by PHP's rules (P2R-49).

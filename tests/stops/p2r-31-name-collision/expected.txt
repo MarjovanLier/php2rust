@@ -1,0 +1,2 @@
+input.php:10:10: get_total gives the same Rust name as another function (P2R-31)
+input.php:15:10: a function named main is not supported (P2R-31)

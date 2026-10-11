@@ -1,0 +1,1 @@
+input.php:5:15: the type mixed has no Rust type (P2R-22)

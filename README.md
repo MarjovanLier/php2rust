@@ -87,9 +87,11 @@ the others are findings of the Mago analyser. In short:
 - A read that a path reaches with no assignment before it, a variable whose type
   changes, a value that is assigned and never read, and two PHP names that give the same
   Rust name.
+- A name whose snake_case form is not a plain ASCII Rust name: `$_2` (it would become
+  `2`), and any name with a letter outside ASCII, such as `$größe` or `$naïve`.
 - Code that rustc or rustfmt would reject or change: a statement that no path reaches,
   int arithmetic that always overflows, `%` or `intdiv()` by a zero the tool can prove,
-  and a statement too long for one line.
+  a function that calls itself on every path, and a statement too long for one line.
 
 ## Known limitations
 

@@ -160,10 +160,10 @@ impl Converter<'_> {
             return Some(None);
         }
         let ty = self.declared_type(hint, declared)?;
-        if ty != RustType::I64 {
+        if !matches!(ty, RustType::I64 | RustType::String) {
             self.refuse(
                 hint,
-                "only int and void return types are built so far (P2R-20)",
+                "only int, string and void return types are built so far (P2R-20)",
             );
             return None;
         }

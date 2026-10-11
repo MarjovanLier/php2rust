@@ -3,8 +3,8 @@
 use mago_span::HasSpan;
 use mago_syntax::cst::*;
 
-use super::Converter;
 use super::variables::changes_variable;
+use super::{Converter, strings};
 use crate::printer::{self, BinOp, RExpr};
 use crate::types::RustType;
 
@@ -37,6 +37,12 @@ impl Converter<'_> {
                 self.checked_constant(unary, RExpr::Neg(Box::new(operand)))
             }
             Expression::Binary(binary) => self.binary(binary),
+            Expression::CompositeString(CompositeString::Interpolated(string)) => {
+                self.interpolation(string)
+            }
+            Expression::Call(Call::Function(call)) if strings::calls(call, b"strlen") => {
+                self.strlen(call, expression)
+            }
             Expression::Call(Call::Function(call)) => match self.call(call, expression)? {
                 (call, Some(ty)) => Some((call, ty)),
                 (_, None) => {
@@ -62,6 +68,7 @@ impl Converter<'_> {
 
     pub(super) fn binary(&mut self, binary: &Binary<'_>) -> Option<(RExpr, RustType)> {
         let op = match binary.operator {
+            BinaryOperator::StringConcat(_) => return self.concatenation(binary),
             BinaryOperator::Addition(_) => BinOp::Add,
             BinaryOperator::Subtraction(_) => BinOp::Sub,
             BinaryOperator::Multiplication(_) => BinOp::Mul,
@@ -160,7 +167,7 @@ impl Converter<'_> {
                 // Mago reports an argument whose type does not match the parameter (P2R-11).
                 Argument::Positional(positional) if positional.ellipsis.is_none() => {
                     match self.expression(positional.value) {
-                        Some((expr, _)) => arguments.push(expr),
+                        Some((expr, ty)) => arguments.push(self.borrowed(expr, &ty)),
                         None => converted = false,
                     }
                 }

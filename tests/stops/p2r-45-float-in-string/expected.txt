@@ -1,0 +1,1 @@
+input.php:5:17: only string and int values can be joined into a string (P2R-45)

@@ -98,6 +98,13 @@ impl Variables {
     pub(super) fn set_value(&mut self, var: Var, value: Option<i64>) {
         self.entries[var].value = value;
     }
+
+    /// True when `rust_name` is a parameter: a string parameter is a `&str` (P2R-24).
+    pub(super) fn is_parameter(&self, rust_name: &str) -> bool {
+        self.entries
+            .iter()
+            .any(|e| e.parameter.is_some() && e.rust_name == rust_name)
+    }
 }
 
 /// True for the expressions that change a variable: an assignment, `++` and `--`.

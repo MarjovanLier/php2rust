@@ -75,6 +75,15 @@ pub enum RExpr {
     Neg(Box<RExpr>),
     /// A variable whose value rustc works out at compile time (P2R-50).
     Known(String, i64),
+    /// A joined string: the format text with its braces doubled, and one value per `{}`
+    /// (P2R-45).
+    Format(String, Vec<RExpr>),
+    /// `&value`, where Rust takes a `&str`.
+    Ref(Box<RExpr>),
+    /// `value.method()`, for the copies PHP makes (P2R-26).
+    Method(Box<RExpr>, &'static str),
+    /// The byte length of a string as `i64` (P2R-48).
+    Len(Box<RExpr>),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -155,7 +164,30 @@ fn render(expr: &RExpr, anchor: bool, min_precedence: u8) -> Result<String, TooW
             }
         }
         RExpr::Known(name, _) => name.clone(),
+        RExpr::Format(text, values) => format!("format!({})", format_arguments(text, values)?),
+        RExpr::Ref(inner) => format!("&{}", render(inner, false, 0)?),
+        RExpr::Method(inner, method) => format!("{}.{method}()", render(inner, false, 0)?),
+        // `-x as i64` and `x as i64 < y` do not parse as meant, so an operand gets
+        // parentheses.
+        RExpr::Len(inner) if min_precedence > 0 => {
+            format!("({}.len() as i64)", render(inner, false, 0)?)
+        }
+        RExpr::Len(inner) => format!("{}.len() as i64", render(inner, false, 0)?),
     })
+}
+
+/// The arguments of `format!` or `print!` for a joined string, refused when rustfmt would
+/// put them one per line (P2R-51).
+pub fn format_arguments(text: &str, values: &[RExpr]) -> Result<String, TooWide> {
+    let mut arguments = quote(text);
+    for value in values {
+        arguments.push_str(", ");
+        arguments.push_str(&render(value, true, 0)?);
+    }
+    if arguments.len() > ARGS_WIDTH {
+        return Err(TooWide);
+    }
+    Ok(arguments)
 }
 
 /// True when a variable or a call fixes the expression's Rust type without its literals.
@@ -166,6 +198,7 @@ pub fn anchored(expr: &RExpr) -> bool {
         RExpr::Neg(inner) => anchored(inner),
         RExpr::Binary(left, _, right) => anchored(left) || anchored(right),
         RExpr::Known(..) => true,
+        RExpr::Format(..) | RExpr::Ref(_) | RExpr::Method(..) | RExpr::Len(_) => true,
     }
 }
 
@@ -187,6 +220,7 @@ pub fn literal_value(expr: &RExpr) -> Option<i64> {
         }
         RExpr::Str(_) | RExpr::Var(_) | RExpr::Call(..) => None,
         RExpr::Known(_, value) => Some(*value),
+        RExpr::Format(..) | RExpr::Ref(_) | RExpr::Method(..) | RExpr::Len(_) => None,
     }
 }
 

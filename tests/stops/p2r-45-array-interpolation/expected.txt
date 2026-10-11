@@ -1,0 +1,2 @@
+input.php:7:20: only $name and {$name} can be interpolated into a string (P2R-45)
+input.php:7:38: only $name and {$name} can be interpolated into a string (P2R-45)

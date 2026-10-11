@@ -54,9 +54,10 @@ impl Converter<'_> {
             (Context::Function(None), None) => "return;".to_owned(),
             (Context::Function(Some(_)), Some(value)) => {
                 // Mago reports a value that does not match the declared return type (P2R-11).
-                let Some((expr, _)) = self.expression(value) else {
+                let Some((expr, ty)) = self.expression(value) else {
                     return;
                 };
+                let expr = self.owned(expr, &ty);
                 let Some(rendered) = self.render(value, &expr, false) else {
                     return;
                 };
@@ -114,6 +115,14 @@ impl Converter<'_> {
             RExpr::Str(text) => Some(format!("print!({});", printer::format_text(&text))),
             // PHP and Rust print an int the same way, so a literal goes into the format string.
             RExpr::Int(value) => Some(format!("print!(\"{value}\");")),
+            // A joined string prints with its own format text, not through `format!`.
+            RExpr::Format(text, values) => match printer::format_arguments(&text, &values) {
+                Ok(arguments) => Some(format!("print!({arguments});")),
+                Err(_) => {
+                    self.refuse(value, "this statement is too long for one line (P2R-51)");
+                    None
+                }
+            },
             expr if matches!(ty, RustType::I64 | RustType::String) => {
                 let arguments = format!("\"{{}}\", {}", self.render(value, &expr, true)?);
                 if arguments.len() > printer::ARGS_WIDTH {

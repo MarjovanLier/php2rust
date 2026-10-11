@@ -31,6 +31,7 @@ mod expressions;
 mod flow;
 mod functions;
 mod statements;
+mod strings;
 mod variables;
 
 /// The first line of every output (P2R-52).

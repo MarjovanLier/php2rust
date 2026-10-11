@@ -38,13 +38,17 @@ use mago_syntax::cst::*;
 use mago_syntax::walker::Walker;
 
 use super::flow::{Flow, Var};
-use super::{Converter, ParameterSignature};
+use super::{Converter, ParameterSignature, strings};
 use crate::printer::{self, BinOp, RExpr};
 use crate::types::{self, RustType};
 
 /// Stands in a `let` line for its `mut `. `printer::quote` escapes every control
 /// character, so no other output text holds it.
 const MARK: char = '\u{1}';
+
+/// Stands after a string variable that an assignment moves, for its `.clone()` when the
+/// variable is read again (P2R-26).
+const COPY: char = '\u{2}';
 
 struct Entry {
     /// The PHP name without `$`.
@@ -68,6 +72,8 @@ pub(super) struct Variables {
     /// hashing (P2R-06).
     entries: Vec<Entry>,
     flow: Flow,
+    /// By copy mark: the read the assignment moves, and the assignment.
+    copies: Vec<(Span, Span)>,
 }
 
 impl Variables {
@@ -97,6 +103,12 @@ impl Variables {
     /// with this at loops and joins (see the module doc).
     pub(super) fn set_value(&mut self, var: Var, value: Option<i64>) {
         self.entries[var].value = value;
+    }
+
+    /// The copy mark for an assignment that moves the variable read at `read`.
+    fn copy_mark(&mut self, read: Span, assignment: Span) -> String {
+        self.copies.push((read, assignment));
+        format!("{COPY}{}{COPY}", self.copies.len() - 1)
     }
 
     /// True when `rust_name` is a parameter: a string parameter is a `&str` (P2R-24).
@@ -130,8 +142,9 @@ impl Converter<'_> {
         let Some(text) = self.change(statement.expression) else {
             return;
         };
-        let line = if text.contains(MARK) {
-            // A `let` is measured at the end of the body, once its `mut` is known (P2R-51).
+        let line = if text.contains([MARK, COPY]) {
+            // A `let` or a move is measured at the end of the body, once its `mut` and its
+            // `.clone()` are known (P2R-51).
             format!("{}{text}", "    ".repeat(depth))
         } else {
             self.emit(statement, depth, text)
@@ -195,6 +208,7 @@ impl Converter<'_> {
                     AssignmentOperator::Addition(_) => Some("+="),
                     AssignmentOperator::Subtraction(_) => Some("-="),
                     AssignmentOperator::Multiplication(_) => Some("*="),
+                    AssignmentOperator::Concat(_) => Some(".="),
                     _ => None,
                 };
                 (assignment.lhs, operator, Some(assignment.rhs))
@@ -232,7 +246,9 @@ impl Converter<'_> {
         };
         // PHP evaluates the value first. Every operator but `=` then reads the variable
         // before it writes it.
+        let source = value;
         let value = match value {
+            Some(value) if operator == Some(".=") => self.joined_string(value),
             Some(value) => self.expression(value),
             None => Some((RExpr::Int(1), RustType::I64)),
         };
@@ -256,7 +272,10 @@ impl Converter<'_> {
             }
             return None;
         };
-        if let Some((_, current_type)) = &current
+        // The value of `.=` is a joined string; the type of its variable is checked as a
+        // write (P2R-34).
+        if operator != ".="
+            && let Some((_, current_type)) = &current
             && (*current_type != RustType::I64 || value_type != RustType::I64)
         {
             self.record_write(variable);
@@ -294,7 +313,30 @@ impl Converter<'_> {
             );
             return None;
         }
-        let rendered = self.render(expression, &expr, false)?;
+        let mut moved = None;
+        let (operator, expr) = if operator == ".=" {
+            // `s += &s` borrows `s` twice, which rustc rejects (E0502).
+            let expr = if read_itself {
+                RExpr::Method(Box::new(expr), "clone")
+            } else {
+                expr
+            };
+            ("+=", self.borrowed(expr, &value_type))
+        } else if ty == RustType::String {
+            let expr = self.owned(expr, &ty);
+            // A string variable assigned alone moves; whether it needs a copy is known
+            // at the end of the body (P2R-26).
+            if matches!(expr, RExpr::Var(_)) {
+                moved = source.and_then(strings::sole_read);
+            }
+            (operator, expr)
+        } else {
+            (operator, expr)
+        };
+        let mut rendered = self.render(expression, &expr, false)?;
+        if let Some(read) = moved {
+            rendered.push_str(&self.variables.copy_mark(read, expression.span()));
+        }
         let name = &self.variables.entries[var].rust_name;
         if !declares {
             return Some(format!("{name} {operator} {rendered};"));
@@ -320,6 +362,18 @@ impl Converter<'_> {
         let found = self.site_type(node);
         let (var, declared) = self.record_write(variable);
         let entry = &self.variables.entries[var];
+        // PHP passes the function a copy, but Rust borrows a string or list (P2R-24).
+        let borrowed = entry
+            .ty
+            .as_ref()
+            .is_some_and(|ty| ty.parameter() != ty.owned());
+        if entry.parameter.is_some() && borrowed {
+            self.refuse(
+                node,
+                "a string or list parameter cannot be changed, because PHP passes a copy (P2R-24)",
+            );
+            return None;
+        }
         let checked = match declared {
             // The name problem is recorded.
             Some(false) => return None,
@@ -329,7 +383,7 @@ impl Converter<'_> {
                 found.and_then(|found| same_type(&entry.php_name, &known, found))
             }
         };
-        match checked.and_then(int_only) {
+        match checked.and_then(built_yet) {
             Ok(ty) => {
                 self.variables.entries[var].ty = Some(ty.clone());
                 Some((var, declared.is_some(), ty))
@@ -455,7 +509,11 @@ impl Converter<'_> {
     /// read, writes each `mut`, and gives a function's parameter list, with a leading `_`
     /// on an unused parameter so rustc does not warn (P2R-34, P2R-35).
     pub(super) fn finish_variables(&mut self, body: &mut [String]) -> Vec<String> {
-        let Variables { entries, flow } = std::mem::take(&mut self.variables);
+        let Variables {
+            entries,
+            flow,
+            copies,
+        } = std::mem::take(&mut self.variables);
         let facts = flow.finish(entries.len());
         for (var, span) in facts.unassigned {
             self.refuse(&span, unassigned(&entries[var].php_name));
@@ -477,9 +535,11 @@ impl Converter<'_> {
             }
         }
         for line in body.iter_mut() {
-            if let Some(var) = resolve_mark(line, &facts.reassigned)
-                && line.len() > printer::MAX_WIDTH
-                && let Some(span) = entries[var].assigned
+            let moved = resolve_copy(line, &copies, &facts.read_again);
+            let declared =
+                resolve_mark(line, &facts.reassigned).and_then(|var| entries[var].assigned);
+            if line.len() > printer::MAX_WIDTH
+                && let Some(span) = declared.or(moved)
             {
                 self.refuse(&span, "this statement is too long for one line (P2R-51)");
             }
@@ -510,6 +570,21 @@ fn resolve_mark(line: &mut String, reassigned: &[bool]) -> Option<Var> {
     let var: Var = line[start + 1..end].parse().ok()?;
     line.replace_range(start..=end, if reassigned[var] { "mut " } else { "" });
     Some(var)
+}
+
+/// Replaces the copy mark of an assignment with `.clone()` when the variable it moves is
+/// read again, or with nothing, and gives the assignment (P2R-26).
+fn resolve_copy(
+    line: &mut String,
+    copies: &[(Span, Span)],
+    read_again: &[(Var, Span)],
+) -> Option<Span> {
+    let start = line.find(COPY)?;
+    let end = start + 1 + line[start + 1..].find(COPY)?;
+    let (read, assignment) = *copies.get(line[start + 1..end].parse::<usize>().ok()?)?;
+    let again = read_again.iter().any(|&(_, span)| span == read);
+    line.replace_range(start..=end, if again { ".clone()" } else { "" });
+    Some(assignment)
 }
 
 /// A variable that a refused expression reads or writes.
@@ -619,9 +694,10 @@ fn same_type(php_name: &[u8], known: &RustType, found: RustType) -> Result<RustT
     ))
 }
 
-/// Only int variables are written so far; the other types follow in later steps (P2R-20).
-fn int_only(ty: RustType) -> Result<RustType, String> {
-    if ty == RustType::I64 {
+/// Only int and string variables are written so far; the other types follow in later
+/// steps (P2R-20).
+fn built_yet(ty: RustType) -> Result<RustType, String> {
+    if matches!(ty, RustType::I64 | RustType::String) {
         return Ok(ty);
     }
     Err(format!(

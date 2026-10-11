@@ -6,6 +6,7 @@
 //! parameter are a `&str` in Rust (P2R-24); every other string value is an owned
 //! `String`. `owned` and `borrowed` convert a value to the form a place needs.
 
+use mago_span::Span;
 use mago_syntax::cst::*;
 
 use super::Converter;
@@ -28,13 +29,11 @@ impl Converter<'_> {
         (left && right).then(|| (joined(pieces), RustType::String))
     }
 
-    /// A double-quoted string with variables in it (P2R-45).
-    pub(super) fn interpolation(
-        &mut self,
-        string: &InterpolatedString<'_>,
-    ) -> Option<(RExpr, RustType)> {
+    /// A value as one joined string: an interpolated string, or the right side of `.=`
+    /// (P2R-45).
+    pub(super) fn joined_string(&mut self, value: &Expression<'_>) -> Option<(RExpr, RustType)> {
         let mut pieces = Vec::new();
-        self.interpolated(string, &mut pieces)
+        self.concatenated(value, &mut pieces)
             .then(|| (joined(pieces), RustType::String))
     }
 
@@ -103,6 +102,7 @@ impl Converter<'_> {
         let mut converted = true;
         for part in string.parts.iter() {
             converted &= match part {
+                part if empty(part) => true,
                 StringPart::Literal(literal) => match self.part_text(literal) {
                     Some(text) => {
                         pieces.push(Piece::Text(text));
@@ -191,6 +191,37 @@ impl Converter<'_> {
 pub(super) fn calls(call: &FunctionCall<'_>, name: &[u8]) -> bool {
     matches!(call.function, Expression::Identifier(Identifier::Local(local))
         if local.value.eq_ignore_ascii_case(name))
+}
+
+/// The read of a string variable when a value is that read alone (`$s`, `"$s"`), so an
+/// assignment of it moves the variable (P2R-26).
+pub(super) fn sole_read(value: &Expression<'_>) -> Option<Span> {
+    match value {
+        Expression::Parenthesized(inner) => sole_read(inner.expression),
+        Expression::Variable(Variable::Direct(variable)) => Some(variable.span),
+        Expression::CompositeString(CompositeString::Interpolated(string)) => {
+            let mut parts = string.parts.iter().filter(|part| !empty(part));
+            match (parts.next(), parts.next()) {
+                (
+                    Some(
+                        StringPart::Expression(inner)
+                        | StringPart::BracedExpression(BracedExpressionStringPart {
+                            expression: inner,
+                            ..
+                        }),
+                    ),
+                    None,
+                ) => sole_read(inner),
+                _ => None,
+            }
+        }
+        _ => None,
+    }
+}
+
+/// Mago keeps an empty literal part next to an interpolated variable; it adds nothing.
+fn empty(part: &StringPart<'_>) -> bool {
+    matches!(part, StringPart::Literal(literal) if literal.raw.is_empty())
 }
 
 /// One string from its pieces: a literal when no value is joined, a lone string value

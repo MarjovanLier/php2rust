@@ -37,8 +37,8 @@ impl Converter<'_> {
                 self.checked_constant(unary, RExpr::Neg(Box::new(operand)))
             }
             Expression::Binary(binary) => self.binary(binary),
-            Expression::CompositeString(CompositeString::Interpolated(string)) => {
-                self.interpolation(string)
+            Expression::CompositeString(CompositeString::Interpolated(_)) => {
+                self.joined_string(expression)
             }
             Expression::Call(Call::Function(call)) if strings::calls(call, b"strlen") => {
                 self.strlen(call, expression)

@@ -1,1 +1,0 @@
-input.php:5:1: variables of type String are not built yet (P2R-20)

@@ -1,0 +1,1 @@
+input.php:6:6: echo of a list is not supported (P2R-46)

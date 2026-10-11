@@ -150,6 +150,10 @@ impl Converter<'_> {
                 }
                 Some(format!("print!({arguments});"))
             }
+            _ if matches!(ty, RustType::Vec(_)) => {
+                self.refuse(value, "echo of a list is not supported (P2R-46)");
+                None
+            }
             _ => {
                 self.refuse(value, "echo of a float or bool is not supported (P2R-46)");
                 None

@@ -152,9 +152,10 @@ requirement IDs.
   forms. These stop the conversion: by-reference `foreach`, a loop body that
   changes the list it iterates, and a key or value variable that a read
   after the loop can reach with no new assignment in between (PHP keeps the
-  last key and value after the loop). A later `foreach` that reuses the name
-  as its key or value converts, and its binding counts as a new variable
-  for P2R-34 (it may have a different Rust type).
+  last key and value after the loop). A key or value that reuses the name of
+  an earlier local variable or an earlier `foreach` binding converts, and
+  counts as a new variable for P2R-34 (it may have a different Rust type).
+  A key or value that reuses a parameter name follows P2R-24 and P2R-35.
 - **P2R-42** Conditions of `if`, `while`, `for`, and the operands of `&&`,
   `||` and `!`, MUST be `bool`. A non-bool condition (PHP truthiness) stops
   the conversion.

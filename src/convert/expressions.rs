@@ -1,0 +1,214 @@
+//! Expressions, literals and calls (P2R-43, P2R-44, P2R-48, P2R-49).
+
+use mago_span::HasSpan;
+use mago_syntax::cst::*;
+
+use super::Converter;
+use crate::printer::{self, BinOp, RExpr};
+use crate::types::RustType;
+
+impl Converter<'_> {
+    /// Converts an expression and gives its Rust type, or records why it cannot.
+    pub(super) fn expression(&mut self, expression: &Expression<'_>) -> Option<(RExpr, RustType)> {
+        match expression {
+            Expression::Parenthesized(inner) => self.expression(inner.expression),
+            Expression::Literal(Literal::Integer(integer)) => {
+                match integer.value.and_then(|v| i64::try_from(v).ok()) {
+                    Some(value) => Some((RExpr::Int(value), RustType::I64)),
+                    None => {
+                        self.refuse(integer, "an integer literal above PHP_INT_MAX is a float, and floats are not built yet (P2R-49)");
+                        None
+                    }
+                }
+            }
+            Expression::Literal(Literal::String(string)) => {
+                Some((RExpr::Str(self.string_literal(string)?), RustType::String))
+            }
+            Expression::Variable(Variable::Direct(variable)) => self.variable(variable),
+            Expression::UnaryPrefix(unary)
+                if matches!(unary.operator, UnaryPrefixOperator::Negation(_)) =>
+            {
+                let (operand, ty) = self.expression(unary.operand)?;
+                if ty != RustType::I64 {
+                    self.refuse(unary, "unary minus is built for int only so far (P2R-43)");
+                    return None;
+                }
+                self.checked_constant(unary, RExpr::Neg(Box::new(operand)))
+            }
+            Expression::Binary(binary) => self.binary(binary),
+            Expression::Call(Call::Function(call)) => match self.call(call, expression)? {
+                (call, Some(ty)) => Some((call, ty)),
+                (_, None) => {
+                    self.refuse(expression, "a void function has no value (P2R-20)");
+                    None
+                }
+            },
+            other => {
+                self.refuse(
+                    other,
+                    "this expression is not supported in version 1 (P2R-07)",
+                );
+                None
+            }
+        }
+    }
+
+    pub(super) fn binary(&mut self, binary: &Binary<'_>) -> Option<(RExpr, RustType)> {
+        let op = match binary.operator {
+            BinaryOperator::Addition(_) => BinOp::Add,
+            BinaryOperator::Subtraction(_) => BinOp::Sub,
+            BinaryOperator::Multiplication(_) => BinOp::Mul,
+            BinaryOperator::Modulo(_) => BinOp::Rem,
+            BinaryOperator::Division(_) => {
+                self.refuse(
+                    binary,
+                    "/ gives an int or a float depending on the values; use intdiv() (P2R-44)",
+                );
+                return None;
+            }
+            _ => {
+                self.refuse(
+                    binary,
+                    "this operator is not supported in version 1 (P2R-07)",
+                );
+                return None;
+            }
+        };
+        // Both sides convert first, so problems on both sides are reported.
+        let left = self.expression(binary.lhs);
+        let right = self.expression(binary.rhs);
+        let ((left, left_type), (right, right_type)) = (left?, right?);
+        if left_type != RustType::I64 || right_type != RustType::I64 {
+            self.refuse(
+                binary,
+                "arithmetic is built for int operands only so far (P2R-43)",
+            );
+            return None;
+        }
+        // rustc rejects a constant zero divisor at compile time (unconditional_panic).
+        if op == BinOp::Rem && printer::literal_value(&right) == Some(0) {
+            self.refuse(
+                binary,
+                "% by zero always fails, and rustc rejects it (P2R-50)",
+            );
+            return None;
+        }
+        self.checked_constant(binary, RExpr::Binary(Box::new(left), op, Box::new(right)))
+    }
+
+    /// An int expression made only of literals must not overflow, because rustc evaluates it
+    /// at compile time and rejects the overflow (arithmetic_overflow, P2R-50).
+    pub(super) fn checked_constant(
+        &mut self,
+        node: &impl HasSpan,
+        expr: RExpr,
+    ) -> Option<(RExpr, RustType)> {
+        if !printer::anchored(&expr) && printer::literal_value(&expr).is_none() {
+            self.refuse(
+                node,
+                "this int arithmetic overflows, and rustc rejects it (P2R-50)",
+            );
+            return None;
+        }
+        Some((expr, RustType::I64))
+    }
+
+    pub(super) fn variable(&mut self, variable: &DirectVariable<'_>) -> Option<(RExpr, RustType)> {
+        let php_name = &variable.name[1..];
+        let found = self
+            .scope
+            .iter_mut()
+            .find(|(p, _)| p.php_name == php_name)
+            .map(|(p, read)| {
+                *read = true;
+                (RExpr::Var(p.rust_name.clone()), p.ty.clone())
+            });
+        if found.is_none() {
+            self.refuse(
+                variable,
+                "variables other than parameters are not built yet (P2R-34)",
+            );
+        }
+        found
+    }
+
+    /// A call to a function declared in this file, with its return type (`None` for void).
+    pub(super) fn call(
+        &mut self,
+        call: &FunctionCall<'_>,
+        node: &Expression<'_>,
+    ) -> Option<(RExpr, Option<RustType>)> {
+        let Expression::Identifier(Identifier::Local(name)) = call.function else {
+            self.refuse(
+                node,
+                "only calls by plain function name are supported (P2R-07)",
+            );
+            return None;
+        };
+        let Some(signature) = self
+            .functions
+            .get(&name.value.to_ascii_lowercase())
+            .cloned()
+        else {
+            let text = String::from_utf8_lossy(name.value).into_owned();
+            self.refuse(node, format!("calls to {text} are not supported (P2R-48)"));
+            return None;
+        };
+        let mut arguments = Vec::new();
+        let mut converted = true;
+        for argument in call.argument_list.arguments.iter() {
+            match argument {
+                // Mago reports an argument whose type does not match the parameter (P2R-11).
+                Argument::Positional(positional) if positional.ellipsis.is_none() => {
+                    match self.expression(positional.value) {
+                        Some((expr, _)) => arguments.push(expr),
+                        None => converted = false,
+                    }
+                }
+                other => {
+                    self.refuse(
+                        other,
+                        "named and spread arguments are not supported (P2R-07)",
+                    );
+                    converted = false;
+                }
+            }
+        }
+        // PHP accepts extra arguments to a user function; Rust does not.
+        if converted && arguments.len() != signature.parameters.len() {
+            self.refuse(node, "a call must pass one argument per parameter (P2R-07)");
+            converted = false;
+        }
+        converted.then_some((
+            RExpr::Call(signature.rust_name, arguments),
+            signature.returns,
+        ))
+    }
+
+    /// The text of a PHP string literal, decoded by PHP's rules (P2R-49).
+    pub(super) fn string_literal(&mut self, string: &LiteralString<'_>) -> Option<String> {
+        if matches!(string.kind, LiteralStringKind::DoubleQuoted)
+            && printer::octal_overflow(string.raw)
+        {
+            self.refuse(
+                string,
+                "an octal escape above \\377 is not supported (P2R-49)",
+            );
+            return None;
+        }
+        let Some(bytes) = string.value else {
+            self.refuse(string, "this string escape is not supported (P2R-49)");
+            return None;
+        };
+        match std::str::from_utf8(bytes) {
+            Ok(text) => Some(text.to_owned()),
+            Err(_) => {
+                self.refuse(
+                    string,
+                    "a string that is not valid UTF-8 is not supported (P2R-49)",
+                );
+                None
+            }
+        }
+    }
+}

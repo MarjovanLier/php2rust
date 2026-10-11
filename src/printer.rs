@@ -93,6 +93,8 @@ pub enum RExpr {
     Index(Box<RExpr>, Box<RExpr>),
     /// A float literal, written by value (P2R-49).
     Float(f64),
+    /// `value as f64`: an int where a float is declared (P2R-25).
+    ToFloat(Box<RExpr>),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -259,6 +261,12 @@ fn render(expr: &RExpr, anchor: bool, min_precedence: u8) -> Result<String, TooW
         // as the same value, and always a float literal (`1.0`, `1e300`).
         RExpr::Float(value) if *value == f64::INFINITY => "f64::INFINITY".into(),
         RExpr::Float(value) => format!("{value:?}"),
+        // `x as f64 < y` parses `<` as generic arguments, so an operand gets parentheses,
+        // as with `len`. The int inside is anchored, or literals alone would be i32.
+        RExpr::ToFloat(inner) if min_precedence > 0 => {
+            format!("({} as f64)", render(inner, true, CAST)?)
+        }
+        RExpr::ToFloat(inner) => format!("{} as f64", render(inner, true, CAST)?),
     })
 }
 
@@ -309,8 +317,8 @@ pub fn anchored(expr: &RExpr) -> bool {
         RExpr::Bool(_) | RExpr::Not(_) => true,
         RExpr::List(items) => items.iter().any(anchored),
         RExpr::Index(list, _) => anchored(list),
-        // A float literal without a suffix is f64.
-        RExpr::Float(_) => true,
+        // A float literal without a suffix is f64, as is a cast to it.
+        RExpr::Float(_) | RExpr::ToFloat(_) => true,
     }
 }
 
@@ -343,7 +351,7 @@ pub fn literal_value(expr: &RExpr) -> Option<i64> {
         RExpr::Format(..) | RExpr::Ref(_) | RExpr::Method(..) | RExpr::Len(_) => None,
         RExpr::Bool(_) | RExpr::Not(_) => None,
         RExpr::List(_) | RExpr::Index(..) => None,
-        RExpr::Float(_) => None,
+        RExpr::Float(_) | RExpr::ToFloat(_) => None,
     }
 }
 
@@ -523,5 +531,23 @@ mod tests {
         assert_eq!(text(1e300), "1e300");
         assert_eq!(text(9_223_372_036_854_775_808.0), "9.223372036854776e18");
         assert_eq!(text(f64::INFINITY), "f64::INFINITY");
+    }
+
+    #[test]
+    fn casts_to_float_are_operands_in_parentheses() {
+        let cast = |inner: RExpr| RExpr::ToFloat(Box::new(inner));
+        let n = || RExpr::Var("n".into());
+        assert_eq!(expr(&cast(n()), false).unwrap(), "n as f64");
+        // `1.0 / n as f64 < x` does not parse: `<` reads as generic arguments of `f64`.
+        let e = binary(
+            binary(RExpr::Float(1.0), BinOp::Mul, cast(n())),
+            BinOp::Lt,
+            RExpr::Var("x".into()),
+        );
+        assert_eq!(expr(&e, false).unwrap(), "1.0 * (n as f64) < x");
+        let sum = cast(binary(RExpr::Int(2), BinOp::Add, RExpr::Int(3)));
+        assert_eq!(expr(&sum, false).unwrap(), "(2_i64 + 3) as f64");
+        let negated = cast(RExpr::Neg(Box::new(n())));
+        assert_eq!(expr(&negated, false).unwrap(), "-n as f64");
     }
 }

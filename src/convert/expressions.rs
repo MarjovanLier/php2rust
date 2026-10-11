@@ -206,7 +206,10 @@ impl Converter<'_> {
                 Argument::Positional(positional) if positional.ellipsis.is_none() => {
                     let parameter = signature.parameters.get(position).map(|p| &p.ty);
                     match self.value(positional.value, parameter) {
-                        Some((expr, ty)) => arguments.push(self.borrowed(expr, &ty)),
+                        Some((expr, ty)) => {
+                            let expr = numbers::widened(expr, &ty, parameter.unwrap_or(&ty));
+                            arguments.push(self.borrowed(expr, &ty));
+                        }
                         None => converted = false,
                     }
                 }

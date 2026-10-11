@@ -12,7 +12,8 @@
 //! - definite assignment (forward, intersection at joins): a read is refused unless every
 //!   path to it writes the variable first (P2R-34);
 //! - liveness (backward, union at joins): a write is refused when no path from it reads the
-//!   value before the next write or the end of the body (P2R-35);
+//!   value before the next write or the end of the body (P2R-35), and a read is read again
+//!   when some path from it reads the variable before the next write (P2R-26);
 //! - possible assignment (forward, union at joins): a variable needs `mut` when one of its
 //!   writes can run while it may already hold a value.
 //!
@@ -59,6 +60,9 @@ pub(super) struct Facts {
     pub unread: Vec<(Var, Option<Span>)>,
     /// By variable: some write can run while the variable may already hold a value.
     pub reassigned: Vec<bool>,
+    /// Reads after which some path reads the variable again before its next write, so a
+    /// copy of a string or list is needed only at these reads (P2R-26).
+    pub read_again: Vec<(Var, Span)>,
 }
 
 /// One flag per variable.
@@ -136,6 +140,7 @@ impl Flow {
             unassigned: Vec::new(),
             unread: Vec::new(),
             reassigned: vec![false; vars],
+            read_again: Vec::new(),
         };
         for (index, block) in self.blocks.iter().enumerate() {
             let (mut def, mut pos) = arriving(index, &previous, &definite, &possible, vars);
@@ -153,7 +158,12 @@ impl Flow {
             let mut set = leaving(block, &live, vars);
             for event in block.events.iter().rev() {
                 match *event {
-                    Event::Read(var, _) => set[var] = true,
+                    Event::Read(var, span) => {
+                        if set[var] {
+                            facts.read_again.push((var, span));
+                        }
+                        set[var] = true;
+                    }
                     Event::Write(var, span) => {
                         if !set[var] {
                             facts.unread.push((var, span));
@@ -246,6 +256,42 @@ mod tests {
         let facts = flow.finish(1);
         assert_eq!(facts.unread, vec![(0, None)]);
         assert_eq!(facts.reassigned, vec![true]);
+    }
+
+    /// `$b = $a; $c = $a; $a = 1; $d = $a;` for the parameter `$a`: only the first read is
+    /// read again, because a write follows the second and nothing follows the last.
+    #[test]
+    fn read_again_stops_at_the_next_write() {
+        let mut flow = Flow::default();
+        flow.write(0, None);
+        flow.read(0, at(1));
+        flow.read(0, at(2));
+        flow.write(0, Some(at(3)));
+        flow.read(0, at(4));
+        let facts = flow.finish(1);
+        assert_eq!(facts.read_again, vec![(0, at(1))]);
+    }
+
+    /// `$s = 1; while (c) { echo $s; }` built by hand: the back edge reads `$s` again.
+    #[test]
+    fn read_again_follows_back_edges() {
+        let blocks = vec![
+            Block {
+                events: vec![Event::Write(0, Some(at(1)))],
+                next: vec![1],
+            },
+            Block {
+                events: vec![],
+                next: vec![2, 3],
+            },
+            Block {
+                events: vec![Event::Read(0, at(2))],
+                next: vec![1],
+            },
+            Block::default(),
+        ];
+        let facts = Flow { blocks, current: 0 }.finish(1);
+        assert_eq!(facts.read_again, vec![(0, at(2))]);
     }
 
     /// `if (c) { $x = 1; } else { $x = 2; } echo $x; echo $y;` built by hand, as the control flow code

@@ -13,12 +13,15 @@
 //! rustc works out the value of a variable at compile time when it can, and then rejects
 //! `%` by 0 (unconditional_panic) and overflow (arithmetic_overflow) through the variable
 //! (P2R-50). So each entry keeps the latest value of its variable when it is known, and a
-//! read of it is an `RExpr::Known` that `checked_constant` and `binary` can check. The
-//! values must never be weaker than rustc's: a missed value lets through code that rustc
-//! rejects. In straight-line code the latest write in source order gives the value, and a
-//! call between does not change it. With branches and loops, a variable written
-//! once from a known value keeps that value everywhere; any other variable has a known
-//! value after a join only when every path into the join gives the same value.
+//! read of it is an `RExpr::Known` that `checked_constant` and `binary` can check. P2R-50
+//! stops every overflow and zero divisor that these values prove, also where rustc 1.99
+//! misses it: rustc never tracks a variable that `print!` borrows, and tracks a variable
+//! written twice only inside one MIR block, so its rule depends on later uses. The values
+//! must never be weaker than rustc's, because a missed value lets through code that
+//! rustc rejects. In straight-line code the latest write in source order gives the value,
+//! and a call between does not change it. With branches and loops, a variable
+//! written once from a known value keeps that value everywhere; any other variable has a
+//! known value after a join only when every path into the join gives the same value.
 
 use mago_span::{HasSpan, Span};
 use mago_syntax::cst::*;
@@ -242,8 +245,8 @@ impl Converter<'_> {
                     && printer::literal_value(&expr).is_some();
                 let combined = RExpr::Binary(Box::new(current), op, Box::new(expr.clone()));
                 let after = printer::literal_value(&combined);
-                // rustc 1.99 lets this overflow pass through a mut variable, but refusing it
-                // keeps the check from ever being weaker than rustc's.
+                // rustc 1.99 rejects this only when nothing borrows the variable (`print!`
+                // does), so it stops whenever the tool can prove it (P2R-50).
                 if known && after.is_none() {
                     self.refuse(expression, "this int arithmetic always overflows (P2R-50)");
                     return None;

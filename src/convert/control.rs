@@ -432,7 +432,7 @@ struct LoopParts<'a, 'arena> {
 
 /// The branches of an `if`. An `else if` written as two words is an else clause that
 /// holds an `if`, so its branches join this chain, as Rust writes `else if`.
-fn branches<'a, 'arena>(statement: &'a If<'arena>) -> Vec<Branch<'a, 'arena>> {
+pub(super) fn branches<'a, 'arena>(statement: &'a If<'arena>) -> Vec<Branch<'a, 'arena>> {
     let mut branches: Vec<Branch<'a, 'arena>> = Vec::new();
     match &statement.body {
         IfBody::Statement(body) => {

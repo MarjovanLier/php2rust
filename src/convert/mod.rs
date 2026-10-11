@@ -35,6 +35,7 @@ mod foreach;
 mod functions;
 mod lists;
 mod numbers;
+mod recursion;
 mod statements;
 mod strings;
 mod variables;

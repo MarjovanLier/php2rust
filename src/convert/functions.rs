@@ -7,7 +7,7 @@ use mago_codex::ttype::union::TUnion;
 use mago_span::HasSpan;
 use mago_syntax::cst::*;
 
-use super::{Context, Converter, ParameterSignature, Signature, Variables, lists};
+use super::{Context, Converter, ParameterSignature, Signature, Variables, lists, recursion};
 use crate::names;
 use crate::types::{self, RustType};
 
@@ -233,6 +233,13 @@ impl Converter<'_> {
             self.refuse(
                 &function.name,
                 "a function with a return type must return on every path (P2R-50)",
+            );
+        }
+        let statements: Vec<&Statement<'_>> = function.body.statements.iter().collect();
+        if recursion::always_recurses(&statements, function.name.value) {
+            self.refuse(
+                &function.name,
+                "this function calls itself on every path, and rustc rejects it (P2R-50)",
             );
         }
         let parameters = self.finish_variables(&mut body);

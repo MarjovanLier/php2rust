@@ -1,0 +1,5 @@
+input.php:5:10: this function calls itself on every path, and rustc rejects it (P2R-50)
+input.php:11:10: this function calls itself on every path, and rustc rejects it (P2R-50)
+input.php:23:10: this function calls itself on every path, and rustc rejects it (P2R-50)
+input.php:30:10: this function calls itself on every path, and rustc rejects it (P2R-50)
+input.php:37:10: this function calls itself on every path, and rustc rejects it (P2R-50)

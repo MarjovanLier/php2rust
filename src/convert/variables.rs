@@ -666,17 +666,7 @@ impl Converter<'_> {
         let empty = self.empty_list(node);
         let found = self.site_type(node);
         let (var, declared) = self.record_write(variable);
-        let entry = &self.variables.entries[var];
-        // PHP passes the function a copy, but Rust borrows a string or list (P2R-24).
-        let borrowed = entry
-            .ty
-            .as_ref()
-            .is_some_and(|ty| ty.parameter() != ty.owned());
-        if entry.parameter.is_some() && borrowed {
-            self.refuse(
-                node,
-                "a string or list parameter cannot be changed, because PHP passes a copy (P2R-24)",
-            );
+        if self.refuse_borrowed_parameter(var, node) {
             return None;
         }
         let checked = match declared {
@@ -707,6 +697,24 @@ impl Converter<'_> {
                 None
             }
         }
+    }
+
+    /// Refuses a change of `var` at `node` when it is a string or list parameter: PHP passes
+    /// the function a copy, but Rust borrows it (P2R-24).
+    fn refuse_borrowed_parameter(&mut self, var: Var, node: &impl HasSpan) -> bool {
+        let entry = &self.variables.entries[var];
+        let borrowed = entry.parameter.is_some()
+            && entry
+                .ty
+                .as_ref()
+                .is_some_and(|ty| ty.parameter() != ty.owned());
+        if borrowed {
+            self.refuse(
+                node,
+                "a string or list parameter cannot be changed, because PHP passes a copy (P2R-24)",
+            );
+        }
+        borrowed
     }
 
     /// Records a write of `variable`, and declares the variable at its first write. The
@@ -776,6 +784,17 @@ impl Converter<'_> {
     /// of the loop body (P2R-34, P2R-41). `ty` is `None` when a problem with the list is
     /// recorded.
     pub(super) fn bind(&mut self, variable: &DirectVariable<'_>, ty: Option<RustType>) -> Var {
+        // A key or value named like a parameter assigns the parameter in PHP: a string or
+        // list parameter cannot change (P2R-24), and the parameter's value must be read
+        // first, which the end of the body checks from its first assignment (P2R-35).
+        if let Some(parameter) = self.lookup(variable)
+            && self.variables.entries[parameter].parameter.is_some()
+            && !self.refuse_borrowed_parameter(parameter, variable)
+        {
+            self.variables.entries[parameter]
+                .assigned
+                .get_or_insert(variable.span);
+        }
         let (var, named) = self.declare(variable);
         let ty = match ty.map(built_yet) {
             Some(Ok(ty)) => Some(ty),

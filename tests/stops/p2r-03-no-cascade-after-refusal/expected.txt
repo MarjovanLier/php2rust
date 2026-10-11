@@ -1,0 +1,1 @@
+input.php:6:6: / gives an int or a float depending on the values; use intdiv() (P2R-44)

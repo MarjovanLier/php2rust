@@ -81,6 +81,7 @@ impl Converter<'_> {
         body: &mut Vec<String>,
     ) {
         let Expression::Call(Call::Function(call)) = statement.expression else {
+            self.record_refused(statement.expression);
             self.refuse(
                 statement,
                 "this expression statement is not supported (P2R-43)",

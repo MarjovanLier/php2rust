@@ -50,6 +50,7 @@ impl Converter<'_> {
                 None
             }
             other => {
+                self.record_refused(other);
                 self.refuse(
                     other,
                     "this expression is not supported in version 1 (P2R-07)",
@@ -66,6 +67,8 @@ impl Converter<'_> {
             BinaryOperator::Multiplication(_) => BinOp::Mul,
             BinaryOperator::Modulo(_) => BinOp::Rem,
             BinaryOperator::Division(_) => {
+                self.record_refused(binary.lhs);
+                self.record_refused(binary.rhs);
                 self.refuse(
                     binary,
                     "/ gives an int or a float depending on the values; use intdiv() (P2R-44)",
@@ -73,6 +76,8 @@ impl Converter<'_> {
                 return None;
             }
             _ => {
+                self.record_refused(binary.lhs);
+                self.record_refused(binary.rhs);
                 self.refuse(
                     binary,
                     "this operator is not supported in version 1 (P2R-07)",
@@ -137,6 +142,7 @@ impl Converter<'_> {
         node: &Expression<'_>,
     ) -> Option<(RExpr, Option<RustType>)> {
         let Expression::Identifier(Identifier::Local(name)) = call.function else {
+            self.record_refused(node);
             self.refuse(
                 node,
                 "only calls by plain function name are supported (P2R-07)",
@@ -149,6 +155,7 @@ impl Converter<'_> {
             .cloned()
         else {
             let text = String::from_utf8_lossy(name.value).into_owned();
+            self.record_refused(node);
             self.refuse(node, format!("calls to {text} are not supported (P2R-48)"));
             return None;
         };
@@ -164,6 +171,11 @@ impl Converter<'_> {
                     }
                 }
                 other => {
+                    let value = match other {
+                        Argument::Positional(positional) => positional.value,
+                        Argument::Named(named) => named.value,
+                    };
+                    self.record_refused(value);
                     self.refuse(
                         other,
                         "named and spread arguments are not supported (P2R-07)",

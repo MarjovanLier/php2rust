@@ -25,6 +25,7 @@
 
 use mago_span::{HasSpan, Span};
 use mago_syntax::cst::*;
+use mago_syntax::walker::Walker;
 
 use super::flow::{Flow, Var};
 use super::{Converter, ParameterSignature};
@@ -194,7 +195,7 @@ impl Converter<'_> {
             if let Some(value) = value {
                 self.expression(value);
             }
-            self.record_targets(target);
+            self.record_refused_target(target);
             self.refuse(
                 expression,
                 "only a plain variable can be assigned to in version 1 (P2R-07)",
@@ -332,23 +333,35 @@ impl Converter<'_> {
         (var, declared)
     }
 
-    /// Records the writes of a target that does not convert, such as `[$a, $b]`.
-    fn record_targets(&mut self, target: &Expression<'_>) {
-        let elements = match target {
-            Expression::Variable(Variable::Direct(variable)) => {
-                self.record_write(variable);
-                return;
-            }
-            Expression::Array(array) => &array.elements,
-            Expression::LegacyArray(array) => &array.elements,
-            Expression::List(list) => &list.elements,
-            _ => return,
-        };
-        for element in elements.iter() {
-            match element {
-                ArrayElement::KeyValue(element) => self.record_targets(element.value),
-                ArrayElement::Value(element) => self.record_targets(element.value),
-                _ => {}
+    /// Records the reads and writes inside an expression that is refused before it
+    /// converts, so no false P2R-34 or P2R-35 line follows the refusal (P2R-03). Call it
+    /// only on a part that was not converted: a write recorded twice makes the first one
+    /// look unread.
+    pub(super) fn record_refused(&mut self, expression: &Expression<'_>) {
+        let mut accesses = Vec::new();
+        Accesses.walk_expression(expression, &mut accesses);
+        self.record_accesses(accesses);
+    }
+
+    /// The same for the target of a refused assignment, such as `[$a, $b]` or `$a[]`.
+    fn record_refused_target(&mut self, target: &Expression<'_>) {
+        let mut accesses = Vec::new();
+        Accesses.target(target, &mut accesses);
+        self.record_accesses(accesses);
+    }
+
+    fn record_accesses(&mut self, accesses: Vec<Access<'_, '_>>) {
+        for access in accesses {
+            match access {
+                // A read of a variable with no write yet is not reported: the refusal is.
+                Access::Read(variable) => {
+                    if let Some(var) = self.lookup(variable) {
+                        self.variables.flow.read(var, variable.span);
+                    }
+                }
+                Access::Write(variable) => {
+                    self.record_write(variable);
+                }
             }
         }
     }
@@ -467,6 +480,82 @@ fn resolve_mark(line: &mut String, reassigned: &[bool]) -> Option<Var> {
     let var: Var = line[start + 1..end].parse().ok()?;
     line.replace_range(start..=end, if reassigned[var] { "mut " } else { "" });
     Some(var)
+}
+
+/// A variable that a refused expression reads or writes.
+enum Access<'ast, 'arena> {
+    Read(&'ast DirectVariable<'arena>),
+    Write(&'ast DirectVariable<'arena>),
+}
+
+/// Collects the variables of a refused expression in PHP's order of evaluation: every
+/// variable is a read, except the target of an assignment, which is written after its
+/// value.
+struct Accesses;
+
+impl<'ast, 'arena> Walker<'ast, 'arena, Vec<Access<'ast, 'arena>>> for Accesses {
+    fn walk_in_direct_variable(
+        &self,
+        variable: &'ast DirectVariable<'arena>,
+        accesses: &mut Vec<Access<'ast, 'arena>>,
+    ) {
+        accesses.push(Access::Read(variable));
+    }
+
+    fn walk_assignment(
+        &self,
+        assignment: &'ast Assignment<'arena>,
+        accesses: &mut Vec<Access<'ast, 'arena>>,
+    ) {
+        self.walk_expression(assignment.rhs, accesses);
+        // Every operator but `=` reads the target before it writes it.
+        if !matches!(assignment.operator, AssignmentOperator::Assign(_)) {
+            self.walk_expression(assignment.lhs, accesses);
+        }
+        self.target(assignment.lhs, accesses);
+    }
+}
+
+impl Accesses {
+    fn target<'ast, 'arena>(
+        &self,
+        target: &'ast Expression<'arena>,
+        accesses: &mut Vec<Access<'ast, 'arena>>,
+    ) {
+        let elements = match target {
+            Expression::Variable(Variable::Direct(variable)) => {
+                accesses.push(Access::Write(variable));
+                return;
+            }
+            // `$a[] = x` and `$a[$i] = x` change the list in `$a`: they read it, then write it.
+            Expression::ArrayAppend(append) => {
+                self.walk_expression(append.array, accesses);
+                self.target(append.array, accesses);
+                return;
+            }
+            Expression::ArrayAccess(access) => {
+                self.walk_expression(access.index, accesses);
+                self.walk_expression(access.array, accesses);
+                self.target(access.array, accesses);
+                return;
+            }
+            Expression::Array(array) => &array.elements,
+            Expression::LegacyArray(array) => &array.elements,
+            Expression::List(list) => &list.elements,
+            // Any other target, such as a property, only reads its variables.
+            other => {
+                self.walk_expression(other, accesses);
+                return;
+            }
+        };
+        for element in elements.iter() {
+            match element {
+                ArrayElement::KeyValue(element) => self.target(element.value, accesses),
+                ArrayElement::Value(element) => self.target(element.value, accesses),
+                _ => {}
+            }
+        }
+    }
 }
 
 /// The operation of a compound assignment, `++` or `--`; `None` for `=`.

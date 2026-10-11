@@ -16,10 +16,11 @@ impl Converter<'_> {
             Expression::Literal(Literal::Integer(integer)) => {
                 match integer.value.and_then(|v| i64::try_from(v).ok()) {
                     Some(value) => Some((RExpr::Int(value), RustType::I64)),
-                    None => {
-                        self.refuse(integer, "an integer literal above PHP_INT_MAX is a float, and floats are not built yet (P2R-49)");
-                        None
-                    }
+                    // PHP reads an integer literal above PHP_INT_MAX as a float (P2R-49).
+                    None => Some((
+                        RExpr::Float(numbers::integer_as_float(integer.raw)),
+                        RustType::F64,
+                    )),
                 }
             }
             Expression::Literal(Literal::String(string)) => {

@@ -91,6 +91,35 @@ pub(super) fn widened(expr: RExpr, ty: &RustType, declared: &RustType) -> RExpr 
     }
 }
 
+/// The float PHP reads from an integer literal above PHP_INT_MAX (P2R-49). Decimal text
+/// parses as a float literal; hexadecimal, octal and binary digits add up in a float one
+/// at a time, as in PHP's zend_hex_strtod, zend_oct_strtod and zend_bin_strtod.
+pub(super) fn integer_as_float(raw: &[u8]) -> f64 {
+    let text: String = raw
+        .iter()
+        .filter(|&&byte| byte != b'_')
+        .map(|&byte| char::from(byte))
+        .collect();
+    let (radix, digits) = match text.as_bytes() {
+        [b'0', b'x' | b'X', ..] => (16, &text[2..]),
+        [b'0', b'o' | b'O', ..] => (8, &text[2..]),
+        [b'0', b'b' | b'B', ..] => (2, &text[2..]),
+        [b'0', ..] => (8, &text[1..]),
+        // Rust parses a decimal that overflows as infinity, as PHP does.
+        _ => return text.parse().unwrap_or_default(),
+    };
+    digits.bytes().fold(0.0, |value, byte| {
+        let scaled = value * f64::from(radix);
+        if radix == 16 {
+            scaled + f64::from(char::from(byte).to_digit(16).unwrap_or_default())
+        } else {
+            // PHP's octal and binary add the digit's ASCII code, then take away that of
+            // `0`. Above 2^53 that rounds twice, and the value must match PHP's.
+            scaled + f64::from(byte) - f64::from(b'0')
+        }
+    })
+}
+
 /// The value of an int literal, with any unary minus in front of it.
 fn int_literal(expr: &RExpr) -> Option<i64> {
     match expr {
@@ -115,5 +144,27 @@ pub(super) fn arithmetic_refusal(
             Some("arithmetic that mixes int and float is not supported (P2R-44)")
         }
         _ => Some("arithmetic needs two int or two float operands (P2R-43)"),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The values PHP 8.5 gives these literals in var_dump. Adding the digit instead of
+    /// its ASCII code gives 2^65 for the 65 binary ones.
+    #[test]
+    fn integers_above_the_maximum_read_as_php_reads_them() {
+        let max_plus_one = 9_223_372_036_854_775_808.0;
+        assert_eq!(integer_as_float(b"9223372036854775808"), max_plus_one);
+        assert_eq!(integer_as_float(b"9_223_372_036_854_775_808"), max_plus_one);
+        assert_eq!(integer_as_float(b"0x8000000000000000"), max_plus_one);
+        let wide = 4.722_366_482_869_645e21;
+        assert_eq!(integer_as_float(b"0xFFFFFFFFFFFFFFFFFF"), wide);
+        assert_eq!(integer_as_float(b"0777777777777777777777777"), wide);
+        assert_eq!(integer_as_float(b"0o777777777777777777777777"), wide);
+        let ones = [b"0b".as_slice(), &[b'1'; 65]].concat();
+        assert_eq!(integer_as_float(&ones), 3.689_348_814_741_91e19);
+        assert_eq!(integer_as_float(&[b'1'; 400]), f64::INFINITY);
     }
 }

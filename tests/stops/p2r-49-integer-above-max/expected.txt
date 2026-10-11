@@ -1,1 +1,0 @@
-input.php:5:6: an integer literal above PHP_INT_MAX is a float, and floats are not built yet (P2R-49)

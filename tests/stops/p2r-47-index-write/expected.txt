@@ -1,0 +1,1 @@
+input.php:6:1: writing to a list index is not supported in version 1 (P2R-47)

@@ -82,10 +82,15 @@ pub enum RExpr {
     Ref(Box<RExpr>),
     /// `value.method()`, for the copies PHP makes (P2R-26).
     Method(Box<RExpr>, &'static str),
-    /// The byte length of a string as `i64` (P2R-48).
+    /// The byte length of a string, or the length of a list (`count()`), as `i64`
+    /// (P2R-48).
     Len(Box<RExpr>),
     Bool(bool),
     Not(Box<RExpr>),
+    /// A list literal: `vec![a, b]`, or `Vec::new()` when empty (P2R-47).
+    List(Vec<RExpr>),
+    /// A list read by index (P2R-47).
+    Index(Box<RExpr>, Box<RExpr>),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -124,7 +129,8 @@ impl BinOp {
 
     /// Rust precedence, which matches PHP for these operators: `*` and `%` bind tighter
     /// than `+` and `-`, then the comparisons, then `&&`, then `||`. Above them come `as`
-    /// at 6, unary operators at 7 and method calls and indexing at 8.
+    /// at [`CAST`], unary operators at [`UNARY`] and method calls and indexing at
+    /// [`POSTFIX`].
     fn precedence(self) -> u8 {
         match self {
             Self::Mul | Self::Rem => 5,
@@ -145,8 +151,13 @@ impl BinOp {
 #[derive(Debug)]
 pub struct TooWide;
 
+/// `as` binds tighter than every binary operator, so `(i + 1) as usize` needs its
+/// parentheses and `n * a.len() as i64` needs none.
+const CAST: u8 = 6;
 /// Unary minus and `!` bind tighter than every binary operator and `as`.
 const UNARY: u8 = 7;
+/// A method call or an index binds tighter than everything else.
+const POSTFIX: u8 = 8;
 
 /// Lays out `expr` on one line with only the parentheses Rust needs (P2R-43). With
 /// `anchor`, an expression made only of literals gets `_i64` on its first literal, so Rust
@@ -184,9 +195,14 @@ fn render(expr: &RExpr, anchor: bool, min_precedence: u8) -> Result<String, TooW
         RExpr::Binary(left, op, right) if op.compares() => {
             let precedence = op.precedence();
             let anchor = !anchored(left) && !anchored(right);
+            let mut left = render(left, anchor, precedence + 1)?;
+            // rustc reads `as i64 <` as the start of generic arguments, so a left operand
+            // that ends in a cast gets parentheses.
+            if *op == BinOp::Lt && left.ends_with(" as i64") {
+                left = format!("({left})");
+            }
             let text = format!(
-                "{} {} {}",
-                render(left, anchor, precedence + 1)?,
+                "{left} {} {}",
                 op.text(),
                 render(right, false, precedence + 1)?
             );
@@ -209,16 +225,43 @@ fn render(expr: &RExpr, anchor: bool, min_precedence: u8) -> Result<String, TooW
         }
         RExpr::Known(name, _) => name.clone(),
         RExpr::Format(text, values) => format!("format!({})", format_arguments(text, values)?),
-        RExpr::Ref(inner) => format!("&{}", render(inner, false, 0)?),
-        RExpr::Method(inner, method) => format!("{}.{method}()", render(inner, false, 0)?),
-        // `-x as i64` and `x as i64 < y` do not parse as meant, so an operand gets
-        // parentheses.
-        RExpr::Len(inner) if min_precedence > 0 => {
-            format!("({}.len() as i64)", render(inner, false, 0)?)
+        RExpr::Ref(inner) => format!("&{}", render(inner, false, UNARY)?),
+        RExpr::Method(inner, method) => {
+            format!("{}.{method}()", render(inner, false, POSTFIX)?)
         }
-        RExpr::Len(inner) => format!("{}.len() as i64", render(inner, false, 0)?),
+        RExpr::Len(inner) => {
+            let text = format!("{}.len() as i64", render(inner, false, POSTFIX)?);
+            if CAST < min_precedence {
+                format!("({text})")
+            } else {
+                text
+            }
+        }
         RExpr::Bool(value) => value.to_string(),
         RExpr::Not(inner) => format!("!{}", render(inner, false, UNARY)?),
+        RExpr::List(items) if items.is_empty() => "Vec::new()".to_owned(),
+        RExpr::List(items) => {
+            let first = anchor && !anchored(expr);
+            let parts = items
+                .iter()
+                .enumerate()
+                .map(|(i, item)| render(item, first && i == 0, 0))
+                .collect::<Result<Vec<_>, _>>()?;
+            let joined = parts.join(", ");
+            // rustfmt's `array_width` is 60 as well: wider elements go one per line.
+            if joined.len() > ARGS_WIDTH {
+                return Err(TooWide);
+            }
+            format!("vec![{joined}]")
+        }
+        RExpr::Index(list, index) => {
+            let list = render(list, anchor, POSTFIX)?;
+            match **index {
+                // Rust reads a literal index as `usize` without a conversion.
+                RExpr::Int(value) if value >= 0 => format!("{list}[{value}]"),
+                _ => format!("{list}[{} as usize]", render(index, true, CAST)?),
+            }
+        }
     })
 }
 
@@ -252,6 +295,8 @@ pub fn anchored(expr: &RExpr) -> bool {
         RExpr::Known(..) => true,
         RExpr::Format(..) | RExpr::Ref(_) | RExpr::Method(..) | RExpr::Len(_) => true,
         RExpr::Bool(_) | RExpr::Not(_) => true,
+        RExpr::List(items) => items.iter().any(anchored),
+        RExpr::Index(list, _) => anchored(list),
     }
 }
 
@@ -283,6 +328,7 @@ pub fn literal_value(expr: &RExpr) -> Option<i64> {
         RExpr::Known(_, value) => Some(*value),
         RExpr::Format(..) | RExpr::Ref(_) | RExpr::Method(..) | RExpr::Len(_) => None,
         RExpr::Bool(_) | RExpr::Not(_) => None,
+        RExpr::List(_) | RExpr::Index(..) => None,
     }
 }
 
@@ -400,6 +446,38 @@ mod tests {
             RExpr::Var("c".into()),
         );
         assert_eq!(expr(&e, false).unwrap(), "(false || true) && c");
+    }
+
+    #[test]
+    fn a_cast_gets_parentheses_only_where_rust_needs_them() {
+        let len = || RExpr::Len(Box::new(RExpr::Var("a".into())));
+        let n = || RExpr::Var("n".into());
+        assert_eq!(
+            expr(&binary(n(), BinOp::Mul, len()), false).unwrap(),
+            "n * a.len() as i64"
+        );
+        assert_eq!(
+            expr(&RExpr::Neg(Box::new(len())), false).unwrap(),
+            "-(a.len() as i64)"
+        );
+        // `as i64 <` would start generic arguments; `<=` and a cast on the right do not.
+        assert_eq!(
+            expr(&binary(len(), BinOp::Lt, RExpr::Int(3)), false).unwrap(),
+            "(a.len() as i64) < 3"
+        );
+        let product = binary(n(), BinOp::Mul, len());
+        assert_eq!(
+            expr(&binary(product, BinOp::Lt, RExpr::Int(3)), false).unwrap(),
+            "(n * a.len() as i64) < 3"
+        );
+        assert_eq!(
+            expr(&binary(len(), BinOp::Le, RExpr::Int(3)), false).unwrap(),
+            "a.len() as i64 <= 3"
+        );
+        assert_eq!(
+            expr(&binary(RExpr::Int(3), BinOp::Lt, len()), false).unwrap(),
+            "3 < a.len() as i64"
+        );
     }
 
     #[test]

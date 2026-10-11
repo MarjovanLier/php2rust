@@ -32,6 +32,7 @@ mod control;
 mod expressions;
 mod flow;
 mod functions;
+mod lists;
 mod statements;
 mod strings;
 mod variables;

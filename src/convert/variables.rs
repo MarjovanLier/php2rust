@@ -40,7 +40,7 @@ use mago_syntax::walker::Walker;
 
 use super::control::Loop;
 use super::flow::{Flow, Var};
-use super::{Converter, ParameterSignature, strings};
+use super::{Converter, ParameterSignature, lists, strings};
 use crate::printer::{self, BinOp, RExpr};
 use crate::types::{self, RustType};
 
@@ -365,6 +365,11 @@ impl Converter<'_> {
                 return None;
             }
         };
+        if let (Expression::ArrayAppend(append), Some("="), Some(value)) = (target, operator, value)
+            && let Expression::Variable(Variable::Direct(list)) = append.array
+        {
+            return self.append(expression, list, value);
+        }
         let Expression::Variable(Variable::Direct(variable)) = target else {
             // The value's reads and the target's writes still count, so no false P2R-34 or
             // P2R-35 line follows. The refusal covers the whole assignment, so it is the one
@@ -373,10 +378,15 @@ impl Converter<'_> {
                 self.expression(value);
             }
             self.record_refused_target(target);
-            self.refuse(
-                expression,
-                "only a plain variable can be assigned to in version 1 (P2R-07)",
-            );
+            let message = if matches!(
+                target,
+                Expression::ArrayAccess(_) | Expression::ArrayAppend(_)
+            ) {
+                "writing to a list index is not supported in version 1 (P2R-47)"
+            } else {
+                "only a plain variable can be assigned to in version 1 (P2R-07)"
+            };
+            self.refuse(expression, message);
             return None;
         };
         // PHP evaluates the value first. Every operator but `=` then reads the variable
@@ -488,6 +498,35 @@ impl Converter<'_> {
             value: rendered,
         });
         Some(format!("{MARK}{}", self.variables.pending.len() - 1))
+    }
+
+    /// `$a[] = x`, a change of the list in `$a`: PHP evaluates the value, then reads the list
+    /// and writes it back (P2R-47).
+    fn append(
+        &mut self,
+        expression: &Expression<'_>,
+        list: &DirectVariable<'_>,
+        value: &Expression<'_>,
+    ) -> Option<String> {
+        let value = self.expression(value);
+        let current = self.variable(list);
+        let (Some((value, _)), Some((_, current_type))) = (value, current) else {
+            // The write still counts, so later reads see it.
+            self.record_write(list);
+            return None;
+        };
+        if !matches!(current_type, RustType::Vec(_)) {
+            self.record_write(list);
+            self.refuse(expression, "only a list can be appended to (P2R-47)");
+            return None;
+        }
+        // Mago types the `$a` of `$a[]` as the list after the append, so a value of another
+        // type shows as a type change.
+        let (var, _, _) = self.write(list, list)?;
+        let name = &self.variables.entries[var].rust_name;
+        // rustfmt lays out the arguments of a method call as those of a call (P2R-51).
+        let push = RExpr::Call(format!("{name}.push"), vec![value]);
+        Some(format!("{};", self.render(expression, &push, false)?))
     }
 
     /// Records a write of `variable` by `node` and checks the type Mago gives the write.
@@ -630,7 +669,7 @@ impl Converter<'_> {
     }
 
     /// The Rust type of the value Mago found at `node` (P2R-21, P2R-22).
-    fn site_type(&self, node: &impl HasSpan) -> Result<RustType, String> {
+    pub(super) fn site_type(&self, node: &impl HasSpan) -> Result<RustType, String> {
         let union = self
             .artifacts
             .get_expression_type(node)
@@ -960,10 +999,10 @@ fn same_type(php_name: &[u8], known: &RustType, found: RustType) -> Result<RustT
     ))
 }
 
-/// Only int, bool and string variables are written so far; the other types follow in
-/// later steps (P2R-20).
+/// Only int, bool, string and list variables are written so far; the other types follow
+/// in later steps (P2R-20).
 fn built_yet(ty: RustType) -> Result<RustType, String> {
-    if matches!(ty, RustType::I64 | RustType::Bool | RustType::String) {
+    if matches!(ty, RustType::I64 | RustType::Bool | RustType::String) || lists::list_built(&ty) {
         return Ok(ty);
     }
     Err(format!(

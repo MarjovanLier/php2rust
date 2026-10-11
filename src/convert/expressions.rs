@@ -43,6 +43,9 @@ impl Converter<'_> {
             Expression::Call(Call::Function(call)) if strings::calls(call, b"strlen") => {
                 self.strlen(call, expression)
             }
+            Expression::Call(Call::Function(call)) if strings::calls(call, b"count") => {
+                self.count(call, expression)
+            }
             Expression::Call(Call::Function(call)) => match self.call(call, expression)? {
                 (call, Some(ty)) => Some((call, ty)),
                 (_, None) => {
@@ -62,6 +65,8 @@ impl Converter<'_> {
                 self.refuse(null, "the type null has no Rust type (P2R-22)");
                 None
             }
+            Expression::Array(array) => self.list(array),
+            Expression::ArrayAccess(access) => self.index(access),
             other => {
                 self.record_refused(other);
                 self.refuse(

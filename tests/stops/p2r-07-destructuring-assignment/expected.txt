@@ -1,0 +1,1 @@
+input.php:7:1: only a plain variable can be assigned to in version 1 (P2R-07)

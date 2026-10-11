@@ -185,8 +185,15 @@ impl Converter<'_> {
             }
         };
         let Expression::Variable(Variable::Direct(variable)) = target else {
+            // The value's reads and the target's writes still count, so no false P2R-34 or
+            // P2R-35 line follows. The refusal covers the whole assignment, so it is the one
+            // line printed for it (P2R-03).
+            if let Some(value) = value {
+                self.expression(value);
+            }
+            self.record_targets(target);
             self.refuse(
-                target,
+                expression,
                 "only a plain variable can be assigned to in version 1 (P2R-07)",
             );
             return None;
@@ -320,6 +327,27 @@ impl Converter<'_> {
         // A write whose value is not worked out leaves the value unknown.
         entry.value = None;
         (var, declared)
+    }
+
+    /// Records the writes of a target that does not convert, such as `[$a, $b]`.
+    fn record_targets(&mut self, target: &Expression<'_>) {
+        let elements = match target {
+            Expression::Variable(Variable::Direct(variable)) => {
+                self.record_write(variable);
+                return;
+            }
+            Expression::Array(array) => &array.elements,
+            Expression::LegacyArray(array) => &array.elements,
+            Expression::List(list) => &list.elements,
+            _ => return,
+        };
+        for element in elements.iter() {
+            match element {
+                ArrayElement::KeyValue(element) => self.record_targets(element.value),
+                ArrayElement::Value(element) => self.record_targets(element.value),
+                _ => {}
+            }
+        }
     }
 
     /// Adds a variable at its first write. The flag is `false` when the name has no Rust

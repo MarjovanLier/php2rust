@@ -115,7 +115,10 @@ requirement IDs.
   `get_http_response`). A name that is a Rust 2024 strict or reserved
   keyword (`gen` included) MUST become a raw identifier (`r#type`). A name
   whose Rust form is `self`, `Self`, `super`, `crate`, `_` or empty MUST stop
-  the conversion.
+  the conversion. A name whose Rust form is not an ASCII identifier (a
+  letter or `_` first, then only ASCII letters, digits and `_`) MUST stop the
+  conversion (`$_2` gives `2`; non-ASCII names trip rustc's confusable-name
+  lints).
 - **P2R-31** These MUST stop the conversion: two PHP functions in the file,
   or two PHP names in one function, that give the same Rust name
   (`getTotal()` and `get_total()`); a variable whose Rust name equals the
@@ -149,10 +152,11 @@ requirement IDs.
   `return`, `break` or `continue`, after an `if`/`else` whose every branch
   leaves, or after a `loop` with no `break`).
 - **P2R-41** `foreach` over a list MUST support value-only and `key => value`
-  forms. These stop the conversion: by-reference `foreach`, a loop body that
-  changes the list it iterates, and a key or value variable that a read
-  after the loop can reach with no new assignment in between (PHP keeps the
-  last key and value after the loop). A key or value that reuses the name of
+  forms. These stop the conversion: by-reference `foreach`, a key and a
+  value with the same name, a loop body that changes the list it iterates,
+  and a key or value variable that a read after the loop can reach with no
+  new assignment in between (PHP keeps the last key and value after the
+  loop). A key or value that reuses the name of
   an earlier local variable or an earlier `foreach` binding converts, and
   counts as a new variable for P2R-34 (it may have a different Rust type).
   A key or value that reuses a parameter name follows P2R-24 and P2R-35.
@@ -222,8 +226,10 @@ requirement IDs.
   stop instead. Int arithmetic that the tool can prove overflows, and `%` by
   a divisor it can prove is 0, MUST stop the conversion: rustc rejects many
   such cases at compile time, and whether it does depends on how the value
-  is used later. The output MUST NOT contain `allow` or `expect` attributes.
-  Clippy is not required on the output.
+  is used later. A function that calls itself on every path MUST stop the
+  conversion (rustc rejects it as unconditional recursion). The output MUST
+  NOT contain `allow` or `expect` attributes. Clippy is not required on the
+  output.
 - **P2R-51** The output MUST be unchanged by `rustfmt --edition 2024 --check`
   from the pinned toolchain. The tool MUST NOT run rustfmt or any other
   external program. Version 1 writes every simple statement (an expression

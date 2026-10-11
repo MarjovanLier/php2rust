@@ -45,6 +45,10 @@ impl Converter<'_> {
                 }
             },
             other if changes_variable(other) => self.change_as_value(other),
+            Expression::Literal(Literal::Null(null)) => {
+                self.refuse(null, "the type null has no Rust type (P2R-22)");
+                None
+            }
             other => {
                 self.refuse(
                     other,

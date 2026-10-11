@@ -1,0 +1,3 @@
+input.php:11:13: a statement after break never runs, and rustc rejects it (P2R-40)
+input.php:14:9: a statement after continue never runs, and rustc rejects it (P2R-40)
+input.php:19:5: a statement after a loop with no break never runs, and rustc rejects it (P2R-40)

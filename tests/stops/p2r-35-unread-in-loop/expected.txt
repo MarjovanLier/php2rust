@@ -1,0 +1,2 @@
+input.php:13:5: the value assigned to $seen is never read (P2R-35)
+input.php:15:9: the value assigned to $seen is never read (P2R-35)

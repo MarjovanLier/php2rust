@@ -1,0 +1,1 @@
+input.php:7:5: a for with more than one condition is not supported (P2R-07)

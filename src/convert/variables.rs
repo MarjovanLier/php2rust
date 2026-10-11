@@ -9,8 +9,9 @@
 //! it: `reassigned` counts back edges, so an inline `let` in the loop body would get
 //! rustc's unused_mut (see flow.rs). Where the `let` goes and whether it needs `mut` are
 //! known only at the end of the body, so those lines carry a mark until
-//! [`Converter::finish_variables`] replaces it. So is the type of a variable whose first
-//! write is `[]`: a later read or write gives it (P2R-21).
+//! [`Converter::finish_variables`] replaces it. The type of a variable whose first write
+//! is `[]` comes from the other reads and writes of the body, which `list_types` scans
+//! before it converts; when they disagree, a later read or write gives it (P2R-21).
 //!
 //! A `foreach` key or value is a new entry, declared by the `for` pattern and never by a
 //! `let`, so a later loop can reuse its PHP name with another type (P2R-41). `lookup`
@@ -37,6 +38,8 @@
 //!   Paths that end in `return`, `break` or `continue` do not count.
 //! - After a loop, the value is the meet of the value at the loop head and at every
 //!   `break`.
+
+use std::collections::HashMap;
 
 use heck::ToSnakeCase;
 use mago_span::{HasSpan, Span};
@@ -149,6 +152,9 @@ pub(super) struct Variables {
     iterated: Vec<Var>,
     /// By foreach key or value: the flow block after its loop (P2R-41).
     exits: Vec<(usize, Var)>,
+    /// The list type that the reads and writes of the body give each PHP name, for a `[]`
+    /// (P2R-21); see `Converter::list_types`.
+    pub(super) list_types: HashMap<Vec<u8>, Option<RustType>>,
 }
 
 impl Default for Variables {
@@ -168,6 +174,7 @@ impl Default for Variables {
             loops: Vec::new(),
             iterated: Vec::new(),
             exits: Vec::new(),
+            list_types: HashMap::new(),
         }
     }
 }
@@ -672,10 +679,17 @@ impl Converter<'_> {
         let checked = match declared {
             // The name problem is recorded.
             Some(false) => return None,
-            // `[]` has no element type: a later read or write gives it (P2R-21).
+            // `[]` has no element type: the other reads and writes of the variable give it,
+            // or a later read or write does (P2R-21).
             Some(true) if empty => {
-                self.variables.entries[var].empty = true;
-                return Some((var, true));
+                let name = &self.variables.entries[var].php_name;
+                match self.variables.list_types.get(name) {
+                    Some(Some(ty)) => Ok(ty.clone()),
+                    _ => {
+                        self.variables.entries[var].empty = true;
+                        return Some((var, true));
+                    }
+                }
             }
             Some(true) => found,
             None => {

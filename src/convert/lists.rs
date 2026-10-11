@@ -3,15 +3,18 @@
 //! `variables.rs`.
 
 use std::borrow::Cow;
+use std::collections::HashMap;
 
+use mago_analyzer::artifacts::AnalysisArtifacts;
 use mago_codex::ttype::atomic::TAtomic;
 use mago_codex::ttype::union::TUnion;
 use mago_span::HasSpan;
 use mago_syntax::cst::*;
+use mago_syntax::walker::Walker;
 
-use super::Converter;
+use super::{Converter, Signature};
 use crate::printer::RExpr;
-use crate::types::RustType;
+use crate::types::{self, RustType};
 
 /// Mago types `[]` as `array{}`, which has no element type of its own (P2R-21).
 pub(super) const UNKNOWN_ELEMENT: &str =
@@ -68,7 +71,119 @@ pub(super) fn list_built(ty: &RustType) -> bool {
     }
 }
 
+/// What the reads and writes of one body say about the list type of each variable name.
+struct Sites<'c> {
+    artifacts: &'c AnalysisArtifacts,
+    functions: &'c HashMap<Vec<u8>, Signature>,
+    /// The declared return type of a function body.
+    returns: Option<&'c RustType>,
+    /// By PHP name without `$`; `None` for a name with two different list types.
+    found: HashMap<Vec<u8>, Option<RustType>>,
+}
+
+impl Sites<'_> {
+    /// The list type Mago gives `node`, unless it is only `[]`.
+    fn list_at(&self, node: &impl HasSpan) -> Option<RustType> {
+        let union = self.artifacts.get_expression_type(node)?;
+        types::rust_type(&without_empty(union)).ok()
+    }
+
+    fn add(&mut self, variable: &DirectVariable<'_>, ty: Option<RustType>) {
+        let Some(ty @ RustType::Vec(_)) = ty else {
+            return;
+        };
+        self.found
+            .entry(variable.name[1..].to_vec())
+            .and_modify(|seen| {
+                if seen.as_ref() != Some(&ty) {
+                    *seen = None;
+                }
+            })
+            .or_insert(Some(ty));
+    }
+}
+
+/// Collects [`Sites`]: the type Mago gives each read, append and assignment of a variable,
+/// and the declared parameter or return type that a direct read of it flows into.
+struct ListSites;
+
+impl<'ast, 'arena, 'c> Walker<'ast, 'arena, Sites<'c>> for ListSites {
+    fn walk_in_direct_variable(
+        &self,
+        variable: &'ast DirectVariable<'arena>,
+        sites: &mut Sites<'c>,
+    ) {
+        let ty = sites.list_at(variable);
+        sites.add(variable, ty);
+    }
+
+    fn walk_in_assignment(&self, assignment: &'ast Assignment<'arena>, sites: &mut Sites<'c>) {
+        // Mago types an assignment, not its target.
+        if matches!(assignment.operator, AssignmentOperator::Assign(_))
+            && let Expression::Variable(Variable::Direct(variable)) = assignment.lhs
+        {
+            let ty = sites.list_at(assignment);
+            sites.add(variable, ty);
+        }
+    }
+
+    fn walk_in_return(&self, r#return: &'ast Return<'arena>, sites: &mut Sites<'c>) {
+        if let Some(value) = r#return.value
+            && let Expression::Variable(Variable::Direct(variable)) = unparenthesized(value)
+        {
+            sites.add(variable, sites.returns.cloned());
+        }
+    }
+
+    fn walk_in_function_call(&self, call: &'ast FunctionCall<'arena>, sites: &mut Sites<'c>) {
+        let Expression::Identifier(Identifier::Local(name)) = call.function else {
+            return;
+        };
+        let functions = sites.functions;
+        let Some(signature) = functions.get(&name.value.to_ascii_lowercase()) else {
+            return;
+        };
+        let arguments = call.argument_list.arguments.iter();
+        for (argument, parameter) in arguments.zip(&signature.parameters) {
+            if let Argument::Positional(positional) = argument
+                && positional.ellipsis.is_none()
+                && let Expression::Variable(Variable::Direct(variable)) =
+                    unparenthesized(positional.value)
+            {
+                sites.add(variable, Some(parameter.ty.clone()));
+            }
+        }
+    }
+
+    // A nested function or closure has variables of its own.
+    fn walk_function(&self, _: &'ast Function<'arena>, _: &mut Sites<'c>) {}
+
+    fn walk_closure(&self, _: &'ast Closure<'arena>, _: &mut Sites<'c>) {}
+
+    fn walk_arrow_function(&self, _: &'ast ArrowFunction<'arena>, _: &mut Sites<'c>) {}
+}
+
 impl Converter<'_> {
+    /// The list type that the reads and writes of a body give each variable name, so a
+    /// `[]` takes its element type from them, also when it is read while still empty
+    /// (P2R-21). `returns` is the declared return type of a function body.
+    pub(super) fn list_types<'ast, 'arena: 'ast>(
+        &self,
+        statements: impl IntoIterator<Item = &'ast Statement<'arena>>,
+        returns: Option<&RustType>,
+    ) -> HashMap<Vec<u8>, Option<RustType>> {
+        let mut sites = Sites {
+            artifacts: &self.artifacts,
+            functions: &self.functions,
+            returns,
+            found: HashMap::new(),
+        };
+        for statement in statements {
+            ListSites.walk_statement(statement, &mut sites);
+        }
+        sites.found
+    }
+
     /// An expression whose type is `expected` when it is known, so `[]` can take its element
     /// type from the declared parameter or return type it flows into (P2R-21).
     pub(super) fn value(

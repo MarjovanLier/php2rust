@@ -46,6 +46,14 @@ fn main() {
         print!("{}", row.len() as i64);
         print!(" ");
     }
+    let weights = vec![0.5, 2.5, 3.0];
+    let mut sum = 0.0;
+    for &weight in &weights {
+        sum += weight;
+    }
+    if sum > 5.9 {
+        print!("heavy\n");
+    }
     let words = vec![String::from("end")];
     for mut word in words {
         word += "!";

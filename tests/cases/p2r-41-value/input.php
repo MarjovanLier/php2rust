@@ -42,6 +42,14 @@ echo $yes, "\n";
 foreach ([[1, 2], [3]] as $row) {
     echo count($row), ' ';
 }
+$weights = [0.5, 2.5, 3.0];
+$sum = 0.0;
+foreach ($weights as $weight) {
+    $sum += $weight;
+}
+if ($sum > 5.9) {
+    echo "heavy\n";
+}
 $words = ['end'];
 foreach ($words as $word):
     $word .= '!';

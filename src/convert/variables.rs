@@ -77,6 +77,17 @@ impl Variables {
         }
         variables
     }
+
+    /// The value `var` holds here, when it is known (P2R-50).
+    pub(super) fn value(&self, var: Var) -> Option<i64> {
+        self.entries[var].value
+    }
+
+    /// Sets the value `var` holds here; `None` forgets it. the control flow code clears and meets values
+    /// with this at loops and joins (see the module doc).
+    pub(super) fn set_value(&mut self, var: Var, value: Option<i64>) {
+        self.entries[var].value = value;
+    }
 }
 
 /// True for the expressions that change a variable: an assignment, `++` and `--`.
@@ -143,7 +154,7 @@ impl Converter<'_> {
         match checked {
             Ok(ty) => {
                 let name = entry.rust_name.clone();
-                let read = match entry.value {
+                let read = match self.variables.value(var) {
                     Some(value) => RExpr::Known(name, value),
                     None => RExpr::Var(name),
                 };
@@ -256,7 +267,7 @@ impl Converter<'_> {
             }
             _ => printer::literal_value(&expr),
         };
-        self.variables.entries[var].value = value;
+        self.variables.set_value(var, value);
         let name = &self.variables.entries[var].rust_name;
         let read_itself = matches!(&expr, RExpr::Var(read) | RExpr::Known(read, _) if read == name);
         if operator == "=" && read_itself {
@@ -326,10 +337,11 @@ impl Converter<'_> {
             }
         };
         self.variables.flow.write(var, Some(variable.span));
-        let entry = &mut self.variables.entries[var];
-        entry.assigned.get_or_insert(variable.span);
+        self.variables.entries[var]
+            .assigned
+            .get_or_insert(variable.span);
         // A write whose value is not worked out leaves the value unknown.
-        entry.value = None;
+        self.variables.set_value(var, None);
         (var, declared)
     }
 
@@ -397,7 +409,8 @@ impl Converter<'_> {
         (self.variables.entries.len() - 1, named)
     }
 
-    fn lookup(&self, variable: &DirectVariable<'_>) -> Option<Var> {
+    /// The variable a PHP name refers to, or `None` before its first write.
+    pub(super) fn lookup(&self, variable: &DirectVariable<'_>) -> Option<Var> {
         let php_name = &variable.name[1..];
         self.variables
             .entries

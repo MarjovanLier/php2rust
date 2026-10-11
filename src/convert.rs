@@ -159,6 +159,34 @@ fn assemble(mut items: Vec<Vec<String>>, main: Vec<String>) -> String {
     out
 }
 
+/// A short name for a statement in problem messages.
+fn statement_kind(statement: &Statement<'_>) -> &'static str {
+    match statement {
+        Statement::Namespace(_) => "namespace",
+        Statement::Use(_) => "use",
+        Statement::Class(_) => "a class",
+        Statement::Interface(_) => "an interface",
+        Statement::Trait(_) => "a trait",
+        Statement::Enum(_) => "an enum",
+        Statement::Constant(_) => "const",
+        Statement::Function(_) => "a function declared inside another statement",
+        Statement::Global(_) => "global",
+        Statement::Static(_) => "a static variable",
+        Statement::Unset(_) => "unset",
+        Statement::Switch(_) => "switch",
+        Statement::Try(_) => "try",
+        Statement::If(_) => "if",
+        Statement::While(_) => "while",
+        Statement::DoWhile(_) => "do-while",
+        Statement::For(_) => "for",
+        Statement::Foreach(_) => "foreach",
+        Statement::Block(_) => "a block",
+        Statement::Return(_) => "return",
+        Statement::Expression(_) => "this expression statement",
+        _ => "this statement",
+    }
+}
+
 struct Converter {
     problems: Vec<Problem>,
 }
@@ -181,18 +209,65 @@ impl Converter {
 
     fn program(&mut self, program: &Program<'_>) -> String {
         let mut main: Vec<String> = Vec::new();
+        let mut declared = false;
+        let mut started = false;
+        let mut after_closing_tag = false;
         for statement in program.statements.iter() {
             match statement {
                 Statement::OpeningTag(_) | Statement::ClosingTag(_) | Statement::Noop(_) => {}
-                Statement::Declare(declare) if is_strict_types(declare) => {}
-                Statement::Echo(echo) => self.echo(echo, 1, &mut main),
-                other => self.refuse(
-                    other,
-                    "this statement is not supported in version 1 (P2R-07)",
-                ),
+                // PHP drops the one newline right after a closing tag, so it is not output text.
+                Statement::Inline(inline)
+                    if after_closing_tag && matches!(inline.value, b"\n" | b"\r\n") => {}
+                Statement::Inline(inline) => {
+                    self.refuse(inline, "text outside PHP tags is not supported (P2R-13)")
+                }
+                Statement::Declare(declare)
+                    if !declared && !started && is_strict_types(declare) =>
+                {
+                    declared = true
+                }
+                other => {
+                    if !declared && !started {
+                        self.refuse(
+                            other,
+                            "the file must start with declare(strict_types=1); (P2R-12)",
+                        );
+                    }
+                    started = true;
+                    self.statement(other, 1, &mut main);
+                }
             }
+            after_closing_tag = matches!(statement, Statement::ClosingTag(_));
+        }
+        if !declared && !started {
+            self.problems.push(Problem {
+                start: 0,
+                end: 0,
+                origin: Origin::Tool,
+                message: "the file must start with declare(strict_types=1); (P2R-12)".into(),
+            });
         }
         assemble(Vec::new(), main)
+    }
+
+    fn statement(&mut self, statement: &Statement<'_>, depth: usize, body: &mut Vec<String>) {
+        match statement {
+            Statement::Echo(echo) => self.echo(echo, depth, body),
+            Statement::Noop(_) => {}
+            Statement::Declare(_) => {
+                self.refuse(
+                    statement,
+                    "declare(strict_types=1); must be the first statement (P2R-12)",
+                );
+            }
+            other => self.refuse(
+                other,
+                format!(
+                    "{} is not supported in version 1 (P2R-07)",
+                    statement_kind(other)
+                ),
+            ),
+        }
     }
 
     fn echo(&mut self, echo: &Echo<'_>, depth: usize, body: &mut Vec<String>) {

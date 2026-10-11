@@ -1,0 +1,1 @@
+input.php:6:1: declare(strict_types=1); must be the first statement (P2R-12)

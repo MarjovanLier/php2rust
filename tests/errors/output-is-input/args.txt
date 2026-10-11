@@ -1,0 +1,3 @@
+input.php
+-o
+./input.php

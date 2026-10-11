@@ -1,0 +1,1 @@
+input.php:5:12: syntax error: Expected one of `Semicolon`, `CloseTag` before end of file

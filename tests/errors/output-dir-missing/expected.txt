@@ -1,0 +1,1 @@
+missing/out.rs: the output directory does not exist

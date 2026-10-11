@@ -1,0 +1,1 @@
+./input.php: the output file is the input file

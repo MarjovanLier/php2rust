@@ -31,6 +31,7 @@ mod booleans;
 mod control;
 mod expressions;
 mod flow;
+mod foreach;
 mod functions;
 mod lists;
 mod numbers;

@@ -41,6 +41,7 @@ impl Converter<'_> {
             Statement::For(r#for) => self.for_statement(r#for, depth, context, body),
             Statement::Break(r#break) => self.break_statement(r#break, depth, body),
             Statement::Continue(r#continue) => self.continue_statement(r#continue, depth, body),
+            Statement::Foreach(foreach) => self.foreach_statement(foreach, depth, context, body),
             Statement::Declare(_) => {
                 self.refuse(
                     statement,

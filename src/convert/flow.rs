@@ -36,9 +36,11 @@
 //! `while c() { t = 1; ... }` compiles clean under rustc 1.99, while an inline
 //! `let mut t = 1;` in the loop body gets "variable does not need to be mutable".
 //!
-//! A `foreach` key or value is a new variable id written at the start of the
-//! loop body, so a later loop that reuses the PHP name gets a variable of its own
-//! (P2R-41).
+//! A `foreach` (foreach.rs) reads its list once, before its loop head, and its head has an
+//! exit edge, as for an empty list. Its key and value are new variable ids written at the
+//! start of the loop body, so a later loop that reuses the PHP name gets a variable of its
+//! own (P2R-41). PHP keeps the last key and value after the loop, so no other variable of
+//! that name may be live at the block after the loop: [`Facts::live`] answers that.
 
 use mago_span::Span;
 
@@ -75,6 +77,9 @@ pub(super) struct Facts {
     /// Reads after which some path reads the variable again before its next write, so a
     /// copy of a string or list is needed only at these reads (P2R-26).
     pub read_again: Vec<(Var, Span)>,
+    /// By block, then by variable: some path from the start of the block reads the
+    /// variable before it writes it.
+    pub live: Vec<Set>,
 }
 
 /// One flag per variable.
@@ -173,6 +178,7 @@ impl Flow {
             unread: Vec::new(),
             reassigned: vec![false; vars],
             read_again: Vec::new(),
+            live: Vec::new(),
         };
         for (index, block) in self.blocks.iter().enumerate() {
             let (mut def, mut pos) = arriving(index, &previous, &definite, &possible, vars);
@@ -205,6 +211,7 @@ impl Flow {
                 }
             }
         }
+        facts.live = live;
         facts
     }
 }

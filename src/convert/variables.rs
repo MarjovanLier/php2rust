@@ -12,9 +12,12 @@
 //! [`Converter::finish_variables`] replaces it. So is the type of a variable whose first
 //! write is `[]`: a later read or write gives it (P2R-21).
 //!
-//! A later step changes this file. A `foreach` binding that reuses a PHP name is a new
-//! entry: `lookup` must then find the binding, and the P2R-31 check in `declare` must
-//! allow an earlier entry with the same PHP name.
+//! A `foreach` key or value is a new entry, declared by the `for` pattern and never by a
+//! `let`, so a later loop can reuse its PHP name with another type (P2R-41). `lookup`
+//! finds the latest entry of a name whose loop has not ended; after the loop, a read of
+//! the name finds an earlier entry or none, and a write declares a new one. The `for`
+//! line waits for the end of the body like a first write: its pattern gets `_` when the
+//! binding is never read and `mut` when the body assigns it again (P2R-35).
 //!
 //! P2R-50 stops int arithmetic that the tool can prove overflows, and `%` by a divisor it
 //! can prove is 0. So each entry keeps the latest value of its variable when it is known,
@@ -35,6 +38,7 @@
 //! - After a loop, the value is the meet of the value at the loop head and at every
 //!   `break`.
 
+use heck::ToSnakeCase;
 use mago_span::{HasSpan, Span};
 use mago_syntax::cst::*;
 use mago_syntax::walker::Walker;
@@ -69,6 +73,15 @@ enum Pending {
         typed: bool,
         value: String,
     },
+    /// The opening line of a foreach: `for pattern in list {` (P2R-41).
+    Foreach {
+        key: Option<Var>,
+        value: Var,
+        /// The loop borrows a list of Copy values, so the value is read through `&`.
+        by_ref: bool,
+        /// The text after the pattern: ` in list {`.
+        rest: String,
+    },
 }
 
 /// A Rust block of the body: the body itself, a branch or a loop body.
@@ -98,6 +111,17 @@ struct Entry {
     /// The variable holds `[]` and has no type yet; `ty` is `None` until a later read or
     /// write gives it (P2R-21).
     empty: bool,
+    binding: Option<Binding>,
+}
+
+/// A foreach key or value (P2R-41).
+struct Binding {
+    /// The snake_case name without `r#`, for the `_` of an unused binding (P2R-35).
+    snake: String,
+    /// The loop body assigns it again, so the pattern needs `mut`.
+    rewritten: bool,
+    /// The loop has ended, so `lookup` no longer finds it.
+    closed: bool,
 }
 
 /// The variables of the body being converted, a function or `fn main()`, and the state
@@ -120,6 +144,11 @@ pub(super) struct Variables {
     pub(super) left: Option<&'static str>,
     /// The loops around the statement being converted, innermost last.
     pub(super) loops: Vec<Loop>,
+    /// The variables that hold the lists of the foreach loops around the statement being
+    /// converted, which their bodies must not change (P2R-41).
+    iterated: Vec<Var>,
+    /// By foreach key or value: the flow block after its loop (P2R-41).
+    exits: Vec<(usize, Var)>,
 }
 
 impl Default for Variables {
@@ -137,6 +166,8 @@ impl Default for Variables {
             read_problems: Vec::new(),
             left: None,
             loops: Vec::new(),
+            iterated: Vec::new(),
+            exits: Vec::new(),
         }
     }
 }
@@ -157,6 +188,7 @@ impl Variables {
                 first: 0,
                 common: 0,
                 empty: false,
+                binding: None,
             });
         }
         variables
@@ -221,12 +253,58 @@ impl Variables {
     }
 
     /// True when `rust_name` is a parameter: a string parameter is a `&str` and a list
-    /// parameter a `&[T]` (P2R-24).
+    /// parameter a `&[T]` (P2R-24). A foreach key or value can shadow a parameter of the
+    /// same name, so the entry in scope decides.
     pub(super) fn is_parameter(&self, rust_name: &str) -> bool {
         self.entries
             .iter()
-            .any(|e| e.parameter.is_some() && e.rust_name == rust_name)
+            .rev()
+            .find(|e| e.rust_name == rust_name && !closed(e))
+            .is_some_and(|e| e.parameter.is_some())
     }
+
+    /// The pending `for` line of a foreach, at `depth` (P2R-41).
+    pub(super) fn for_line(
+        &mut self,
+        depth: usize,
+        key: Option<Var>,
+        value: Var,
+        by_ref: bool,
+        rest: String,
+    ) -> String {
+        self.pending.push(Pending::Foreach {
+            key,
+            value,
+            by_ref,
+            rest,
+        });
+        format!("{}{MARK}{}", "    ".repeat(depth), self.pending.len() - 1)
+    }
+
+    /// Starts the body of a foreach over the list in `list`, which the body must not
+    /// change (P2R-41).
+    pub(super) fn iterate(&mut self, list: Option<Var>) {
+        self.iterated.extend(list);
+    }
+
+    /// Ends a foreach: its key and value are gone, and no other variable of their names may
+    /// be live at `exit`, the flow block after the loop (P2R-41).
+    pub(super) fn end_foreach(&mut self, list: Option<Var>, bindings: &[Var], exit: usize) {
+        if list.is_some() {
+            self.iterated.pop();
+        }
+        for &var in bindings {
+            if let Some(binding) = &mut self.entries[var].binding {
+                binding.closed = true;
+            }
+            self.exits.push((exit, var));
+        }
+    }
+}
+
+/// True for a foreach key or value whose loop has ended.
+fn closed(entry: &Entry) -> bool {
+    entry.binding.as_ref().is_some_and(|b| b.closed)
 }
 
 /// True for the expressions that change a variable: an assignment, `++` and `--`.
@@ -314,8 +392,19 @@ impl Converter<'_> {
     /// A read of a variable (P2R-34).
     pub(super) fn variable(&mut self, variable: &DirectVariable<'_>) -> Option<(RExpr, RustType)> {
         let Some(var) = self.lookup(variable) else {
-            // No write comes before this read in the source, so a path reaches it unassigned.
-            self.refuse(variable, unassigned(&variable.name[1..]));
+            let php_name = &variable.name[1..];
+            // A foreach key or value is gone after its loop, where PHP keeps its last value
+            // (P2R-41). Any other name has no write before this read in the source, so a path
+            // reaches it unassigned (P2R-34).
+            let binding = self.variables.entries.iter().rev().find_map(|e| {
+                (e.php_name == php_name && closed(e))
+                    .then_some(e.assigned)
+                    .flatten()
+            });
+            match binding {
+                Some(binding) => self.refuse(&binding, after_loop(php_name)),
+                None => self.refuse(variable, unassigned(php_name)),
+            }
             return None;
         };
         self.variables.read(var, variable.span);
@@ -632,6 +721,15 @@ impl Converter<'_> {
                 (var, Some(named))
             }
         };
+        if let Some(binding) = &mut self.variables.entries[var].binding {
+            binding.rewritten = true;
+        }
+        if self.variables.iterated.contains(&var) {
+            self.refuse(
+                variable,
+                "the body of a foreach cannot change the list it iterates (P2R-41)",
+            );
+        }
         self.variables.write(var, Some(variable.span));
         self.variables.entries[var]
             .assigned
@@ -652,7 +750,7 @@ impl Converter<'_> {
     }
 
     /// The same for the target of a refused assignment, such as `[$a, $b]` or `$a[]`.
-    fn record_refused_target(&mut self, target: &Expression<'_>) {
+    pub(super) fn record_refused_target(&mut self, target: &Expression<'_>) {
         let mut accesses = Vec::new();
         Accesses.target(target, &mut accesses);
         self.record_accesses(accesses);
@@ -674,9 +772,35 @@ impl Converter<'_> {
         }
     }
 
+    /// Declares a foreach key or value as a new variable of type `ty`, written at the start
+    /// of the loop body (P2R-34, P2R-41). `ty` is `None` when a problem with the list is
+    /// recorded.
+    pub(super) fn bind(&mut self, variable: &DirectVariable<'_>, ty: Option<RustType>) -> Var {
+        let (var, named) = self.declare(variable);
+        let ty = match ty.map(built_yet) {
+            Some(Ok(ty)) => Some(ty),
+            Some(Err(message)) => {
+                self.refuse(variable, message);
+                None
+            }
+            None => None,
+        };
+        let entry = &mut self.variables.entries[var];
+        entry.binding = Some(Binding {
+            snake: String::from_utf8_lossy(&entry.php_name).to_snake_case(),
+            rewritten: false,
+            closed: false,
+        });
+        entry.assigned = Some(variable.span);
+        entry.ty = ty.filter(|_| named);
+        self.variables.write(var, Some(variable.span));
+        var
+    }
+
     /// Adds a variable at its first write. The flag is `false` when the name has no Rust
-    /// form, or gives the Rust name of a function or of another variable (P2R-30,
-    /// P2R-31).
+    /// form, or gives the Rust name of a function or of a variable with another PHP name
+    /// (P2R-30, P2R-31). An earlier variable with the same PHP name is a foreach key or
+    /// value, or one that a foreach key or value shadows (P2R-41).
     fn declare(&mut self, variable: &DirectVariable<'_>) -> (Var, bool) {
         let php_name = &variable.name[1..];
         let rust_name = self.rust_name(php_name, variable);
@@ -684,7 +808,11 @@ impl Converter<'_> {
             None => false,
             Some(name)
                 if self.functions.values().any(|f| f.rust_name == *name)
-                    || self.variables.entries.iter().any(|e| e.rust_name == *name) =>
+                    || self
+                        .variables
+                        .entries
+                        .iter()
+                        .any(|e| e.rust_name == *name && e.php_name != php_name) =>
             {
                 self.refuse(
                     variable,
@@ -704,17 +832,19 @@ impl Converter<'_> {
             first: self.variables.scope,
             common: self.variables.scope,
             empty: false,
+            binding: None,
         });
         (self.variables.entries.len() - 1, named)
     }
 
-    /// The variable a PHP name refers to, or `None` before its first write.
+    /// The variable a PHP name refers to, or `None` before its first write. A foreach key
+    /// or value refers to the name until its loop ends (P2R-41).
     pub(super) fn lookup(&self, variable: &DirectVariable<'_>) -> Option<Var> {
         let php_name = &variable.name[1..];
         self.variables
             .entries
             .iter()
-            .position(|e| e.php_name == php_name)
+            .rposition(|e| e.php_name == php_name && !closed(e))
     }
 
     /// The Rust type of the value Mago found at `node` (P2R-21, P2R-22).
@@ -785,6 +915,7 @@ impl Converter<'_> {
             scopes,
             pending,
             read_problems,
+            exits,
             ..
         } = std::mem::take(&mut self.variables);
         let facts = flow.finish(entries.len());
@@ -796,11 +927,28 @@ impl Converter<'_> {
         for (var, span) in facts.unassigned {
             self.refuse(&span, unassigned(&entries[var].php_name));
         }
+        // A read after the loop that reaches an earlier variable of the same name, through
+        // an outer loop or past an empty list, would see the last key or value in PHP.
+        for (exit, binding) in exits {
+            let entry = &entries[binding];
+            let live = entries.iter().enumerate().any(|(var, other)| {
+                var != binding && other.php_name == entry.php_name && facts.live[exit][var]
+            });
+            if live && let Some(span) = entry.assigned {
+                self.refuse(&span, after_loop(&entry.php_name));
+            }
+        }
         let mut unused = vec![false; entries.len()];
         for (var, span) in facts.unread {
             let entry = &entries[var];
             let name = String::from_utf8_lossy(&entry.php_name);
             match (span, entry.assigned) {
+                // A foreach key or value that is never read gets a `_` (P2R-35).
+                (Some(span), Some(first))
+                    if span == first && entry.binding.as_ref().is_some_and(|b| !b.rewritten) =>
+                {
+                    unused[var] = true
+                }
                 (Some(span), _) => self.refuse(
                     &span,
                     format!("the value assigned to ${name} is never read (P2R-35)"),
@@ -812,9 +960,12 @@ impl Converter<'_> {
                 (None, None) => unused[var] = true,
             }
         }
+        // A foreach key or value is declared by its `for` pattern.
         let slots: Vec<Option<usize>> = entries
             .iter()
-            .map(|entry| slot(&scopes, entry.first, entry.common))
+            .map(|entry| {
+                slot(&scopes, entry.first, entry.common).filter(|_| entry.binding.is_none())
+            })
             .collect();
         let let_keyword = |var: Var| {
             if facts.reassigned[var] {
@@ -861,6 +1012,20 @@ impl Converter<'_> {
                         }
                     };
                     finished.push((entry.assigned, text));
+                }
+                Some((
+                    at,
+                    _,
+                    Pending::Foreach {
+                        key,
+                        value,
+                        by_ref,
+                        rest,
+                    },
+                )) => {
+                    let pattern = for_pattern(&entries, &unused, *key, *value, *by_ref);
+                    let text = format!("{}for {pattern}{rest}", &line[..at]);
+                    finished.push((entries[*value].assigned, text));
                 }
                 None => finished.push((None, line)),
             }
@@ -1070,6 +1235,44 @@ fn operation(operator: &str) -> Option<BinOp> {
         "*=" => Some(BinOp::Mul),
         _ => None,
     }
+}
+
+/// The pattern of a foreach: its value, or its key and value (P2R-41).
+fn for_pattern(
+    entries: &[Entry],
+    unused: &[bool],
+    key: Option<Var>,
+    value: Var,
+    by_ref: bool,
+) -> String {
+    let value = pattern(&entries[value], unused[value], by_ref);
+    match key {
+        Some(key) => format!("({}, {value})", pattern(&entries[key], unused[key], false)),
+        None => value,
+    }
+}
+
+/// A foreach key or value in its `for` pattern: `_` when it is never read, `mut` when the
+/// body assigns it again, behind `&` when `by_ref` (P2R-35, P2R-41).
+fn pattern(entry: &Entry, unused: bool, by_ref: bool) -> String {
+    let name = match &entry.binding {
+        Some(binding) if unused => format!("_{}", binding.snake),
+        _ => entry.rust_name.clone(),
+    };
+    let rewritten = entry.binding.as_ref().is_some_and(|b| b.rewritten);
+    match (by_ref, rewritten) {
+        (true, true) => format!("&(mut {name})"),
+        (true, false) => format!("&{name}"),
+        (false, true) => format!("mut {name}"),
+        (false, false) => name,
+    }
+}
+
+fn after_loop(php_name: &[u8]) -> String {
+    format!(
+        "${} is read after its foreach loop, where PHP keeps the last value (P2R-41)",
+        String::from_utf8_lossy(php_name)
+    )
 }
 
 fn unassigned(php_name: &[u8]) -> String {

@@ -27,6 +27,23 @@ pub(super) struct Loop {
     steps: Option<Vec<Site>>,
 }
 
+impl Loop {
+    /// A loop without a step, whose head may exit: a foreach (P2R-41).
+    pub(super) fn new(head: usize, exit: usize) -> Self {
+        Self {
+            head,
+            exit,
+            breaks: Vec::new(),
+            steps: None,
+        }
+    }
+
+    /// The values at each `break`.
+    pub(super) fn into_breaks(self) -> Vec<Values> {
+        self.breaks
+    }
+}
+
 /// A `continue` in a `for`. Its copy of the step is converted once the body is done,
 /// because only the `for` holds the step.
 struct Site {
@@ -355,7 +372,7 @@ impl Converter<'_> {
 
     /// Goes on after an `if` or a loop with the values of every path that arrives. When
     /// none arrives, the next statement is unreachable for `reason` (P2R-40, P2R-50).
-    fn join(&mut self, arriving: Vec<Values>, reason: &'static str) {
+    pub(super) fn join(&mut self, arriving: Vec<Values>, reason: &'static str) {
         if arriving.is_empty() {
             self.variables.left = Some(reason);
             return;
@@ -444,20 +461,22 @@ fn branches<'a, 'arena>(statement: &'a If<'arena>) -> Vec<Branch<'a, 'arena>> {
 }
 
 /// The statements of a body: a braced block, or one statement without braces.
-fn statements_of<'a, 'arena>(statement: &'a Statement<'arena>) -> Vec<&'a Statement<'arena>> {
+pub(super) fn statements_of<'a, 'arena>(
+    statement: &'a Statement<'arena>,
+) -> Vec<&'a Statement<'arena>> {
     match statement {
         Statement::Block(block) => block.statements.iter().collect(),
         other => vec![other],
     }
 }
 
-fn empty(statements: &[&Statement<'_>]) -> bool {
+pub(super) fn empty(statements: &[&Statement<'_>]) -> bool {
     statements
         .iter()
         .all(|statement| matches!(statement, Statement::Noop(_)))
 }
 
-fn indent(depth: usize) -> String {
+pub(super) fn indent(depth: usize) -> String {
     "    ".repeat(depth)
 }
 

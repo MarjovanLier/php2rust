@@ -242,7 +242,8 @@ fn render(expr: &RExpr, anchor: bool, min_precedence: u8) -> Result<String, TooW
             format!("{}.{method}()", render(inner, false, POSTFIX)?)
         }
         RExpr::Len(inner) => {
-            let text = format!("{}.len() as i64", render(inner, false, POSTFIX)?);
+            // A length fixes no element type, so a list of literals gets `_i64` (P2R-49).
+            let text = format!("{}.len() as i64", render(inner, true, POSTFIX)?);
             if CAST < min_precedence {
                 format!("({text})")
             } else {

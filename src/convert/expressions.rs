@@ -49,6 +49,12 @@ impl Converter<'_> {
             Expression::Call(Call::Function(call)) if strings::calls(call, b"count") => {
                 self.count(call, expression)
             }
+            Expression::Call(Call::Function(call)) if strings::calls(call, b"intdiv") => {
+                self.intdiv(call, expression)
+            }
+            Expression::Call(Call::Function(call)) if strings::calls(call, b"fdiv") => {
+                self.fdiv(call, expression)
+            }
             Expression::Call(Call::Function(call)) => match self.call(call, expression)? {
                 (call, Some(ty)) => Some((call, ty)),
                 (_, None) => {

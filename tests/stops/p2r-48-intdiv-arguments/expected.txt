@@ -1,0 +1,1 @@
+input.php:5:6: intdiv takes two positional arguments (P2R-48)

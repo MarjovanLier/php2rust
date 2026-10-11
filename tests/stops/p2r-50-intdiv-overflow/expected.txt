@@ -1,0 +1,2 @@
+input.php:5:6: this int arithmetic always overflows (P2R-50)
+input.php:7:6: this int arithmetic always overflows (P2R-50)

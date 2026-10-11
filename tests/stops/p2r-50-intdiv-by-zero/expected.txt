@@ -1,0 +1,3 @@
+input.php:7:12: intdiv by zero always fails (P2R-50)
+input.php:11:6: intdiv by zero always fails (P2R-50)
+input.php:12:6: intdiv by zero always fails (P2R-50)

@@ -111,6 +111,8 @@ pub enum BinOp {
     Ge,
     And,
     Or,
+    /// `/`, for `intdiv` and `fdiv` only (P2R-48).
+    Div,
 }
 
 impl BinOp {
@@ -128,10 +130,11 @@ impl BinOp {
             Self::Ge => ">=",
             Self::And => "&&",
             Self::Or => "||",
+            Self::Div => "/",
         }
     }
 
-    /// Rust precedence, which matches PHP for these operators: `*` and `%` bind tighter
+    /// Rust precedence, which matches PHP for these operators: `*`, `/` and `%` bind tighter
     /// than `+` and `-`, then the comparisons, then `&&`, then `||`. Above them come `as`
     /// at [`CAST`], unary operators at [`UNARY`] and method calls and indexing at
     /// [`POSTFIX`].
@@ -142,6 +145,7 @@ impl BinOp {
             Self::Eq | Self::Ne | Self::Lt | Self::Gt | Self::Le | Self::Ge => 3,
             Self::And => 2,
             Self::Or => 1,
+            Self::Div => 5,
         }
     }
 
@@ -344,6 +348,7 @@ pub fn literal_value(expr: &RExpr) -> Option<i64> {
                 | BinOp::Ge
                 | BinOp::And
                 | BinOp::Or => None,
+                BinOp::Div => left.checked_div(right),
             }
         }
         RExpr::Str(_) | RExpr::Var(_) | RExpr::Call(..) => None,

@@ -10,18 +10,18 @@
 //! that reuses a PHP name is a new entry: `lookup` must then find the binding, and the
 //! P2R-31 check in `declare` must allow an earlier entry with the same PHP name.
 //!
-//! rustc works out the value of a variable at compile time when it can, and then rejects
-//! `%` by 0 (unconditional_panic) and overflow (arithmetic_overflow) through the variable
-//! (P2R-50). So each entry keeps the latest value of its variable when it is known, and a
-//! read of it is an `RExpr::Known` that `checked_constant` and `binary` can check. P2R-50
-//! stops every overflow and zero divisor that these values prove, also where rustc 1.99
-//! misses it: rustc never tracks a variable that `print!` borrows, and tracks a variable
-//! written twice only inside one MIR block, so its rule depends on later uses. The values
-//! must never be weaker than rustc's, because a missed value lets through code that
-//! rustc rejects. In straight-line code the latest write in source order gives the value,
-//! and a call between does not change it. With branches and loops, a variable
-//! written once from a known value keeps that value everywhere; any other variable has a
-//! known value after a join only when every path into the join gives the same value.
+//! P2R-50 stops int arithmetic that the tool can prove overflows, and `%` by a divisor it
+//! can prove is 0. So each entry keeps the latest value of its variable when it is known,
+//! and a read of it is an `RExpr::Known` that `checked_constant` and `binary` check.
+//! rustc 1.99 rejects many of these cases at compile time (arithmetic_overflow,
+//! unconditional_panic), but not all: it never tracks a variable that `print!` borrows,
+//! and tracks a variable written twice only inside one MIR block. The spec's rule is
+//! wider, so the output never depends on that. The values must never be weaker than
+//! rustc's, because a missed value lets through code that rustc rejects. In straight-line
+//! code the latest write in source order gives the value, and a call between does not
+//! change it. With branches and loops, a variable written once from a known
+//! value keeps that value everywhere; any other variable has a known value after a join
+//! only when every path into the join gives the same value.
 
 use mago_span::{HasSpan, Span};
 use mago_syntax::cst::*;

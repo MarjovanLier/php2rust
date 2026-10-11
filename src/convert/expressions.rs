@@ -96,22 +96,19 @@ impl Converter<'_> {
             );
             return None;
         }
-        // rustc rejects a zero divisor it knows at compile time, a literal or a variable that
-        // holds 0, mut or not (unconditional_panic).
+        // P2R-50 stops `%` by a divisor the tool can prove is 0, a literal or a variable
+        // that holds 0. rustc rejects many such cases at compile time (unconditional_panic).
         if op == BinOp::Rem && printer::literal_value(&right) == Some(0) {
-            self.refuse(
-                binary,
-                "% by zero always fails, and rustc rejects it (P2R-50)",
-            );
+            self.refuse(binary, "% by zero always fails (P2R-50)");
             return None;
         }
         self.checked_constant(binary, RExpr::Binary(Box::new(left), op, Box::new(right)))
     }
 
-    /// An int operation on values rustc knows at compile time, literals or variables that
-    /// hold a known value, must not overflow: rustc evaluates it and rejects the overflow
-    /// (arithmetic_overflow, or unconditional_panic for `%` of i64::MIN by -1; P2R-50).
-    /// Each operation is checked when it is built, so an operand that overflowed is
+    /// P2R-50 stops int arithmetic that the tool can prove overflows: an operation whose
+    /// operands are literals or variables with a known value. rustc rejects many such cases
+    /// at compile time (arithmetic_overflow, or unconditional_panic for `%` of i64::MIN by
+    /// -1). Each operation is checked when it is built, so an operand that overflowed is
     /// already refused.
     pub(super) fn checked_constant(
         &mut self,
@@ -126,10 +123,7 @@ impl Converter<'_> {
             _ => false,
         };
         if operands_known && printer::literal_value(&expr).is_none() {
-            self.refuse(
-                node,
-                "this int arithmetic overflows, and rustc rejects it (P2R-50)",
-            );
+            self.refuse(node, "this int arithmetic always overflows (P2R-50)");
             return None;
         }
         Some((expr, RustType::I64))

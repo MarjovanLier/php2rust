@@ -118,9 +118,9 @@ impl Converter<'_> {
         (Some((**element).clone()), by_ref, iter)
     }
 
-    /// Refuses a by-reference foreach, and a key or value that is not a plain variable. The
-    /// problem covers the whole loop, so the problems its body then has are not printed
-    /// too (P2R-03).
+    /// Refuses a by-reference foreach, a key or value that is not a plain variable, and a
+    /// key and value with the same name. The problem covers the whole loop, so the
+    /// problems its body then has are not printed too (P2R-03).
     fn refuse_target(&mut self, statement: &Foreach<'_>) {
         let (key, value) = (statement.target.key(), statement.target.value());
         if matches!(value, Expression::UnaryPrefix(unary)
@@ -134,6 +134,14 @@ impl Converter<'_> {
             self.refuse(
                 statement,
                 "only a plain variable can be a foreach key or value (P2R-07)",
+            );
+        } else if let (Some(key), Some(value)) = (key.and_then(target), target(value))
+            && key.name == value.name
+        {
+            // PHP writes the key after the value, so the variable holds the key.
+            self.refuse(
+                statement,
+                "a foreach key and value with the same name are not supported (P2R-41)",
             );
         }
     }

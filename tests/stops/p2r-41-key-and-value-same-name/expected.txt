@@ -1,0 +1,1 @@
+input.php:6:1: a foreach key and value with the same name are not supported (P2R-41)

@@ -214,8 +214,11 @@ impl Converter<'_> {
                     let parameter = signature.parameters.get(position).map(|p| &p.ty);
                     match self.value(positional.value, parameter) {
                         Some((expr, ty)) => {
-                            let expr = numbers::widened(expr, &ty, parameter.unwrap_or(&ty));
-                            arguments.push(self.borrowed(expr, &ty));
+                            let declared = parameter.unwrap_or(&ty);
+                            match self.declared_value(positional.value, expr, &ty, declared) {
+                                Some(expr) => arguments.push(self.borrowed(expr, &ty)),
+                                None => converted = false,
+                            }
                         }
                         None => converted = false,
                     }

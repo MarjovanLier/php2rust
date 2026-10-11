@@ -1,0 +1,3 @@
+input.php:18:12: a list of int where a list of float is declared is not supported (P2R-25)
+input.php:26:18: a list of int where a list of float is declared is not supported (P2R-25)
+input.php:31:18: a list of int where a list of float is declared is not supported (P2R-25)

@@ -4,6 +4,7 @@
 //! Float arithmetic never panics and rustc rejects none of it, so only int arithmetic
 //! goes through the P2R-50 checks of expressions.rs.
 
+use mago_span::HasSpan;
 use mago_syntax::cst::*;
 
 use super::Converter;
@@ -11,6 +12,26 @@ use crate::printer::{self, BinOp, RExpr};
 use crate::types::RustType;
 
 impl Converter<'_> {
+    /// A value passed to a parameter or returned, where `declared` is the declared type. An
+    /// int becomes a float (P2R-25). A list of ints where a list of floats is declared has
+    /// no such conversion, so it stops: Mago accepts it, but a `Vec<i64>` is no `&[f64]`.
+    pub(super) fn declared_value(
+        &mut self,
+        node: &impl HasSpan,
+        expr: RExpr,
+        ty: &RustType,
+        declared: &RustType,
+    ) -> Option<RExpr> {
+        if ints_for_floats(ty, declared) {
+            self.refuse(
+                node,
+                "a list of int where a list of float is declared is not supported (P2R-25)",
+            );
+            return None;
+        }
+        Some(widened(expr, ty, declared))
+    }
+
     /// `intdiv()`: `/` on two ints, which Rust rounds towards zero as PHP does (P2R-48).
     /// Mago reports an argument that is not an int (P2R-11).
     pub(super) fn intdiv(
@@ -76,10 +97,21 @@ fn division(left: RExpr, right: RExpr) -> RExpr {
     RExpr::Binary(Box::new(left), BinOp::Div, Box::new(right))
 }
 
+/// True for a list of ints, at any depth, where the same list of floats is declared.
+fn ints_for_floats(ty: &RustType, declared: &RustType) -> bool {
+    match (ty, declared) {
+        (RustType::Vec(found), RustType::Vec(wanted)) => {
+            (**found == RustType::I64 && **wanted == RustType::F64)
+                || ints_for_floats(found, wanted)
+        }
+        _ => false,
+    }
+}
+
 /// An int value where a float is declared, as a parameter or a return type, becomes a
 /// float: a literal by its value (`4` to `4.0`), any other value with `as f64` (P2R-25).
 /// Every other value is given back as it is.
-pub(super) fn widened(expr: RExpr, ty: &RustType, declared: &RustType) -> RExpr {
+fn widened(expr: RExpr, ty: &RustType, declared: &RustType) -> RExpr {
     if *ty != RustType::I64 || *declared != RustType::F64 {
         return expr;
     }

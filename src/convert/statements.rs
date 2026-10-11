@@ -4,7 +4,7 @@
 use mago_syntax::cst::*;
 
 use super::variables::changes_variable;
-use super::{Context, Converter, numbers, statement_kind};
+use super::{Context, Converter, statement_kind};
 use crate::printer::{self, RExpr};
 use crate::types::RustType;
 
@@ -75,7 +75,9 @@ impl Converter<'_> {
                 let Some((expr, ty)) = self.value(value, Some(returns)) else {
                     return;
                 };
-                let expr = numbers::widened(expr, &ty, returns);
+                let Some(expr) = self.declared_value(value, expr, &ty, returns) else {
+                    return;
+                };
                 let expr = self.owned(expr, &ty);
                 let Some(rendered) = self.render(value, &expr, false) else {
                     return;

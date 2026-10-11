@@ -73,6 +73,8 @@ pub enum RExpr {
     Call(String, Vec<RExpr>),
     Binary(Box<RExpr>, BinOp, Box<RExpr>),
     Neg(Box<RExpr>),
+    /// A variable whose value rustc works out at compile time (P2R-50).
+    Known(String, i64),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -152,6 +154,7 @@ fn render(expr: &RExpr, anchor: bool, min_precedence: u8) -> Result<String, TooW
                 text
             }
         }
+        RExpr::Known(name, _) => name.clone(),
     })
 }
 
@@ -162,12 +165,13 @@ pub fn anchored(expr: &RExpr) -> bool {
         RExpr::Var(_) | RExpr::Call(..) => true,
         RExpr::Neg(inner) => anchored(inner),
         RExpr::Binary(left, _, right) => anchored(left) || anchored(right),
+        RExpr::Known(..) => true,
     }
 }
 
-/// The value of an int expression made only of literals. `None` when it holds a variable
-/// or a call, or when it overflows or divides by zero: rustc evaluates such an expression
-/// at compile time and rejects it.
+/// The value of an int expression made only of literals and known variables. `None` when
+/// it holds another variable or a call, or when it overflows or divides by zero: rustc
+/// evaluates such an expression at compile time and rejects it.
 pub fn literal_value(expr: &RExpr) -> Option<i64> {
     match expr {
         RExpr::Int(value) => Some(*value),
@@ -182,6 +186,7 @@ pub fn literal_value(expr: &RExpr) -> Option<i64> {
             }
         }
         RExpr::Str(_) | RExpr::Var(_) | RExpr::Call(..) => None,
+        RExpr::Known(_, value) => Some(*value),
     }
 }
 

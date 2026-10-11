@@ -1,0 +1,2 @@
+input.php:12:9: this int arithmetic overflows, and rustc rejects it (P2R-50)
+input.php:15:6: this int arithmetic overflows, and rustc rejects it (P2R-50)

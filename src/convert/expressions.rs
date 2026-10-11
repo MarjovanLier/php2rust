@@ -91,7 +91,8 @@ impl Converter<'_> {
             );
             return None;
         }
-        // rustc rejects a constant zero divisor at compile time (unconditional_panic).
+        // rustc rejects a zero divisor it knows at compile time, a literal or a variable that
+        // holds 0, mut or not (unconditional_panic).
         if op == BinOp::Rem && printer::literal_value(&right) == Some(0) {
             self.refuse(
                 binary,
@@ -102,14 +103,24 @@ impl Converter<'_> {
         self.checked_constant(binary, RExpr::Binary(Box::new(left), op, Box::new(right)))
     }
 
-    /// An int expression made only of literals must not overflow, because rustc evaluates it
-    /// at compile time and rejects the overflow (arithmetic_overflow, P2R-50).
+    /// An int operation on values rustc knows at compile time, literals or variables that
+    /// hold a known value, must not overflow: rustc evaluates it and rejects the overflow
+    /// (arithmetic_overflow, or unconditional_panic for `%` of i64::MIN by -1; P2R-50).
+    /// Each operation is checked when it is built, so an operand that overflowed is
+    /// already refused.
     pub(super) fn checked_constant(
         &mut self,
         node: &impl HasSpan,
         expr: RExpr,
     ) -> Option<(RExpr, RustType)> {
-        if !printer::anchored(&expr) && printer::literal_value(&expr).is_none() {
+        let operands_known = match &expr {
+            RExpr::Binary(left, _, right) => {
+                printer::literal_value(left).is_some() && printer::literal_value(right).is_some()
+            }
+            RExpr::Neg(operand) => printer::literal_value(operand).is_some(),
+            _ => false,
+        };
+        if operands_known && printer::literal_value(&expr).is_none() {
             self.refuse(
                 node,
                 "this int arithmetic overflows, and rustc rejects it (P2R-50)",

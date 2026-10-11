@@ -9,13 +9,23 @@
 //! after it, needs its declaration moved above that block. A `foreach` binding
 //! that reuses a PHP name is a new entry: `lookup` must then find the binding, and the
 //! P2R-31 check in `declare` must allow an earlier entry with the same PHP name.
+//!
+//! rustc works out the value of a variable at compile time when it can, and then rejects
+//! `%` by 0 (unconditional_panic) and overflow (arithmetic_overflow) through the variable
+//! (P2R-50). So each entry keeps the latest value of its variable when it is known, and a
+//! read of it is an `RExpr::Known` that `checked_constant` and `binary` can check. The
+//! values must never be weaker than rustc's: a missed value lets through code that rustc
+//! rejects. In straight-line code the latest write in source order gives the value, and a
+//! call between does not change it. With branches and loops, a variable written
+//! once from a known value keeps that value everywhere; any other variable has a known
+//! value after a join only when every path into the join gives the same value.
 
 use mago_span::{HasSpan, Span};
 use mago_syntax::cst::*;
 
 use super::flow::{Flow, Var};
 use super::{Converter, ParameterSignature};
-use crate::printer::{self, RExpr};
+use crate::printer::{self, BinOp, RExpr};
 use crate::types::{self, RustType};
 
 /// Stands in a `let` line for its `mut `. `printer::quote` escapes every control
@@ -33,6 +43,8 @@ struct Entry {
     parameter: Option<String>,
     /// The first write in the body.
     assigned: Option<Span>,
+    /// The value the variable holds here, when rustc knows it too (P2R-50).
+    value: Option<i64>,
 }
 
 /// The variables of the body being converted, a function or `fn main()`.
@@ -56,6 +68,7 @@ impl Variables {
                 ty: Some(parameter.ty.clone()),
                 parameter: Some(parameter.snake.clone()),
                 assigned: None,
+                value: None,
             });
         }
         variables
@@ -124,7 +137,14 @@ impl Converter<'_> {
             .site_type(variable)
             .and_then(|found| same_type(&entry.php_name, &known, found));
         match checked {
-            Ok(ty) => Some((RExpr::Var(entry.rust_name.clone()), ty)),
+            Ok(ty) => {
+                let name = entry.rust_name.clone();
+                let read = match entry.value {
+                    Some(value) => RExpr::Known(name, value),
+                    None => RExpr::Var(name),
+                };
+                Some((read, ty))
+            }
             Err(message) => {
                 self.fail(var, variable, message);
                 None
@@ -180,10 +200,12 @@ impl Converter<'_> {
         let current = (operator != Some("=")).then(|| self.variable(variable));
         let converted = match (operator, value, current) {
             (Some(operator), Some(value), None) => Some((operator, value, None)),
-            (Some(operator), Some(value), Some(Some((_, ty)))) => Some((operator, value, Some(ty))),
+            (Some(operator), Some(value), Some(Some(current))) => {
+                Some((operator, value, Some(current)))
+            }
             _ => None,
         };
-        let Some((operator, (expr, value_type), current_type)) = converted else {
+        let Some((operator, (expr, value_type), current)) = converted else {
             // The write still counts, so later reads see it. Its type is not checked: a
             // problem with it would hide the one found inside this expression (P2R-03).
             self.record_write(variable);
@@ -195,8 +217,8 @@ impl Converter<'_> {
             }
             return None;
         };
-        if let Some(current_type) = current_type
-            && (current_type != RustType::I64 || value_type != RustType::I64)
+        if let Some((_, current_type)) = &current
+            && (*current_type != RustType::I64 || value_type != RustType::I64)
         {
             self.record_write(variable);
             self.refuse(
@@ -206,8 +228,27 @@ impl Converter<'_> {
             return None;
         }
         let (var, declares, ty) = self.write(variable, expression)?;
+        // The value the variable now holds, when rustc can work it out (P2R-50).
+        let value = match (current, operation(operator)) {
+            (Some((current, _)), Some(op)) => {
+                let known = printer::literal_value(&current).is_some()
+                    && printer::literal_value(&expr).is_some();
+                let combined = RExpr::Binary(Box::new(current), op, Box::new(expr.clone()));
+                let after = printer::literal_value(&combined);
+                // rustc 1.99 lets this overflow pass through a mut variable, but refusing it
+                // keeps the check from ever being weaker than rustc's.
+                if known && after.is_none() {
+                    self.refuse(expression, "this int arithmetic always overflows (P2R-50)");
+                    return None;
+                }
+                after
+            }
+            _ => printer::literal_value(&expr),
+        };
+        self.variables.entries[var].value = value;
         let name = &self.variables.entries[var].rust_name;
-        if operator == "=" && matches!(&expr, RExpr::Var(read) if read == name) {
+        let read_itself = matches!(&expr, RExpr::Var(read) | RExpr::Known(read, _) if read == name);
+        if operator == "=" && read_itself {
             self.refuse(
                 expression,
                 "an assignment of a variable to itself does nothing, and rustc rejects it (P2R-50)",
@@ -274,9 +315,10 @@ impl Converter<'_> {
             }
         };
         self.variables.flow.write(var, Some(variable.span));
-        self.variables.entries[var]
-            .assigned
-            .get_or_insert(variable.span);
+        let entry = &mut self.variables.entries[var];
+        entry.assigned.get_or_insert(variable.span);
+        // A write whose value is not worked out leaves the value unknown.
+        entry.value = None;
         (var, declared)
     }
 
@@ -306,6 +348,7 @@ impl Converter<'_> {
             ty: None,
             parameter: None,
             assigned: None,
+            value: None,
         });
         (self.variables.entries.len() - 1, named)
     }
@@ -393,6 +436,16 @@ fn resolve_mark(line: &mut String, reassigned: &[bool]) -> Option<Var> {
     let var: Var = line[start + 1..end].parse().ok()?;
     line.replace_range(start..=end, if reassigned[var] { "mut " } else { "" });
     Some(var)
+}
+
+/// The operation of a compound assignment, `++` or `--`; `None` for `=`.
+fn operation(operator: &str) -> Option<BinOp> {
+    match operator {
+        "+=" => Some(BinOp::Add),
+        "-=" => Some(BinOp::Sub),
+        "*=" => Some(BinOp::Mul),
+        _ => None,
+    }
 }
 
 fn unassigned(php_name: &[u8]) -> String {

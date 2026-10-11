@@ -6,6 +6,7 @@ use std::collections::HashMap;
 use mago_allocator::LocalArena;
 use mago_analyzer::Analyzer;
 use mago_analyzer::analysis_result::AnalysisResult;
+use mago_analyzer::artifacts::AnalysisArtifacts;
 use mago_analyzer::plugin::registry::PluginRegistry;
 use mago_analyzer::settings::Settings;
 use mago_codex::metadata::CodebaseMetadata;
@@ -24,10 +25,13 @@ use mago_syntax::parser::parse_file;
 use crate::printer::{self, RExpr, TooWide};
 use crate::problem::{self, Origin, Problem};
 use crate::types::RustType;
+use variables::Variables;
 
 mod expressions;
+mod flow;
 mod functions;
 mod statements;
+mod variables;
 
 /// The first line of every output (P2R-52).
 pub const HEADER: &str =
@@ -80,18 +84,18 @@ pub fn convert(path: &str, source: Vec<u8>) -> Result<String, Failure> {
         Settings::new(PHPVersion::PHP85),
     );
     let mut result = AnalysisResult::new(SymbolReferences::new());
-    if analyzer.analyze(program, &mut result).is_err() {
+    let Ok(artifacts) = analyzer.analyze_with_artifacts(program, &mut result) else {
         return Err(Failure::Invalid(format!(
             "{path}: the Mago analyser could not finish\n"
         )));
-    }
+    };
     let mut problems: Vec<Problem> = result
         .issues
         .iter()
         .filter(|issue| reported(issue))
         .filter_map(mago_problem)
         .collect();
-    let mut converter = Converter::new(&codebase);
+    let mut converter = Converter::new(&codebase, artifacts);
     let rust = converter.program(program);
     problems.append(&mut converter.problems);
     if problems.is_empty() {
@@ -219,20 +223,23 @@ enum Context<'t> {
 
 struct Converter<'c> {
     codebase: &'c CodebaseMetadata,
+    /// The type Mago found for each expression, keyed by its span (P2R-21).
+    artifacts: AnalysisArtifacts,
     problems: Vec<Problem>,
     /// Declared functions by lowercase PHP name, because PHP function names ignore case (P2R-32).
     functions: HashMap<Vec<u8>, Signature>,
-    /// Parameters of the function being converted, and whether the body reads each one.
-    scope: Vec<(ParameterSignature, bool)>,
+    /// The variables of the body being converted: a function, or `fn main()`.
+    variables: Variables,
 }
 
 impl<'c> Converter<'c> {
-    fn new(codebase: &'c CodebaseMetadata) -> Self {
+    fn new(codebase: &'c CodebaseMetadata, artifacts: AnalysisArtifacts) -> Self {
         Self {
             codebase,
+            artifacts,
             problems: Vec::new(),
             functions: HashMap::new(),
-            scope: Vec::new(),
+            variables: Variables::default(),
         }
     }
 
@@ -311,6 +318,7 @@ impl<'c> Converter<'c> {
                 message: "the file must start with declare(strict_types=1); (P2R-12)".into(),
             });
         }
+        self.finish_variables(&mut main);
         assemble(items, main)
     }
 }

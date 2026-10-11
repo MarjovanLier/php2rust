@@ -1,0 +1,3 @@
+input.php:7:5: the value assigned to $copy is never read (P2R-35)
+input.php:12:1: the value assigned to $x is never read (P2R-35)
+input.php:15:1: the value assigned to $x is never read (P2R-35)

@@ -113,25 +113,6 @@ impl Converter<'_> {
         Some((expr, RustType::I64))
     }
 
-    pub(super) fn variable(&mut self, variable: &DirectVariable<'_>) -> Option<(RExpr, RustType)> {
-        let php_name = &variable.name[1..];
-        let found = self
-            .scope
-            .iter_mut()
-            .find(|(p, _)| p.php_name == php_name)
-            .map(|(p, read)| {
-                *read = true;
-                (RExpr::Var(p.rust_name.clone()), p.ty.clone())
-            });
-        if found.is_none() {
-            self.refuse(
-                variable,
-                "variables other than parameters are not built yet (P2R-34)",
-            );
-        }
-        found
-    }
-
     /// A call to a function declared in this file, with its return type (`None` for void).
     pub(super) fn call(
         &mut self,

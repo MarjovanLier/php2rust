@@ -7,7 +7,7 @@ use mago_codex::ttype::union::TUnion;
 use mago_span::HasSpan;
 use mago_syntax::cst::*;
 
-use super::{Context, Converter, ParameterSignature, Signature};
+use super::{Context, Converter, ParameterSignature, Signature, Variables};
 use crate::names;
 use crate::types::{self, RustType};
 
@@ -204,11 +204,11 @@ impl Converter<'_> {
             .functions
             .get(&function.name.value.to_ascii_lowercase())?
             .clone();
-        self.scope = signature
-            .parameters
-            .iter()
-            .map(|p| (p.clone(), false))
-            .collect();
+        // A function has its own variables; those of `fn main()` wait until it ends.
+        let outer = std::mem::replace(
+            &mut self.variables,
+            Variables::with_parameters(&signature.parameters),
+        );
         let mut body = Vec::new();
         let mut returned = false;
         for statement in function.body.statements.iter() {
@@ -228,6 +228,8 @@ impl Converter<'_> {
                 &mut body,
             );
         }
+        let parameters = self.finish_variables(&mut body);
+        self.variables = outer;
         if signature.returns.is_some()
             && !matches!(
                 function.body.statements.iter().last(),
@@ -239,18 +241,6 @@ impl Converter<'_> {
                 "a function with a return type must end with return (P2R-50)",
             );
         }
-        // An unused parameter gets a leading `_`, so rustc does not warn (P2R-35).
-        let parameters: Vec<String> = std::mem::take(&mut self.scope)
-            .into_iter()
-            .map(|(p, read)| {
-                let name = if read {
-                    p.rust_name
-                } else {
-                    format!("_{}", p.snake)
-                };
-                format!("{name}: {}", p.ty.parameter())
-            })
-            .collect();
         let returns = signature
             .returns
             .as_ref()

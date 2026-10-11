@@ -1,0 +1,1 @@
+input.php:7:1: the variable $x changes type from i64 to String (P2R-34)

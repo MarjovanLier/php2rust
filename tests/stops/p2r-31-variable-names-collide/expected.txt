@@ -1,0 +1,1 @@
+input.php:7:5: my_value is already the Rust name of a function or variable (P2R-31)

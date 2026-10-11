@@ -2,6 +2,7 @@
 
 use mago_syntax::cst::*;
 
+use super::variables::changes_variable;
 use super::{Context, Converter, statement_kind};
 use crate::printer::{self, RExpr};
 use crate::types::RustType;
@@ -17,6 +18,9 @@ impl Converter<'_> {
         match statement {
             Statement::Echo(echo) => self.echo(echo, depth, body),
             Statement::Return(ret) => self.return_statement(ret, depth, context, body),
+            Statement::Expression(expression) if changes_variable(expression.expression) => {
+                self.assignment_statement(expression, depth, body)
+            }
             Statement::Expression(expression) => self.expression_statement(expression, depth, body),
             Statement::Noop(_) => {}
             Statement::Declare(_) => {

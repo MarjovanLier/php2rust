@@ -1,0 +1,1 @@
+input.php:10:1: total is already the Rust name of a function or variable (P2R-31)

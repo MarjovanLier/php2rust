@@ -1,0 +1,1 @@
+input.php:7:5: the parameter $n is assigned before it is read (P2R-35)

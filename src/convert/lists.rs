@@ -54,10 +54,13 @@ fn unparenthesized<'e, 'a>(expression: &'e Expression<'a>) -> &'e Expression<'a>
     }
 }
 
-/// True for the list types built so far: lists of int, and lists of such lists (P2R-20).
+/// True for the list types built so far: lists of int or string, and lists of such lists
+/// (P2R-20).
 pub(super) fn list_built(ty: &RustType) -> bool {
     match ty {
-        RustType::Vec(element) => **element == RustType::I64 || list_built(element),
+        RustType::Vec(element) => {
+            matches!(**element, RustType::I64 | RustType::String) || list_built(element)
+        }
         _ => false,
     }
 }

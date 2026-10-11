@@ -152,7 +152,7 @@ mod tests {
     use super::*;
 
     /// The values PHP 8.5 gives these literals in var_dump. Adding the digit instead of
-    /// its ASCII code gives 2^65 for the 65 binary ones.
+    /// its ASCII code gives 2^65 for the 65 binary ones and for 2^65 in octal.
     #[test]
     fn integers_above_the_maximum_read_as_php_reads_them() {
         let max_plus_one = 9_223_372_036_854_775_808.0;
@@ -163,8 +163,11 @@ mod tests {
         assert_eq!(integer_as_float(b"0xFFFFFFFFFFFFFFFFFF"), wide);
         assert_eq!(integer_as_float(b"0777777777777777777777777"), wide);
         assert_eq!(integer_as_float(b"0o777777777777777777777777"), wide);
+        let below_2_65 = 3.689_348_814_741_91e19;
         let ones = [b"0b".as_slice(), &[b'1'; 65]].concat();
-        assert_eq!(integer_as_float(&ones), 3.689_348_814_741_91e19);
+        assert_eq!(integer_as_float(&ones), below_2_65);
+        assert_eq!(integer_as_float(b"0o4000000000000000000000"), below_2_65);
+        assert_eq!(integer_as_float(b"04000000000000000000000"), below_2_65);
         assert_eq!(integer_as_float(&[b'1'; 400]), f64::INFINITY);
     }
 }

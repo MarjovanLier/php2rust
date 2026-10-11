@@ -13,9 +13,28 @@ pub fn report(value: f64, limit: f64) {
     print!("\n");
 }
 
+pub fn cheap(value: f64) -> bool {
+    return value < 10.0;
+}
+
 fn main() {
     let price = 19.99;
     let total = half(price);
     report(total, 9.99);
     report(half(2.5), total);
+    let discount: f64;
+    if cheap(total) {
+        discount = 0.5;
+    } else {
+        discount = 1.5;
+    }
+    report(discount, 1.0);
+    let mut i: i64 = 0;
+    let mut rate: f64;
+    while i < 2 {
+        rate = 0.25;
+        rate *= 2.0;
+        i += 1;
+        report(rate, 0.4);
+    }
 }

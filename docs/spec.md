@@ -449,8 +449,9 @@ Sections 3 to 9 apply to nullable values unless this section says otherwise.
   read or an append; an element of a list literal, or an appended value,
   whose list holds values that cannot be null; an argument of a built-in
   function (P2R-48), of `E::from()` or of `E::tryFrom()`; the enum of
-  `->name` or `->value`; an argument for a parameter that is not nullable;
-  and a `return` value in a function whose return type is not nullable.
+  `->name` or `->value`; the subject of a `match` (P2R-120); an argument for
+  a parameter that is not nullable; and a `return` value in a function
+  whose return type is not nullable.
   These also stop: a parameter
   default value, and `return;` or a path that reaches the end of a function
   with a nullable return type.
@@ -527,43 +528,62 @@ Sections 3 to 9 apply to nullable values unless this section says otherwise.
 
 - **P2R-120** A `match` expression MUST convert to a Rust `match` when it is
   the whole value of a `return` or of an assignment to a variable
-  (`$v = match (...) {...}`), its subject has type `int`, `bool`, `string`
-  or an enum of the file, and every arm condition is a literal of the
-  subject's type (an int literal with or without unary minus, `true`,
-  `false`, or a string literal, converted by P2R-49) or a case of the
-  subject's enum. These stop the conversion:
+  (`$v = match (...) {...}`), its subject has Rust type `i64`, `bool`,
+  `String` or `&str`, or an enum of the file with at least one case, and
+  every arm condition is a literal of the subject's type (an int literal
+  with or without unary minus, `true`, `false`, or a string literal,
+  converted by P2R-49) or a case of the subject's enum. These stop the
+  conversion:
   - a `match` anywhere else: an argument, an operand, `echo`, an append, a
-    compound assignment, an arm result, a statement on its own;
-  - a subject of any other type, among them a subject that may be null
-    (P2R-106);
-  - a condition of any other form: a variable, a call, `null`, or an
-    expression, so `match (true)` with conditions stops;
-  - an arm whose result Mago gives no type, because Mago finds it
-    unreachable after an arm that is always true, other than a `default`
-    that P2R-121 leaves out.
+    compound assignment, a `for` init or step, an arm result, a statement on
+    its own;
+  - a subject of any other type, among them a subject of Rust type
+    `Option<T>` (P2R-106), also where Mago types it as `T` after a check
+    against null, and a subject of an enum without cases, because rustc
+    rejects the code around such a `match` as unreachable (P2R-50);
+  - a condition of any other form: a variable, a call, `null`, an
+    expression, or an integer literal that PHP reads as a float (P2R-49);
+    so `match (true)` with conditions stops;
+  - more than one `default` arm: PHP rejects the file when it compiles it,
+    and Mago reports nothing;
+  - an arm whose result Mago gives no type, because Mago finds the arm
+    unreachable (after an arm that is always true, or because an earlier
+    check or assignment narrowed the subject), other than a `default` that
+    P2R-121 leaves out.
 - **P2R-121** Several conditions in one arm MUST become one pattern joined by
   ` | `, in source order, and `default` MUST become `_`, written as the
   last arm wherever it stands in the source: PHP tries `default` only when
   no other arm matches. When the other arms cover every case of the enum, or
   both `true` and `false`, the `default` arm is left out, because Rust
-  rejects a `_` that no value reaches. Two conditions with the same value in
-  one `match` (`16` and `0x10`) stop the conversion, because Rust rejects the
-  second as unreachable. A `match` without `default` whose arms do not cover
-  every value of the subject's type (every int or string subject, an enum
-  with a case left out) stops: Mago reports `match-not-exhaustive` at error
-  level (P2R-11), and PHP throws an `UnhandledMatchError` there.
+  rejects a `_` that no value reaches; its contents are not converted, and a
+  read inside it does not count as a read (P2R-35). Two conditions with the
+  same value in one `match` (`16` and `0x10`, `'a'` and `"a"`) stop the
+  conversion, because Rust rejects the second as unreachable. The tool
+  decides whether the arms of a `match` without `default` cover every value
+  from the subject's Rust type and the enum's declared cases, never from the
+  type Mago gives the subject, because Mago narrows that type after a check,
+  an assignment, a `%` or a docblock and then reports nothing, while rustc
+  rejects the `match`. Without `default`, a `match` stops when its subject is
+  an int or a string, when its subject is a bool and `true` or `false` is
+  missing, and when its subject is an enum and a case is missing. Where Mago
+  does report `match-not-exhaustive` (P2R-11), PHP throws an
+  `UnhandledMatchError`.
 - **P2R-122** Each arm result MUST convert as the value of its `return` or
   assignment does, with P2R-25, P2R-26, P2R-102 and P2R-106 applied to each
   arm result, never to the whole `match`, and the arm results MUST have one
-  Rust type after that. When the `match` is the value of a new variable and
-  every arm result is an int literal, the first one gets `_i64` (P2R-49).
-  Only the arm PHP chooses runs, as in PHP. A string subject compares as
-  `&str`: a `String` value as `s.as_str()`, a string parameter as it is.
+  Rust type after that. A `let` whose `match` has no arm result that fixes
+  the Rust type (int literals, `None`, and `Some(..)` or lists built only
+  from them do not) names the type, as other first writes do (P2R-49):
+  `let v: i64 = match x {`, `let v: Option<i64> = match x {`. Only the arm
+  PHP chooses runs, as in PHP. A subject of Rust type `String` compares as
+  `s.as_str()`; a subject that is already `&str` (a string parameter, a
+  P2R-104 binding, `->name`, a string `->value`) stays as it is.
 - **P2R-123** The `return`, `let` or assignment line MUST end with
   `match subject {`; each arm MUST be one line one level deeper, ending with
   `,`; and `};` closes the `match` at the level of the opening line, as
-  rustfmt writes it. Each arm line follows the one-line rule of P2R-51: when
-  rustfmt would split an arm, its pattern or its value, the conversion stops.
+  rustfmt writes it. The opening line and each arm line follow the one-line
+  rule of P2R-51: when rustfmt would split one of them, or an arm's pattern
+  or value, the conversion stops.
 - **P2R-124** For P2R-34 and P2R-35, each arm MUST be its own path from the
   subject, and the paths join after the `match`.
 

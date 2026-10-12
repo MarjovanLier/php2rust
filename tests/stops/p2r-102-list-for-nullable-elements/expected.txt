@@ -1,0 +1,1 @@
+input.php:12:11: a list of values that cannot be null where a list of values that may be null is declared is not supported (P2R-102)

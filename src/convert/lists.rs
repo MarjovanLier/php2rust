@@ -62,8 +62,9 @@ pub(super) fn unparenthesized<'e, 'a>(expression: &'e Expression<'a>) -> &'e Exp
 pub(super) struct SiteTypes {
     /// The list type of each name, for a `[]` (P2R-21).
     pub(super) lists: HashMap<Vec<u8>, Option<RustType>>,
-    /// The `Option` type of each name that may hold null, when it is known (P2R-102).
-    pub(super) nulls: HashMap<Vec<u8>, RustType>,
+    /// The `Option` type of each name that may hold null (P2R-102); `None` when its reads
+    /// and writes give different types.
+    pub(super) nulls: HashMap<Vec<u8>, Option<RustType>>,
 }
 
 /// What the reads and writes of one body say about the type of each variable name.
@@ -210,13 +211,16 @@ impl Converter<'_> {
         for statement in statements {
             ListSites.walk_statement(statement, &mut sites);
         }
+        // A name with no typed site at all is left out: its null has the type null.
         let nulls = sites
             .nullable
             .iter()
-            .filter_map(|name| {
-                let inner = sites.inner.get(name)?.clone()?;
-                let ty = RustType::Option(Box::new(inner));
-                types::built(&ty).then(|| (name.clone(), ty))
+            .filter_map(|name| match sites.inner.get(name)? {
+                Some(inner) => {
+                    let ty = RustType::Option(Box::new(inner.clone()));
+                    types::built(&ty).then(|| (name.clone(), Some(ty)))
+                }
+                None => Some((name.clone(), None)),
             })
             .collect();
         SiteTypes {
@@ -258,9 +262,19 @@ impl Converter<'_> {
                 }
             }
         }
+        // A nullable list type gives `[]` its list type too (P2R-100).
+        let expected = expected.map(RustType::inner);
         let found = match expected {
             Some(expected @ RustType::Vec(_)) if self.empty_list(array) => Ok(expected.clone()),
             _ if self.empty_list(array) => Err(UNKNOWN_ELEMENT.to_owned()),
+            // Where a list of `Option` is expected, a literal of plain values, or of nulls
+            // only, takes that type: its elements become `Some(..)` and `None` (P2R-102).
+            Some(expected @ RustType::Vec(element))
+                if matches!(**element, RustType::Option(_))
+                    && self.elements_fit(array, element) =>
+            {
+                Ok(expected.clone())
+            }
             _ => self.site_type(array),
         };
         let ty = match found {
@@ -283,6 +297,13 @@ impl Converter<'_> {
             .into_iter()
             .map(|value| {
                 let (expr, element) = self.value(value, wanted.as_ref())?;
+                // Mago may type the element as `T` where it knows more (P2R-104).
+                if let RustType::Vec(target) = &ty
+                    && nulls::null_for_plain(&element, target)
+                {
+                    self.refuse(value, nulls::NULL_ELEMENT);
+                    return None;
+                }
                 let expr = self.stored(value, expr, &element, array.span());
                 Some(match &wanted {
                     Some(wanted) => nulls::wrapped(expr, &element, wanted),
@@ -292,6 +313,21 @@ impl Converter<'_> {
             .collect();
         let items = items.into_iter().collect::<Option<Vec<RExpr>>>()?;
         Some((RExpr::List(items), ty))
+    }
+
+    /// True when every element Mago finds in the list literal `array` is null, `element`
+    /// or its inner type (P2R-102).
+    fn elements_fit(&self, array: &Array<'_>, element: &RustType) -> bool {
+        let Some(elements) = self
+            .artifacts
+            .get_expression_type(array)
+            .and_then(types::list_elements)
+        else {
+            return false;
+        };
+        types::only_null(&elements)
+            || types::rust_type(&elements)
+                .is_ok_and(|found| found == *element || found == *element.inner())
     }
 
     /// Records the variables of a refused list literal, then refuses it.
@@ -316,7 +352,12 @@ impl Converter<'_> {
         let index = self.expression(access.index);
         let ((list, list_type), (index, index_type)) = (list?, index?);
         let RustType::Vec(element) = list_type else {
-            self.refuse(access, "only a list can be read by index (P2R-47)");
+            let message = if matches!(list_type, RustType::Option(_)) {
+                "a value that may be null cannot be read by index (P2R-106)"
+            } else {
+                "only a list can be read by index (P2R-47)"
+            };
+            self.refuse(access, message);
             return None;
         };
         if index_type != RustType::I64 {
@@ -345,6 +386,10 @@ impl Converter<'_> {
             }
         };
         let (list, ty) = self.expression(argument.value)?;
+        if matches!(ty, RustType::Option(_)) {
+            self.refuse(argument.value, nulls::NULL_BUILT_IN);
+            return None;
+        }
         if !matches!(ty, RustType::Vec(_)) {
             self.refuse(node, "count() converts on a list only (P2R-48)");
             return None;

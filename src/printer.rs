@@ -366,13 +366,15 @@ pub fn format_arguments(text: &str, values: &[RExpr]) -> Result<String, TooWide>
     Ok(arguments)
 }
 
-/// The elements of a list literal on one line, the first with `anchor`. rustfmt's
-/// `array_width` is 60 as well: wider elements go one per line (P2R-51).
+/// The elements of a list literal on one line, the first that can take it with `anchor`:
+/// `None` has no literal to suffix (P2R-49). rustfmt's `array_width` is 60 as well: wider
+/// elements go one per line (P2R-51).
 fn elements(items: &[RExpr], anchor: bool) -> Result<String, TooWide> {
+    let first = items.iter().position(|item| !matches!(item, RExpr::None));
     let parts = items
         .iter()
         .enumerate()
-        .map(|(i, item)| render(item, anchor && i == 0, 0))
+        .map(|(i, item)| render(item, anchor && Some(i) == first, 0))
         .collect::<Result<Vec<_>, _>>()?;
     let joined = parts.join(", ");
     if joined.len() > ARGS_WIDTH {
@@ -634,6 +636,12 @@ mod tests {
         assert!(!anchored(&some));
         assert!(!anchored(&RExpr::None));
         assert!(anchored(&RExpr::Some(Box::new(RExpr::Var("n".into())))));
+        // The first element that is not `None` takes the `_i64`.
+        let list = RExpr::List(vec![RExpr::None, RExpr::Some(int(7)), RExpr::Some(int(8))]);
+        assert_eq!(
+            expr(&list, true).unwrap(),
+            "vec![None, Some(7_i64), Some(8)]"
+        );
     }
 
     #[test]

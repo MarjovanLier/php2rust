@@ -11,6 +11,13 @@ impl Converter<'_> {
     /// truthiness has no Rust form, so the value must be a bool (P2R-42).
     pub(super) fn condition(&mut self, expression: &Expression<'_>) -> Option<RExpr> {
         let (expr, ty) = self.expression(expression)?;
+        if matches!(ty, RustType::Option(_)) {
+            self.refuse(
+                expression,
+                "a value that may be null cannot be a condition (P2R-106)",
+            );
+            return None;
+        }
         if ty != RustType::Bool {
             self.refuse(
                 expression,

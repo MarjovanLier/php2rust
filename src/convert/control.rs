@@ -25,6 +25,9 @@ pub(super) struct Loop {
     breaks: Vec<Values>,
     /// For a `for` with a step: each `continue`, where the step runs first (P2R-40).
     steps: Option<Vec<Site>>,
+    /// The PHP names that a let-else anywhere in the body guards, which the step must not
+    /// read or write (P2R-104).
+    guarded: Vec<Vec<u8>>,
 }
 
 impl Loop {
@@ -35,6 +38,7 @@ impl Loop {
             exit,
             breaks: Vec::new(),
             steps: None,
+            guarded: Vec::new(),
         }
     }
 
@@ -185,6 +189,9 @@ impl Converter<'_> {
             let binding = self.bind_null(variable, inner);
             self.variables.guard(binding);
             self.variables.set_guard(at, binding);
+            for frame in &mut self.variables.loops {
+                frame.guarded.push(variable.name[1..].to_vec());
+            }
         }
     }
 
@@ -363,6 +370,7 @@ impl Converter<'_> {
             exit,
             breaks: Vec::new(),
             steps: (!parts.steps.is_empty()).then(Vec::new),
+            guarded: Vec::new(),
         });
         self.variables.left = None;
         let outer = self.variables.open(slot, true);
@@ -371,11 +379,16 @@ impl Converter<'_> {
         }
         let falls_through = self.variables.left.is_none();
         if falls_through {
-            self.variables.in_step = true;
+            self.variables.step_guards = self
+                .variables
+                .loops
+                .last()
+                .map(|frame| frame.guarded.clone())
+                .unwrap_or_default();
             for &step in parts.steps {
                 self.simple_expression(step, depth + 1, body);
             }
-            self.variables.in_step = false;
+            self.variables.step_guards.clear();
             let end = self.variables.flow.current();
             self.variables.flow.edge(end, head);
         }
@@ -395,11 +408,11 @@ impl Converter<'_> {
             self.variables.set_values(&site.values);
             self.variables.flow.enter(site.block);
             let mut lines = Vec::new();
-            self.variables.in_step = true;
+            self.variables.step_guards = frame.guarded.clone();
             for &step in parts.steps {
                 self.simple_expression(step, site.depth, &mut lines);
             }
-            self.variables.in_step = false;
+            self.variables.step_guards.clear();
             body.splice(site.line..site.line, lines);
         }
         self.variables.close(outer);

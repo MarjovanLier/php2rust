@@ -103,7 +103,12 @@ impl Converter<'_> {
             return (None, false, String::new());
         };
         let RustType::Vec(element) = &ty else {
-            self.refuse(list, "foreach converts over a list only (P2R-41)");
+            let message = if matches!(ty, RustType::Option(_)) {
+                "foreach over a value that may be null is not supported (P2R-106)"
+            } else {
+                "foreach converts over a list only (P2R-41)"
+            };
+            self.refuse(list, message);
             return (None, false, String::new());
         };
         // A Copy value comes out of a borrowed list as a plain value.

@@ -1,0 +1,6 @@
+input.php:31:10: foreach over a value that may be null is not supported (P2R-106)
+input.php:34:12: a value that may be null cannot go to a built-in function (P2R-106)
+input.php:35:6: a value that may be null cannot be read by index (P2R-106)
+input.php:36:1: a value that may be null cannot be appended to (P2R-106)
+input.php:38:6: arithmetic on a value that may be null is not supported (P2R-106)
+input.php:39:5: a value that may be null cannot be a condition (P2R-106)

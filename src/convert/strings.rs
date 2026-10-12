@@ -9,7 +9,7 @@
 use mago_span::Span;
 use mago_syntax::cst::*;
 
-use super::Converter;
+use super::{Converter, nulls};
 use crate::printer::RExpr;
 use crate::types::{self, RustType};
 
@@ -48,7 +48,12 @@ impl Converter<'_> {
             self.refuse(node, "strlen takes one positional argument (P2R-48)");
             return None;
         };
-        let (expr, _) = self.expression(argument.value)?;
+        let (expr, ty) = self.expression(argument.value)?;
+        // Mago may type the argument as a string where it knows more (P2R-104).
+        if matches!(ty, RustType::Option(_)) {
+            self.refuse(argument.value, nulls::NULL_BUILT_IN);
+            return None;
+        }
         Some((RExpr::Len(Box::new(expr)), RustType::I64))
     }
 
@@ -173,9 +178,8 @@ impl Converter<'_> {
             && !matches!(ty, RustType::I64 | RustType::String)
         {
             self.record_refused(value);
-            // PHP joins null as an empty string (P2R-106).
             let message = if matches!(ty, RustType::Option(_)) {
-                "a value that may be null cannot be joined into a string (P2R-106)"
+                nulls::NULL_JOINED
             } else {
                 "only string and int values can be joined into a string (P2R-45)"
             };
@@ -185,6 +189,11 @@ impl Converter<'_> {
         let Some((expr, ty)) = self.expression(value) else {
             return false;
         };
+        // Mago may type the value as a string where it knows more (P2R-104).
+        if matches!(ty, RustType::Option(_)) {
+            self.refuse(value, nulls::NULL_JOINED);
+            return false;
+        }
         pieces.push(match expr {
             RExpr::Str(text) => Piece::Text(text),
             RExpr::Int(value) => Piece::Text(value.to_string()),

@@ -11,6 +11,21 @@ use super::{Converter, booleans, lists};
 use crate::printer::{BinOp, RExpr};
 use crate::types::RustType;
 
+/// The problem of a value that may be null as an element of a list of plain values
+/// (P2R-106).
+pub(super) const NULL_ELEMENT: &str =
+    "a value that may be null cannot go into a list of values that cannot be null (P2R-106)";
+
+/// The problem of a value that may be null as the argument of a built-in function
+/// (P2R-106).
+pub(super) const NULL_BUILT_IN: &str =
+    "a value that may be null cannot go to a built-in function (P2R-106)";
+
+/// The problem of a value that may be null joined into a string, which PHP joins as an
+/// empty string (P2R-106).
+pub(super) const NULL_JOINED: &str =
+    "a value that may be null cannot be joined into a string (P2R-106)";
+
 /// `expr`, of type `ty`, where a value of type `target` is needed: a `T` value becomes
 /// `Some(..)` where an `Option<T>` is needed (P2R-102).
 pub(super) fn wrapped(expr: RExpr, ty: &RustType, target: &RustType) -> RExpr {
@@ -287,13 +302,16 @@ impl Converter<'_> {
                 default: Box::new(right),
                 lazy,
             }
-        } else if **inner == RustType::String && matches!(right, RExpr::Str(_) | RExpr::Var(_)) {
+        } else if **inner == RustType::String
+            && (matches!(right, RExpr::Str(_) | RExpr::Var(_)) || self.lends(&right))
+        {
             // Both sides are borrowed, so neither is copied. The result is a `&str`, which
-            // `owned` copies where a `String` is needed.
+            // `owned` copies where a `String` is needed. A default that is itself such a
+            // `??` (`$p ?? $q ?? 'z'`) is borrowed too.
             RExpr::Unwrap {
                 option: Box::new(self.borrowed(left, &left_type)),
                 default: Box::new(self.borrowed(right, &right_type)),
-                lazy: false,
+                lazy,
             }
         } else {
             // `unwrap_or` takes the option, so a variable moves unless it is read again.
@@ -338,6 +356,8 @@ impl Converter<'_> {
                 let text = match expr {
                     RExpr::Str(_) => expr,
                     RExpr::Var(ref name) if self.variables.is_borrowed(name) => expr,
+                    // The `&str` that `??` gives is borrowed already (P2R-105).
+                    lent if self.lends(&lent) => lent,
                     other => RExpr::Method(Box::new(other), "as_str"),
                 };
                 RExpr::Some(Box::new(text))

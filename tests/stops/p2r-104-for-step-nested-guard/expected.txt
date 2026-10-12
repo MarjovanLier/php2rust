@@ -1,0 +1,1 @@
+input.php:13:42: a for step cannot write a variable that a let-else in the loop body checks against null (P2R-104)

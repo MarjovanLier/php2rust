@@ -7,7 +7,7 @@
 use mago_span::HasSpan;
 use mago_syntax::cst::*;
 
-use super::Converter;
+use super::{Converter, nulls};
 use crate::printer::{self, BinOp, RExpr};
 use crate::types::RustType;
 
@@ -27,6 +27,15 @@ impl Converter<'_> {
             self.refuse(
                 node,
                 "a list of int where a list of float is declared is not supported (P2R-25)",
+            );
+            return None;
+        }
+        // A list literal takes the list of `Option` type it flows into; any other list
+        // value has no conversion to it (P2R-102).
+        if plain_for_nullable(ty.inner(), declared.inner()) {
+            self.refuse(
+                node,
+                "a list of values that cannot be null where a list of values that may be null is declared is not supported (P2R-102)",
             );
             return None;
         }
@@ -95,9 +104,19 @@ impl Converter<'_> {
             }
         };
         // Both convert first, so problems in both are reported.
-        let left = self.expression(left);
-        let right = self.expression(right);
-        Some((left?, right?))
+        let converted = (self.expression(left), self.expression(right));
+        let (Some(left_value), Some(right_value)) = converted else {
+            return None;
+        };
+        // Mago may type an argument as a number where it knows more (P2R-104).
+        let mut plain = true;
+        for (node, (_, ty)) in [(left, &left_value), (right, &right_value)] {
+            if matches!(ty, RustType::Option(_)) {
+                self.refuse(node, nulls::NULL_BUILT_IN);
+                plain = false;
+            }
+        }
+        plain.then_some((left_value, right_value))
     }
 }
 
@@ -112,6 +131,17 @@ fn ints_for_floats(ty: &RustType, declared: &RustType) -> bool {
         (RustType::Vec(found), RustType::Vec(wanted)) => {
             (*found.inner() == RustType::I64 && *wanted.inner() == RustType::F64)
                 || ints_for_floats(found.inner(), wanted.inner())
+        }
+        _ => false,
+    }
+}
+
+/// True for a list of `T`, at any depth, where a list of `Option<T>` is declared.
+fn plain_for_nullable(ty: &RustType, declared: &RustType) -> bool {
+    match (ty, declared) {
+        (RustType::Vec(found), RustType::Vec(wanted)) => {
+            (matches!(**wanted, RustType::Option(_)) && **found == *wanted.inner())
+                || plain_for_nullable(found, wanted)
         }
         _ => false,
     }

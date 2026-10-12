@@ -34,6 +34,13 @@ impl Converter<'_> {
                 match ty {
                     RustType::I64 => self.checked_constant(unary, RExpr::Neg(Box::new(operand))),
                     RustType::F64 => Some((RExpr::Neg(Box::new(operand)), ty)),
+                    RustType::Option(_) => {
+                        self.refuse(
+                            unary,
+                            "arithmetic on a value that may be null is not supported (P2R-106)",
+                        );
+                        None
+                    }
                     _ => {
                         self.refuse(unary, "unary minus needs an int or float operand (P2R-43)");
                         None

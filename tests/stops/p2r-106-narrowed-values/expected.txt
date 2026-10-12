@@ -1,0 +1,5 @@
+input.php:29:13: a value that may be null cannot go into a list of values that cannot be null (P2R-106)
+input.php:30:13: a value that may be null cannot go to a built-in function (P2R-106)
+input.php:31:7: a value that may be null cannot be joined into a string (P2R-106)
+input.php:32:13: a value that may be null cannot go to a built-in function (P2R-106)
+input.php:34:1: a value that may be null cannot go into a list of values that cannot be null (P2R-106)

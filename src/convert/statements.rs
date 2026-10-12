@@ -48,6 +48,10 @@ impl Converter<'_> {
                     "declare(strict_types=1); must be the first statement (P2R-12)",
                 );
             }
+            Statement::Enum(declaration) => self.refuse(
+                &declaration.name,
+                "an enum must be declared outside functions and blocks (P2R-110)",
+            ),
             other => self.refuse(
                 other,
                 format!(

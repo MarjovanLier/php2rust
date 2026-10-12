@@ -12,6 +12,13 @@ use crate::types::RustType;
 /// Type names the output itself uses, which an enum must not take (P2R-111).
 const TAKEN: &[&str] = &["Option", "String", "Vec", "ToOwned"];
 
+/// Names PHP reserves for types, which no enum may take; Mago does not report them
+/// (P2R-111).
+const RESERVED: &[&str] = &[
+    "array", "bool", "callable", "false", "float", "int", "iterable", "mixed", "never", "null",
+    "object", "parent", "self", "static", "string", "true", "void",
+];
+
 /// An enum of the file (P2R-110).
 pub(super) struct EnumInfo {
     /// The lowercase PHP name, by which every use finds it (P2R-111).
@@ -78,6 +85,14 @@ impl Converter<'_> {
     /// registers, so its uses find their type; a name problem leaves it out.
     fn enum_info(&mut self, declaration: &Enum<'_>) -> Option<EnumInfo> {
         let php = String::from_utf8_lossy(declaration.name.value);
+        let lower = php.to_ascii_lowercase();
+        if RESERVED.contains(&lower.as_str()) || self.built_in_classes.contains(lower.as_bytes()) {
+            self.refuse(
+                &declaration.name,
+                format!("PHP reserves the name {php} or has a class of that name (P2R-111)"),
+            );
+            return None;
+        }
         let Some(rust_name) = names::type_name(&php).filter(|name| !TAKEN.contains(&name.as_str()))
         else {
             self.refuse(
@@ -86,22 +101,29 @@ impl Converter<'_> {
             );
             return None;
         };
+        if let Some(attributes) = declaration.attribute_lists.first() {
+            self.refuse(attributes, "attributes are not supported (P2R-07)");
+        }
         if let Some(implements) = &declaration.implements {
             self.refuse(
                 implements,
                 "an enum that implements an interface is not supported (P2R-110)",
             );
         }
-        let backing = declaration
-            .backing_type_hint
-            .as_ref()
-            .map(|hint| match hint.hint {
+        let backing = match &declaration.backing_type_hint {
+            None => None,
+            Some(hint) => match hint.hint {
                 Hint::Integer(_) => Some(RustType::I64),
                 Hint::String(_) => Some(RustType::String),
-                // Mago reports any other backing type (P2R-11).
-                _ => None,
-            })
-            .unwrap_or_default();
+                _ => {
+                    self.refuse(
+                        hint,
+                        "an enum can be backed by int or string only (P2R-110)",
+                    );
+                    None
+                }
+            },
+        };
         let mut cases: Vec<Case> = Vec::new();
         for member in declaration.members.iter() {
             let ClassLikeMember::EnumCase(case) = member else {
@@ -127,9 +149,28 @@ impl Converter<'_> {
                 );
                 continue;
             }
-            let value = match &case.item {
-                EnumCaseItem::Backed(backed) => self.backing_value(backed.value),
-                EnumCaseItem::Unit(_) => None,
+            if let Some(attributes) = case.attribute_lists.first() {
+                self.refuse(attributes, "attributes are not supported (P2R-07)");
+            }
+            // PHP rejects both mismatches when it compiles the file; Mago reports only the
+            // second.
+            let value = match (&case.item, declaration.backing_type_hint.is_some()) {
+                // A refused backing type has no values to check.
+                (EnumCaseItem::Backed(backed), true) => backing
+                    .as_ref()
+                    .and_then(|_| self.backing_value(backed.value)),
+                (EnumCaseItem::Unit(_), true) => {
+                    self.refuse(name, "a case of a backed enum needs a value (P2R-110)");
+                    None
+                }
+                (EnumCaseItem::Backed(backed), false) => {
+                    self.refuse(
+                        backed.value,
+                        "a case of a pure enum cannot have a value (P2R-110)",
+                    );
+                    None
+                }
+                (EnumCaseItem::Unit(_), false) => None,
             };
             cases.push(Case {
                 php_name: name.value.to_vec(),
@@ -283,10 +324,22 @@ impl Converter<'_> {
         };
         let index = self.enum_of(call.class);
         let arguments = call.argument_list.arguments.as_slice();
+        let named_or_spread = arguments.iter().find(|argument| match argument {
+            Argument::Positional(positional) => positional.ellipsis.is_some(),
+            Argument::Named(_) => true,
+        });
+        if let (Some(_), Some(argument)) = (index, named_or_spread) {
+            self.record_refused(node);
+            self.refuse(
+                argument,
+                "named and spread arguments are not supported (P2R-07)",
+            );
+            return None;
+        }
         let usable = match (index, method.as_slice(), arguments) {
             (Some(_), b"cases", []) => true,
-            (Some(index), b"from" | b"tryfrom", [Argument::Positional(argument)]) => {
-                argument.ellipsis.is_none() && self.enums[index].backing.is_some()
+            (Some(index), b"from" | b"tryfrom", [Argument::Positional(_)]) => {
+                self.enums[index].backing.is_some()
             }
             _ => false,
         };
@@ -317,6 +370,15 @@ impl Converter<'_> {
             self.refuse(
                 argument.value,
                 "the argument of E::from() and E::tryFrom() must have the backing type of the enum (P2R-114)",
+            );
+            return None;
+        }
+        if method == b"from" && self.enums[index].cases.is_empty() {
+            // The call returns a value of a type with no values, so rustc rejects the code
+            // after it as unreachable.
+            self.refuse(
+                node,
+                "E::from() on an enum without cases always fails, and rustc rejects the code after it (P2R-50)",
             );
             return None;
         }
@@ -361,14 +423,9 @@ impl Converter<'_> {
             }
             lines.push("}".to_owned());
         }
-        // rustfmt splits a longer line, and a `Some(..)` argument wider than 60 columns.
-        let wide_some = info.used.try_from
-            && info
-                .cases
-                .iter()
-                .any(|case| info.rust_name.len() + 2 + case.rust_name.len() > printer::ARGS_WIDTH);
+        // rustfmt splits a longer line.
         let span = info.span;
-        if wide_some || lines.iter().any(|line| line.len() > printer::MAX_WIDTH) {
+        if lines.iter().any(|line| line.len() > printer::MAX_WIDTH) {
             self.refuse(&span, "this enum has a line too long for one line (P2R-51)");
         }
         lines
@@ -436,10 +493,11 @@ fn methods(info: &EnumInfo) -> Vec<Vec<String>> {
         let mut lines = vec![format!("    pub fn cases() -> Vec<{name}> {{")];
         if paths.is_empty() {
             lines.push("        Vec::new()".to_owned());
-        } else if joined.len() <= printer::ARGS_WIDTH {
+        } else if paths.len() == 1 || joined.len() <= printer::ARGS_WIDTH {
             lines.push(format!("        vec![{joined}]"));
         } else {
-            // rustfmt's array width is 60: wider elements go one per line.
+            // rustfmt's array width is 60: wider elements go one per line, but one element
+            // stays on the line.
             lines.push("        vec![".to_owned());
             lines.extend(paths.iter().map(|path| format!("            {path},")));
             lines.push("        ]".to_owned());
@@ -455,16 +513,22 @@ fn methods(info: &EnumInfo) -> Vec<Vec<String>> {
 fn matching(
     signature: &str,
     subject: &str,
-    arms: impl Iterator<Item = (String, String)>,
+    arms: impl ExactSizeIterator<Item = (String, String)>,
     last: Option<&str>,
 ) -> Vec<String> {
-    let mut lines = vec![
-        format!("    pub fn {signature} {{"),
-        format!("        match {subject} {{"),
-    ];
+    let mut lines = vec![format!("    pub fn {signature} {{")];
+    if arms.len() == 0 && last.is_none() {
+        // rustfmt writes a match without arms on one line.
+        lines.push(format!("        match {subject} {{}}"));
+        lines.push("    }".to_owned());
+        return lines;
+    }
+    lines.push(format!("        match {subject} {{"));
     for (pattern, value) in arms {
         let line = format!("            {pattern} => {value},");
-        if line.len() <= printer::MAX_WIDTH {
+        // rustfmt counts columns, not bytes, so a non-ASCII line stays whole and the width
+        // check of enum_item refuses it.
+        if line.len() <= printer::MAX_WIDTH || !line.is_ascii() {
             lines.push(line);
         } else {
             lines.push(format!("            {pattern} => {{"));

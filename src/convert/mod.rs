@@ -1,7 +1,7 @@
 //! Walks the Mago syntax tree and writes Rust (docs/spec.md sections 2 to 5).
 
 use std::borrow::Cow;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use mago_allocator::LocalArena;
 use mago_analyzer::Analyzer;
@@ -70,6 +70,20 @@ pub fn convert(path: &str, source: Vec<u8>) -> Result<String, Failure> {
     }
     let resolved = NameResolver::new(&arena).resolve(program);
     let mut codebase = Prelude::build().metadata;
+    // An enum may not take the name of a class PHP has built in, and once the file is
+    // scanned the two cannot be told apart (P2R-111).
+    let built_in_classes: HashSet<Vec<u8>> = program
+        .statements
+        .iter()
+        .filter_map(|statement| match statement {
+            Statement::Enum(declaration)
+                if codebase.get_class_like(declaration.name.value).is_some() =>
+            {
+                Some(declaration.name.value.to_ascii_lowercase())
+            }
+            _ => None,
+        })
+        .collect();
     codebase.extend(scan_program(
         &arena,
         &file,
@@ -105,6 +119,7 @@ pub fn convert(path: &str, source: Vec<u8>) -> Result<String, Failure> {
         .filter_map(mago_problem)
         .collect();
     let mut converter = Converter::new(&codebase, artifacts);
+    converter.built_in_classes = built_in_classes;
     let rust = converter.program(program);
     problems.append(&mut converter.problems);
     if problems.is_empty() {
@@ -241,6 +256,8 @@ struct Converter<'c> {
     enums: Vec<enums::EnumInfo>,
     /// The Rust name of each enum by lowercase PHP name (P2R-111).
     enum_names: EnumNames,
+    /// The lowercase names of the file's enums that PHP already has as a class (P2R-111).
+    built_in_classes: HashSet<Vec<u8>>,
     /// The variables of the body being converted: a function, or `fn main()`.
     variables: Variables,
 }
@@ -254,6 +271,7 @@ impl<'c> Converter<'c> {
             functions: HashMap::new(),
             enums: Vec::new(),
             enum_names: EnumNames::new(),
+            built_in_classes: HashSet::new(),
             variables: Variables::default(),
         }
     }

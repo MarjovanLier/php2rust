@@ -1299,6 +1299,12 @@ impl Converter<'_> {
         if matches!(known, RustType::Vec(_)) && self.empty_list(node) {
             return Ok(known.clone());
         }
+        // Mago records no type for an enum variable read again after a property read, as
+        // in `$e->name . $e->name`; every write keeps the one type (P2R-113).
+        if matches!(known, RustType::Enum(_)) && self.artifacts.get_expression_type(node).is_none()
+        {
+            return Ok(known.clone());
+        }
         // A read or write of an `Option` variable has its type, also where Mago knows that
         // the value is null there, or that it is not (P2R-102, P2R-104).
         if let RustType::Option(inner) = known

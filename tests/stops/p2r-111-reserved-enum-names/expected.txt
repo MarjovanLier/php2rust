@@ -1,0 +1,2 @@
+input.php:5:6: PHP reserves the name Bool or has a class of that name (P2R-111)
+input.php:10:6: PHP reserves the name Exception or has a class of that name (P2R-111)

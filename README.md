@@ -67,6 +67,10 @@ converts:
   in PHP.
 - `if`, `elseif`, `else`, `while`, `for`, `foreach` (value only and `key => value`),
   `break`, `continue` and `return`. `while (true)` and `for (;;)` become `loop`.
+- `match` as the whole value of a `return` or of `$v = match (...) {...}`: a Rust
+  `match` on an int, bool, string or enum, whose conditions are literals or enum cases.
+  Several conditions in one arm become `a | b`, and `default` becomes `_`, or is left
+  out when the other arms already cover every enum case or both `true` and `false`.
 - `+`, `-`, `*`, unary minus, `+=`, `-=`, `*=`, `++` and `--` on two ints or two floats,
   `%` on ints, `===` and `!==` on two ints, floats, bools or strings, `==` and `!=` on
   two ints, floats or bools, `<`, `>`, `<=` and `>=` on two ints or two floats, and `&&`,
@@ -85,9 +89,13 @@ Anything not listed above stops the conversion. php2rust then prints every probl
 its line and column, and writes nothing. Its own messages end with the requirement ID;
 the others are findings of the Mago analyser. In short:
 
-- PHP that version 1 does not convert, for example classes, closures, `match`,
-  `namespace`, `use`, casts, `print`, `printf`, `exit`, heredoc, constants other than
-  `true` and `false`, and built-in functions other than the four above.
+- PHP that version 1 does not convert, for example classes, closures, `namespace`,
+  `use`, casts, `print`, `printf`, `exit`, heredoc, constants other than `true` and
+  `false`, and built-in functions other than the four above.
+- A `match` anywhere other than a `return` or an assignment, on a value that may be
+  null, with a condition that is not a literal or an enum case, with two `default`
+  arms or two conditions of the same value, or without `default` where its arms leave a
+  value out (every int or string `match` needs `default`).
 - An enum with a method, a constant, an interface, an attribute or a backing value that
   is not a plain literal, an enum declared inside a function or a block, and an enum
   declared after other code outside functions: PHP declares an enum only when execution
@@ -145,6 +153,13 @@ php2rust refuses some valid PHP that version 1 converts in other forms:
   rejects the code after it.
 - An enum helper line with non-ASCII text that is longer than 100 bytes stops, also
   where it fits in 100 columns, for example a long backing value with accents.
+- A `match` on a value that Mago narrows stops where PHP never fails. After
+  `if ($s === Suit::Hearts) { return 0; }`, a `match` with arms for every other case
+  stops: without `default` because Rust needs every case, and with `default` because
+  Mago finds that arm unreachable and gives it no type. `match ($n % 2)` with arms `0`,
+  `1` and `-1` stops for the same two reasons. Handle the narrowed case inside the
+  `match` instead of before it.
+- A `match` arm that rustfmt would split over several lines stops.
 
 ## Known differences from PHP
 

@@ -1329,14 +1329,10 @@ fn same_type(php_name: &[u8], known: &RustType, found: RustType) -> Result<RustT
     ))
 }
 
-/// Only int, float, bool, string and list variables are written so far; the other types
-/// follow in later steps (P2R-20).
+/// Only the types of `types::built` are written so far; the other types follow in later
+/// steps (P2R-20).
 fn built_yet(ty: RustType) -> Result<RustType, String> {
-    if matches!(
-        ty,
-        RustType::I64 | RustType::F64 | RustType::Bool | RustType::String
-    ) || lists::list_built(&ty)
-    {
+    if types::built(&ty) {
         return Ok(ty);
     }
     Err(format!(

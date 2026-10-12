@@ -68,6 +68,11 @@ pub fn octal_overflow(raw: &[u8]) -> bool {
 /// them (P2R-51).
 pub const ARGS_WIDTH: usize = 60;
 
+/// rustfmt's `chain_width`: a chain of two or more method calls that is wider goes one
+/// call per line, so php2rust refuses it (P2R-51). One call on its own only has to fit the
+/// line.
+const CHAIN_WIDTH: usize = 60;
+
 /// A Rust expression before layout.
 #[derive(Clone, Debug)]
 pub enum RExpr {
@@ -100,6 +105,13 @@ pub enum RExpr {
     Float(f64),
     /// `value as f64`: an int where a float is declared (P2R-25).
     ToFloat(Box<RExpr>),
+    /// The literal `null` (P2R-102).
+    None,
+    /// A value where an `Option` is needed (P2R-102).
+    Some(Box<RExpr>),
+    /// `value.map(ToOwned::to_owned)`: the owned copy of an `Option<&str>` or
+    /// `Option<&[T]>` parameter (P2R-101).
+    MapOwned(Box<RExpr>),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -243,12 +255,14 @@ fn render(expr: &RExpr, anchor: bool, min_precedence: u8) -> Result<String, TooW
             RExpr::List(items) => format!("&[{}]", elements(items, false)?),
             other => format!("&{}", render(other, false, UNARY)?),
         },
-        RExpr::Method(inner, method) => {
-            format!("{}.{method}()", render(inner, false, POSTFIX)?)
-        }
+        RExpr::Method(inner, method) => chained(
+            expr,
+            format!("{}.{method}()", render(inner, false, POSTFIX)?),
+        )?,
         RExpr::Len(inner) => {
             // A length fixes no element type, so a list of literals gets `_i64` (P2R-49).
-            let text = format!("{}.len() as i64", render(inner, true, POSTFIX)?);
+            let call = chained(expr, format!("{}.len()", render(inner, true, POSTFIX)?))?;
+            let text = format!("{call} as i64");
             if CAST < min_precedence {
                 format!("({text})")
             } else {
@@ -280,7 +294,36 @@ fn render(expr: &RExpr, anchor: bool, min_precedence: u8) -> Result<String, TooW
                 text
             }
         }
+        RExpr::None => "None".to_owned(),
+        // rustfmt lays out `Some(..)` as a call.
+        RExpr::Some(inner) => {
+            let text = render(inner, anchor, 0)?;
+            if text.len() > ARGS_WIDTH && !matches!(**inner, RExpr::Str(_)) {
+                return Err(TooWide);
+            }
+            format!("Some({text})")
+        }
+        RExpr::MapOwned(inner) => chained(
+            expr,
+            format!("{}.map(ToOwned::to_owned)", render(inner, false, POSTFIX)?),
+        )?,
     })
+}
+
+/// The method calls at the end of `expr`, counted from the outside in.
+fn calls(expr: &RExpr) -> usize {
+    match expr {
+        RExpr::Method(inner, _) | RExpr::Len(inner) | RExpr::MapOwned(inner) => 1 + calls(inner),
+        _ => 0,
+    }
+}
+
+/// `text`, the layout of the chain `expr`, refused when rustfmt would split it (P2R-51).
+fn chained(expr: &RExpr, text: String) -> Result<String, TooWide> {
+    if calls(expr) >= 2 && text.len() > CHAIN_WIDTH {
+        return Err(TooWide);
+    }
+    Ok(text)
 }
 
 /// The arguments of `format!` or `print!` for a joined string, refused when rustfmt would
@@ -332,6 +375,10 @@ pub fn anchored(expr: &RExpr) -> bool {
         RExpr::Index(list, _) => anchored(list),
         // A float literal without a suffix is f64, as is a cast to it.
         RExpr::Float(_) | RExpr::ToFloat(_) => true,
+        // `None` alone, or `Some(5)`, leaves the inner type to inference (P2R-49).
+        RExpr::None => false,
+        RExpr::Some(inner) => anchored(inner),
+        RExpr::MapOwned(_) => true,
     }
 }
 
@@ -366,6 +413,7 @@ pub fn literal_value(expr: &RExpr) -> Option<i64> {
         RExpr::Bool(_) | RExpr::Not(_) => None,
         RExpr::List(_) | RExpr::Index(..) => None,
         RExpr::Float(_) | RExpr::ToFloat(_) => None,
+        RExpr::None | RExpr::Some(_) | RExpr::MapOwned(_) => None,
     }
 }
 
@@ -538,6 +586,28 @@ mod tests {
         assert!(expr(&at_limit, false).is_ok());
         let one_literal = RExpr::Call("f".into(), vec![RExpr::Str("s".repeat(80))]);
         assert!(expr(&one_literal, false).is_ok());
+    }
+
+    #[test]
+    fn chains_of_two_calls_fit_in_sixty_columns() {
+        let method = |inner: RExpr, name| RExpr::Method(Box::new(inner), name);
+        let one = method(RExpr::Var("a".repeat(70)), "is_some");
+        assert!(expr(&one, false).is_ok());
+        let two = |name: &str| method(method(RExpr::Var(name.into()), "as_deref"), "is_some");
+        // `<name>.as_deref().is_some()` is 21 columns plus the name.
+        assert!(expr(&two(&"a".repeat(39)), false).is_ok());
+        assert!(expr(&two(&"a".repeat(40)), false).is_err());
+        let len = RExpr::Len(Box::new(method(RExpr::Var("a".repeat(48)), "as_deref")));
+        assert!(expr(&len, false).is_err());
+    }
+
+    #[test]
+    fn some_and_none_leave_the_type_to_the_context() {
+        let some = RExpr::Some(int(5));
+        assert_eq!(expr(&some, false).unwrap(), "Some(5)");
+        assert!(!anchored(&some));
+        assert!(!anchored(&RExpr::None));
+        assert!(anchored(&RExpr::Some(Box::new(RExpr::Var("n".into())))));
     }
 
     #[test]

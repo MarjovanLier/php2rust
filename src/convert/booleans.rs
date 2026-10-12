@@ -39,19 +39,31 @@ impl Converter<'_> {
         Some((expr, RustType::Bool))
     }
 
-    /// `===`, `!==`, `==`, `!=`, `<>`, `<`, `>`, `<=` and `>=` (P2R-43, P2R-44).
+    /// `===`, `!==`, `==`, `!=`, `<>`, `<`, `>`, `<=` and `>=` (P2R-43, P2R-44, P2R-103).
     pub(super) fn comparison(
         &mut self,
         binary: &Binary<'_>,
         op: BinOp,
     ) -> Option<(RExpr, RustType)> {
-        let left = self.expression(binary.lhs);
-        let right = self.expression(binary.rhs);
-        let ((left, left_type), (right, right_type)) = (left?, right?);
         let strict = matches!(
             binary.operator,
             BinaryOperator::Identical(_) | BinaryOperator::NotIdentical(_)
         );
+        if let Some(converted) = self.null_comparison(binary, op, strict) {
+            return converted;
+        }
+        let left = self.expression(binary.lhs);
+        let right = self.expression(binary.rhs);
+        let ((left, left_type), (right, right_type)) = (left?, right?);
+        if matches!(left_type, RustType::Option(_)) || matches!(right_type, RustType::Option(_)) {
+            return self.option_comparison(
+                binary,
+                op,
+                strict,
+                (left, left_type),
+                (right, right_type),
+            );
+        }
         if let Some(message) = refusal(op, strict, &left_type, &right_type) {
             self.refuse(binary, message);
             return None;
@@ -68,8 +80,14 @@ impl Converter<'_> {
     }
 }
 
-/// Why a comparison of these operand types does not convert, or `None` when it does.
-fn refusal(op: BinOp, strict: bool, left: &RustType, right: &RustType) -> Option<&'static str> {
+/// Why a comparison of these operand types does not convert, or `None` when it does. For
+/// `Option` operands, nulls.rs passes the inner types.
+pub(super) fn refusal(
+    op: BinOp,
+    strict: bool,
+    left: &RustType,
+    right: &RustType,
+) -> Option<&'static str> {
     let numbers = |ty: &RustType| matches!(ty, RustType::I64 | RustType::F64);
     if left != right {
         return Some(if numbers(left) && numbers(right) {
@@ -93,6 +111,8 @@ fn refusal(op: BinOp, strict: bool, left: &RustType, right: &RustType) -> Option
         }
         RustType::String | RustType::Bool => None,
         RustType::Vec(_) => Some("a comparison of lists is not supported in version 1 (P2R-07)"),
+        // Only nulls.rs compares `Option` values, by their inner types.
+        RustType::Option(_) => Some("only === and !== compare values that may be null (P2R-103)"),
     }
 }
 

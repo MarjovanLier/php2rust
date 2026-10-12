@@ -4,7 +4,7 @@
 use mago_syntax::cst::*;
 
 use super::variables::changes_variable;
-use super::{Context, Converter, statement_kind};
+use super::{Context, Converter, nulls, statement_kind};
 use crate::printer::{self, RExpr};
 use crate::types::RustType;
 
@@ -76,10 +76,17 @@ impl Converter<'_> {
                 let Some((expr, ty)) = self.value(value, Some(returns)) else {
                     return;
                 };
+                if nulls::null_for_plain(&ty, returns) {
+                    self.refuse(
+                        value,
+                        "a value that may be null cannot be returned where the return type is not nullable (P2R-106)",
+                    );
+                    return;
+                }
                 let Some(expr) = self.declared_value(value, expr, &ty, returns) else {
                     return;
                 };
-                let expr = self.owned(expr, &ty);
+                let expr = nulls::wrapped(self.owned(expr, &ty), &ty, returns);
                 let Some(rendered) = self.render(value, &expr, false) else {
                     return;
                 };

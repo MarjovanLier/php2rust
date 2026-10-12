@@ -1,0 +1,1 @@
+input.php:14:5: only === and !== compare with null, because PHP's null == 0 is true (P2R-103)

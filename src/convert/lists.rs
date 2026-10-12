@@ -12,7 +12,7 @@ use mago_span::HasSpan;
 use mago_syntax::cst::*;
 use mago_syntax::walker::Walker;
 
-use super::{Converter, Signature};
+use super::{Converter, Signature, nulls};
 use crate::printer::RExpr;
 use crate::types::{self, RustType};
 
@@ -50,24 +50,10 @@ pub(super) fn is_empty_literal(expression: &Expression<'_>) -> bool {
     matches!(unparenthesized(expression), Expression::Array(array) if array.elements.is_empty())
 }
 
-fn unparenthesized<'e, 'a>(expression: &'e Expression<'a>) -> &'e Expression<'a> {
+pub(super) fn unparenthesized<'e, 'a>(expression: &'e Expression<'a>) -> &'e Expression<'a> {
     match expression {
         Expression::Parenthesized(inner) => unparenthesized(inner.expression),
         other => other,
-    }
-}
-
-/// True for the list types built so far: lists of int, float, bool or string, and lists of
-/// such lists (P2R-20).
-pub(super) fn list_built(ty: &RustType) -> bool {
-    match ty {
-        RustType::Vec(element) => {
-            matches!(
-                **element,
-                RustType::I64 | RustType::F64 | RustType::Bool | RustType::String
-            ) || list_built(element)
-        }
-        _ => false,
     }
 }
 
@@ -184,16 +170,20 @@ impl Converter<'_> {
         sites.found
     }
 
-    /// An expression whose type is `expected` when it is known, so `[]` can take its element
-    /// type from the declared parameter or return type it flows into (P2R-21).
+    /// An expression whose type is `expected` when it is known, so `[]` and `null` can take
+    /// their type from the declared parameter or return type they flow into (P2R-21,
+    /// P2R-102).
     pub(super) fn value(
         &mut self,
         expression: &Expression<'_>,
         expected: Option<&RustType>,
     ) -> Option<(RExpr, RustType)> {
-        match unparenthesized(expression) {
-            Expression::Array(array) => self.list(array, expected),
-            other => self.expression(other),
+        match (unparenthesized(expression), expected) {
+            (Expression::Array(array), _) => self.list(array, expected),
+            (Expression::Literal(Literal::Null(_)), Some(ty @ RustType::Option(_))) => {
+                Some((RExpr::None, ty.clone()))
+            }
+            (other, _) => self.expression(other),
         }
     }
 
@@ -226,12 +216,23 @@ impl Converter<'_> {
             }
         };
         // Every element converts, so the problems in each are reported. PHP copies each
-        // into the list (P2R-26).
+        // into the list (P2R-26). In a list of `Option`, `null` is `None` and every other
+        // element is `Some(..)` (P2R-102).
+        let wanted = match &ty {
+            RustType::Vec(element) if matches!(**element, RustType::Option(_)) => {
+                Some((**element).clone())
+            }
+            _ => None,
+        };
         let items: Vec<Option<RExpr>> = values
             .into_iter()
             .map(|value| {
-                let (expr, element) = self.expression(value)?;
-                Some(self.stored(value, expr, &element, array.span()))
+                let (expr, element) = self.value(value, wanted.as_ref())?;
+                let expr = self.stored(value, expr, &element, array.span());
+                Some(match &wanted {
+                    Some(wanted) => nulls::wrapped(expr, &element, wanted),
+                    None => expr,
+                })
             })
             .collect();
         let items = items.into_iter().collect::<Option<Vec<RExpr>>>()?;

@@ -4,7 +4,7 @@ use mago_span::HasSpan;
 use mago_syntax::cst::*;
 
 use super::variables::changes_variable;
-use super::{Converter, numbers, strings};
+use super::{Converter, nulls, numbers, strings};
 use crate::printer::{self, BinOp, RExpr};
 use crate::types::RustType;
 
@@ -219,10 +219,23 @@ impl Converter<'_> {
                 Argument::Positional(positional) if positional.ellipsis.is_none() => {
                     let parameter = signature.parameters.get(position).map(|p| &p.ty);
                     match self.value(positional.value, parameter) {
+                        Some((_, ty))
+                            if parameter.is_some_and(|p| nulls::null_for_plain(&ty, p)) =>
+                        {
+                            self.refuse(
+                                positional.value,
+                                "a value that may be null cannot go to a parameter that is not nullable (P2R-106)",
+                            );
+                            converted = false;
+                        }
                         Some((expr, ty)) => {
                             let declared = parameter.unwrap_or(&ty);
                             match self.declared_value(positional.value, expr, &ty, declared) {
-                                Some(expr) => arguments.push(self.borrowed(expr, &ty)),
+                                Some(expr) => arguments.push(nulls::wrapped(
+                                    self.borrowed(expr, &ty),
+                                    &ty,
+                                    declared,
+                                )),
                                 None => converted = false,
                             }
                         }

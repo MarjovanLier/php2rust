@@ -67,17 +67,32 @@ impl Converter<'_> {
             {
                 RExpr::Method(Box::new(RExpr::Var(name)), "to_vec")
             }
-            // Rust cannot move a string or list out of a list.
-            RExpr::Index(..) if matches!(ty, RustType::String | RustType::Vec(_)) => {
-                RExpr::Method(Box::new(expr), "clone")
+            // An `Option<&str>` or `Option<&[T]>` parameter (P2R-101).
+            RExpr::Var(name)
+                if matches!(ty, RustType::Option(_))
+                    && !ty.is_copy()
+                    && self.variables.is_parameter(&name) =>
+            {
+                RExpr::MapOwned(Box::new(RExpr::Var(name)))
             }
+            // Rust cannot move a string or list out of a list.
+            RExpr::Index(..) if !ty.is_copy() => RExpr::Method(Box::new(expr), "clone"),
             other => other,
         }
     }
 
     /// A value where Rust takes a `&str` or a `&[T]`: a call argument or the right side of
-    /// `.=`.
+    /// `.=`. An owned `Option<String>` or `Option<Vec<T>>` lends `Option<&str>` or
+    /// `Option<&[T]>` (P2R-101).
     pub(super) fn borrowed(&self, expr: RExpr, ty: &RustType) -> RExpr {
+        if matches!(ty, RustType::Option(_)) {
+            return match expr {
+                _ if ty.is_copy() => expr,
+                RExpr::None => expr,
+                RExpr::Var(ref name) if self.variables.is_parameter(name) => expr,
+                other => RExpr::Method(Box::new(other), "as_deref"),
+            };
+        }
         let is_reference = match &expr {
             RExpr::Str(_) => true,
             RExpr::Var(name) => self.variables.is_parameter(name),

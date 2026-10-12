@@ -1,0 +1,1 @@
+input.php:19:12: a value that may be null cannot go to a parameter that is not nullable (P2R-106)

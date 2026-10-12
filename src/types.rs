@@ -1,4 +1,4 @@
-//! PHP types to Rust types (P2R-20 to P2R-22, P2R-24).
+//! PHP types to Rust types (P2R-20 to P2R-22, P2R-24, P2R-100, P2R-101).
 
 use mago_codex::ttype::TType;
 use mago_codex::ttype::atomic::TAtomic;
@@ -14,6 +14,8 @@ pub enum RustType {
     Bool,
     String,
     Vec(Box<RustType>),
+    /// `?T` and `T|null` (P2R-100).
+    Option(Box<RustType>),
 }
 
 impl RustType {
@@ -25,31 +27,74 @@ impl RustType {
             Self::Bool => "bool".into(),
             Self::String => "String".into(),
             Self::Vec(element) => format!("Vec<{}>", element.owned()),
+            Self::Option(inner) => format!("Option<{}>", inner.owned()),
         }
     }
 
-    /// The type of a function parameter: strings and lists are borrowed (P2R-24).
+    /// The type of a function parameter: strings and lists are borrowed, also inside an
+    /// `Option` (P2R-24, P2R-101).
     pub fn parameter(&self) -> String {
         match self {
             Self::String => "&str".into(),
             Self::Vec(element) => format!("&[{}]", element.owned()),
+            Self::Option(inner) => format!("Option<{}>", inner.parameter()),
             other => other.owned(),
+        }
+    }
+
+    /// The inner type of an `Option` (P2R-100); any other type is its own.
+    pub fn inner(&self) -> &RustType {
+        match self {
+            Self::Option(inner) => inner,
+            other => other,
+        }
+    }
+
+    /// True when Rust copies the value on assignment, so PHP's copy needs no `.clone()`
+    /// (P2R-26).
+    pub fn is_copy(&self) -> bool {
+        match self {
+            Self::I64 | Self::F64 | Self::Bool => true,
+            Self::String | Self::Vec(_) => false,
+            Self::Option(inner) => inner.is_copy(),
         }
     }
 }
 
+/// True for the types built so far: int, float, bool and string, lists of built types,
+/// and an `Option` of a built type that is not an `Option` itself (P2R-20, P2R-100).
+pub fn built(ty: &RustType) -> bool {
+    match ty {
+        RustType::I64 | RustType::F64 | RustType::Bool | RustType::String => true,
+        RustType::Vec(element) => built(element),
+        RustType::Option(inner) => !matches!(**inner, RustType::Option(_)) && built(inner),
+    }
+}
+
 /// Maps an analysed PHP type to exactly one Rust type, widening literal and refined types
-/// to their base type (P2R-21). The error names the PHP type, for the problem message.
+/// to their base type (P2R-21). A `null` member makes it an `Option` (P2R-100). The error
+/// names the PHP type, for the problem message.
 pub fn rust_type(union: &TUnion) -> Result<RustType, String> {
     let mut found: Option<RustType> = None;
+    let mut nullable = false;
     for atomic in union.types.iter() {
+        if matches!(atomic, TAtomic::Null) {
+            nullable = true;
+            continue;
+        }
         let this = atomic_type(atomic).ok_or_else(|| union.get_id().to_string())?;
         if found.as_ref().is_some_and(|seen| *seen != this) {
             return Err(union.get_id().to_string());
         }
         found = Some(this);
     }
-    found.ok_or_else(|| union.get_id().to_string())
+    match found {
+        // `?T` where `T` is itself nullable cannot be written; the union holds one null.
+        Some(RustType::Option(_)) if nullable => Err(union.get_id().to_string()),
+        Some(ty) if nullable => Ok(RustType::Option(Box::new(ty))),
+        Some(ty) => Ok(ty),
+        None => Err(union.get_id().to_string()),
+    }
 }
 
 fn atomic_type(atomic: &TAtomic) -> Option<RustType> {
@@ -65,29 +110,28 @@ fn atomic_type(atomic: &TAtomic) -> Option<RustType> {
 
 /// `list<T>`, `non-empty-list<T>` and `list{T, T}` all give `Vec<T>`. A shape like
 /// `list{int, int}` keeps its element types in `known_elements` and `never` as its
-/// general element type, so both are folded together.
+/// general element type, so both are folded together. They fold as one union, so
+/// `list{int(1), null}` gives `Vec<Option<i64>>` (P2R-100).
 fn list_type(list: &TList) -> Option<RustType> {
-    let mut members: Vec<&TUnion> = Vec::new();
+    let mut members: Vec<TAtomic> = Vec::new();
     if !list
         .element_type
         .types
         .iter()
         .all(|a| matches!(a, TAtomic::Never))
     {
-        members.push(&list.element_type);
+        members.extend(list.element_type.types.iter().cloned());
     }
     if let Some(known) = &list.known_elements {
-        members.extend(known.values().map(|(_, element)| element));
-    }
-    let mut found: Option<RustType> = None;
-    for member in members {
-        let this = rust_type(member).ok()?;
-        if found.as_ref().is_some_and(|seen| *seen != this) {
-            return None;
+        for (_, element) in known.values() {
+            members.extend(element.types.iter().cloned());
         }
-        found = Some(this);
     }
-    found.map(|element| RustType::Vec(Box::new(element)))
+    if members.is_empty() {
+        return None;
+    }
+    let element = rust_type(&TUnion::from_vec(members)).ok()?;
+    Some(RustType::Vec(Box::new(element)))
 }
 
 #[cfg(test)]
@@ -125,6 +169,31 @@ mod tests {
                 .collect(),
         );
         assert!(rust_type(&int_or_string).is_err());
+    }
+
+    #[test]
+    fn a_null_member_gives_an_option() {
+        let with_null = |union: TUnion| {
+            let mut members = union.types.to_vec();
+            members.extend(get_null().types.iter().cloned());
+            TUnion::from_vec(members)
+        };
+        assert_eq!(
+            rust_type(&with_null(get_int())),
+            Ok(RustType::Option(Box::new(RustType::I64)))
+        );
+        assert_eq!(
+            rust_type(&get_list(with_null(get_string()))),
+            Ok(RustType::Vec(Box::new(RustType::Option(Box::new(
+                RustType::String
+            )))))
+        );
+        let option = RustType::Option(Box::new(RustType::String));
+        assert_eq!(option.parameter(), "Option<&str>");
+        assert_eq!(option.owned(), "Option<String>");
+        assert!(!option.is_copy());
+        assert!(built(&option));
+        assert!(!built(&RustType::Option(Box::new(option))));
     }
 
     #[test]

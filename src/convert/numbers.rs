@@ -13,8 +13,9 @@ use crate::types::RustType;
 
 impl Converter<'_> {
     /// A value passed to a parameter or returned, where `declared` is the declared type. An
-    /// int becomes a float (P2R-25). A list of ints where a list of floats is declared has
-    /// no such conversion, so it stops: Mago accepts it, but a `Vec<i64>` is no `&[f64]`.
+    /// int becomes a float, also where a `?float` is declared (P2R-25, P2R-102). A list of
+    /// ints where a list of floats is declared has no such conversion, so it stops: Mago
+    /// accepts it, but a `Vec<i64>` is no `&[f64]`. Nor has an int that may be null.
     pub(super) fn declared_value(
         &mut self,
         node: &impl HasSpan,
@@ -22,14 +23,21 @@ impl Converter<'_> {
         ty: &RustType,
         declared: &RustType,
     ) -> Option<RExpr> {
-        if ints_for_floats(ty, declared) {
+        if ints_for_floats(ty.inner(), declared.inner()) {
             self.refuse(
                 node,
                 "a list of int where a list of float is declared is not supported (P2R-25)",
             );
             return None;
         }
-        Some(widened(expr, ty, declared))
+        if *ty == RustType::Option(Box::new(RustType::I64)) && *declared.inner() == RustType::F64 {
+            self.refuse(
+                node,
+                "an int that may be null where a float is declared is not supported (P2R-25)",
+            );
+            return None;
+        }
+        Some(widened(expr, ty, declared.inner()))
     }
 
     /// `intdiv()`: `/` on two ints, which Rust rounds towards zero as PHP does (P2R-48).
@@ -97,12 +105,13 @@ fn division(left: RExpr, right: RExpr) -> RExpr {
     RExpr::Binary(Box::new(left), BinOp::Div, Box::new(right))
 }
 
-/// True for a list of ints, at any depth, where the same list of floats is declared.
+/// True for a list of ints, at any depth and also inside `Option`, where the same list of
+/// floats is declared.
 fn ints_for_floats(ty: &RustType, declared: &RustType) -> bool {
     match (ty, declared) {
         (RustType::Vec(found), RustType::Vec(wanted)) => {
-            (**found == RustType::I64 && **wanted == RustType::F64)
-                || ints_for_floats(found, wanted)
+            (*found.inner() == RustType::I64 && *wanted.inner() == RustType::F64)
+                || ints_for_floats(found.inner(), wanted.inner())
         }
         _ => false,
     }

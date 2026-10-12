@@ -7,7 +7,9 @@ final review of the build added the list rules of P2R-102, the `for` step
 rule of P2R-104 and the list places of P2R-106. Section 12 (enums) was
 written and built on 12 Oct 2026; the final review of the build added the
 case, name and call stops of P2R-110, P2R-111 and P2R-114 and the layouts
-of P2R-115. Section 13 (`match`) is a draft of 12 Oct 2026.
+of P2R-115. Section 13 (`match`) was written and built on 12 Oct 2026;
+the final review of the build added the type, constant and subject rules
+at the end of P2R-122 and the call rule of P2R-121.
 
 php2rust converts typed PHP source into normal, readable Rust (`Vec`,
 `String`, `i64`), without AI. It reads PHP with the Mago crates, uses Mago's
@@ -555,8 +557,9 @@ Sections 3 to 9 apply to nullable values unless this section says otherwise.
   last arm wherever it stands in the source: PHP tries `default` only when
   no other arm matches. When the other arms cover every case of the enum, or
   both `true` and `false`, the `default` arm is left out, because Rust
-  rejects a `_` that no value reaches; its contents are not converted, and a
-  read inside it does not count as a read (P2R-35). Two conditions with the
+  rejects a `_` that no value reaches; its contents are not converted, a
+  read inside it does not count as a read (P2R-35), and a call inside it
+  does not count as a call (P2R-50). Two conditions with the
   same value in one `match` (`16` and `0x10`, `'a'` and `"a"`) stop the
   conversion, because Rust rejects the second as unreachable. The tool
   decides whether the arms of a `match` without `default` cover every value
@@ -574,10 +577,17 @@ Sections 3 to 9 apply to nullable values unless this section says otherwise.
   Rust type after that. A `let` whose `match` has no arm result that fixes
   the Rust type (int literals, `None`, and `Some(..)` or lists built only
   from them do not) names the type, as other first writes do (P2R-49):
-  `let v: i64 = match x {`, `let v: Option<i64> = match x {`. Only the arm
-  PHP chooses runs, as in PHP. A subject of Rust type `String` compares as
-  `s.as_str()`; a subject that is already `&str` (a string parameter, a
-  P2R-104 binding, `->name`, a string `->value`) stays as it is.
+  `let v: i64 = match x {`, `let v: Option<i64> = match x {`. A new variable
+  takes its type from the arm results and the type Mago gives the whole
+  `match`; when they give no one Rust type, the conversion stops: arms that
+  are all `[]` or all `null`, or list arms whose elements differ in whether
+  they may be null (`[null, 1]` and `[5]`). A variable that already has a
+  type gives that type to every arm. A `match` with one Rust arm is a
+  constant to rustc, so P2R-50 applies to its value as to a plain
+  assignment. An int subject that nothing types gets `_i64` (P2R-49). Only
+  the arm PHP chooses runs, as in PHP. A subject of Rust type `String`
+  compares as `s.as_str()`; a subject that is already `&str` (a string
+  parameter, a P2R-104 binding, `->name`, a string `->value`) stays as it is.
 - **P2R-123** The `return`, `let` or assignment line MUST end with
   `match subject {`; each arm MUST be one line one level deeper, ending with
   `,`; and `};` closes the `match` at the level of the opening line, as

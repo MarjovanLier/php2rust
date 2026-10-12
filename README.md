@@ -160,6 +160,9 @@ php2rust refuses some valid PHP that version 1 converts in other forms:
   `1` and `-1` stops for the same two reasons. Handle the narrowed case inside the
   `match` instead of before it.
 - A `match` arm that rustfmt would split over several lines stops.
+- A `match` that starts a new variable stops when its arms are all `[]` or all `null`,
+  or when its list arms differ in whether their elements may be null (`[null, 1]` and
+  `[5]`), because no arm gives the variable its type. Assign the variable first.
 
 ## Known differences from PHP
 

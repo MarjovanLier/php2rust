@@ -849,10 +849,13 @@ impl Converter<'_> {
             if let Some(var) = self.lookup(list) {
                 self.variables.read(var, list.span);
             }
-            self.record_write(list);
-            self.refuse(
+            // Later reads of the list would report the same cause as a type change.
+            let (var, _) = self.record_write(list);
+            self.fail(
+                var,
                 expression,
-                "null cannot be appended to a list of values that cannot be null (P2R-102)",
+                "null cannot be appended to a list of values that cannot be null (P2R-102)"
+                    .to_owned(),
             );
             return None;
         }

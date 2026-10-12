@@ -1,0 +1,2 @@
+input.php:14:1: null cannot be appended to a list of values that cannot be null (P2R-102)
+input.php:17:10: a value that may be null cannot be a list index (P2R-106)

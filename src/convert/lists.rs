@@ -361,7 +361,12 @@ impl Converter<'_> {
             return None;
         };
         if index_type != RustType::I64 {
-            self.refuse(access.index, "a list index must be an int (P2R-47)");
+            let message = if matches!(index_type, RustType::Option(_)) {
+                "a value that may be null cannot be a list index (P2R-106)"
+            } else {
+                "a list index must be an int (P2R-47)"
+            };
+            self.refuse(access.index, message);
             return None;
         }
         Some((RExpr::Index(Box::new(list), Box::new(index)), *element))

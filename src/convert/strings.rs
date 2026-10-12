@@ -102,15 +102,20 @@ impl Converter<'_> {
                 other => RExpr::Method(Box::new(other), "as_deref"),
             };
         }
-        let is_reference = match &expr {
-            RExpr::Str(_) => true,
-            RExpr::Var(name) => self.variables.is_borrowed(name),
-            other => self.lends(other),
-        };
-        if matches!(ty, RustType::String | RustType::Vec(_)) && !is_reference {
+        if matches!(ty, RustType::String | RustType::Vec(_)) && !self.is_reference(&expr) {
             RExpr::Ref(Box::new(expr))
         } else {
             expr
+        }
+    }
+
+    /// True when a string or list value is already a `&str` or `&[T]`: a literal, a
+    /// parameter, or a value that lends one.
+    pub(super) fn is_reference(&self, expr: &RExpr) -> bool {
+        match expr {
+            RExpr::Str(_) => true,
+            RExpr::Var(name) => self.variables.is_borrowed(name),
+            other => self.lends(other),
         }
     }
 

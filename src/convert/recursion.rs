@@ -191,6 +191,21 @@ impl<'ast, 'arena> Walker<'ast, 'arena, bool> for Calls<'_> {
         }
     }
 
+    fn walk_match(&self, r#match: &'ast Match<'arena>, found: &mut bool) {
+        self.walk_expression(r#match.expression, found);
+        // Only one arm runs, so the arms call on every path only when each of them does.
+        // shortcut: a default arm that P2R-121 leaves out still counts here, so a match
+        // whose other arms all call and whose default does not is missed; rustc would then
+        // reject the output, which no input seen so far does.
+        let mut arms = r#match.arms.iter().map(|arm| match arm {
+            MatchArm::Expression(arm) => arm.expression,
+            MatchArm::Default(arm) => arm.expression,
+        });
+        if arms.all(|result| calls(result, self.0)) && !r#match.arms.is_empty() {
+            *found = true;
+        }
+    }
+
     fn walk_binary(&self, binary: &'ast Binary<'arena>, found: &mut bool) {
         self.walk_expression(binary.lhs, found);
         // The right operand of `&&` and `||` runs on some paths only.

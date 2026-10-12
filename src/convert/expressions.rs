@@ -90,6 +90,14 @@ impl Converter<'_> {
             Expression::Access(Access::ClassConstant(access)) => self.enum_case(access, expression),
             Expression::Access(Access::Property(access)) => self.enum_property(access, expression),
             Expression::Call(Call::StaticMethod(call)) => self.enum_call(call, expression),
+            Expression::Match(_) => {
+                self.record_refused(expression);
+                self.refuse(
+                    expression,
+                    "a match converts only as the whole value of a return or an assignment (P2R-120)",
+                );
+                None
+            }
             other => {
                 self.record_refused(other);
                 self.refuse(

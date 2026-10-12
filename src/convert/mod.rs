@@ -35,6 +35,7 @@ mod flow;
 mod foreach;
 mod functions;
 mod lists;
+mod matching;
 mod nulls;
 mod numbers;
 mod recursion;

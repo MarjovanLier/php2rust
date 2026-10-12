@@ -3,6 +3,7 @@
 
 use mago_syntax::cst::*;
 
+use super::lists::unparenthesized;
 use super::variables::changes_variable;
 use super::{Context, Converter, nulls, statement_kind};
 use crate::printer::{self, RExpr};
@@ -30,7 +31,9 @@ impl Converter<'_> {
                 }
             }
             Statement::Expression(expression) if changes_variable(expression.expression) => {
-                self.assignment_statement(expression.expression, depth, body)
+                if !self.match_assignment(expression.expression, depth, body) {
+                    self.assignment_statement(expression.expression, depth, body)
+                }
             }
             Statement::Expression(expression) => {
                 self.expression_statement(expression.expression, depth, body)
@@ -69,6 +72,12 @@ impl Converter<'_> {
         context: Context<'_>,
         body: &mut Vec<String>,
     ) {
+        if let (Context::Function(Some(returns)), Some(value)) = (context, ret.value)
+            && let Expression::Match(node) = unparenthesized(value)
+        {
+            self.match_return(node, returns, depth, body);
+            return;
+        }
         let text = match (context, ret.value) {
             (Context::Main, _) => {
                 self.refuse(ret, "return outside a function is not supported (P2R-07)");

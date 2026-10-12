@@ -1,0 +1,2 @@
+input.php:13:5: the value assigned to $fallback is never read (P2R-35)
+input.php:27:14: the variable $y is not assigned on every path to this read (P2R-34)

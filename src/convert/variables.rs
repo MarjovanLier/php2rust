@@ -78,6 +78,8 @@ enum Pending {
         /// write (P2R-21).
         typed: bool,
         value: String,
+        /// The value opens a `match`, so no `;` ends the line (P2R-123).
+        open: bool,
     },
     /// The opening line of a foreach: `for pattern in list {` (P2R-41).
     Foreach {
@@ -687,7 +689,7 @@ impl Converter<'_> {
                 let name = &self.variables.entries[var].rust_name;
                 return Some(format!("{name} = Vec::new();"));
             }
-            return Some(self.first_write(var, true, "Vec::new()".to_owned()));
+            return Some(self.first_write(var, true, "Vec::new()".to_owned(), false));
         }
         // `null` has no type of its own either: it has the variable's `Option` type, which
         // the other reads and writes of its name give (P2R-102).
@@ -699,7 +701,7 @@ impl Converter<'_> {
                 let name = &self.variables.entries[var].rust_name;
                 return Some(format!("{name} = None;"));
             }
-            return Some(self.first_write(var, true, "None".to_owned()));
+            return Some(self.first_write(var, true, "None".to_owned(), false));
         }
         // PHP evaluates the value first. Every operator but `=` then reads the variable
         // before it writes it.
@@ -814,16 +816,25 @@ impl Converter<'_> {
             return Some(format!("{name} {operator} {rendered};"));
         }
         // A literal alone would make Rust infer i32 (P2R-49).
-        Some(self.first_write(var, !printer::anchored(&expr), rendered))
+        Some(self.first_write(var, !printer::anchored(&expr), rendered, false))
     }
 
     /// The pending line of the first write of `var`, whose `let` names the type when
     /// `typed`. The type is the one the variable has at the end of the body, which a later
     /// read or write gives a variable that holds `[]` (P2R-21).
-    fn first_write(&mut self, var: Var, typed: bool, value: String) -> String {
-        self.variables
-            .pending
-            .push(Pending::First { var, typed, value });
+    pub(super) fn first_write(
+        &mut self,
+        var: Var,
+        typed: bool,
+        value: String,
+        open: bool,
+    ) -> String {
+        self.variables.pending.push(Pending::First {
+            var,
+            typed,
+            value,
+            open,
+        });
         format!("{MARK}{}", self.variables.pending.len() - 1)
     }
 
@@ -935,7 +946,7 @@ impl Converter<'_> {
     /// Records a write of `variable` by `node` and checks the type Mago gives the write.
     /// `assigned` is the type of the value an `=` stores. Gives the variable and whether
     /// this write declares it.
-    fn write(
+    pub(super) fn write(
         &mut self,
         variable: &DirectVariable<'_>,
         node: &impl HasSpan,
@@ -1079,7 +1090,7 @@ impl Converter<'_> {
     /// flag is `Some` for that first write, and `Some(false)` when the name does not
     /// convert. The write is placed at the variable, not the whole assignment, so a
     /// problem with it does not hide one in the value (P2R-03).
-    fn record_write(&mut self, variable: &DirectVariable<'_>) -> (Var, Option<bool>) {
+    pub(super) fn record_write(&mut self, variable: &DirectVariable<'_>) -> (Var, Option<bool>) {
         let (var, declared) = match self.lookup(variable) {
             Some(var) => (var, None),
             None => {
@@ -1449,7 +1460,16 @@ impl Converter<'_> {
                         }
                     }
                 }
-                Some((at, _, Pending::First { var, typed, value })) => {
+                Some((
+                    at,
+                    _,
+                    Pending::First {
+                        var,
+                        typed,
+                        value,
+                        open,
+                    },
+                )) => {
                     let indent = &line[..at];
                     let entry = &entries[*var];
                     let name = &entry.rust_name;
@@ -1459,11 +1479,13 @@ impl Converter<'_> {
                         (true, Some(ty)) => format!(": {}", ty.owned()),
                         _ => String::new(),
                     };
+                    let end = if *open { "" } else { ";" };
                     let text = match slots[*var] {
-                        Some(_) => format!("{indent}{name} = {value};"),
-                        None => {
-                            format!("{indent}{}{name}{annotation} = {value};", let_keyword(*var))
-                        }
+                        Some(_) => format!("{indent}{name} = {value}{end}"),
+                        None => format!(
+                            "{indent}{}{name}{annotation} = {value}{end}",
+                            let_keyword(*var)
+                        ),
                     };
                     finished.push((entry.assigned, text));
                 }

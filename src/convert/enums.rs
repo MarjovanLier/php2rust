@@ -219,6 +219,19 @@ impl Converter<'_> {
         literal.map(|value| value.to_string())
     }
 
+    /// The paths of the cases of the enum named `rust_name`, as `E::Case`, in source order.
+    pub(super) fn case_paths(&self, rust_name: &str) -> Vec<String> {
+        self.enums
+            .iter()
+            .filter(|e| e.rust_name == rust_name)
+            .flat_map(|e| {
+                e.cases
+                    .iter()
+                    .map(|case| format!("{rust_name}::{}", case.rust_name))
+            })
+            .collect()
+    }
+
     /// The enum a class name in a use refers to, whatever its letter case (P2R-111).
     fn enum_of(&self, class: &Expression<'_>) -> Option<usize> {
         let Expression::Identifier(identifier) = class else {

@@ -1,0 +1,8 @@
+input.php:22:10: a match converts only as the whole value of a return or an assignment (P2R-120)
+input.php:26:16: a match converts only as the whole value of a return or an assignment (P2R-120)
+input.php:30:17: a value that may be null cannot be the subject of a match (P2R-106)
+input.php:34:17: the subject of a match must be an int, bool, string or enum (P2R-120)
+input.php:39:9: a match condition must be a literal of the subject's type or a case of its enum (P2R-120)
+input.php:51:9: a match can have one default arm only, and PHP rejects a second (P2R-120)
+input.php:57:19: a match on an enum without cases never runs an arm, and rustc rejects the code around it (P2R-120)
+input.php:69:20: Mago finds this arm unreachable and gives its value no type (P2R-120)

@@ -1,0 +1,2 @@
+input.php:9:20: the arms of a match must give one Rust type (P2R-122)
+input.php:16:12: Function `null_arm` is declared to return `int` but possibly returns a nullable value (inferred as `int(2)|null`). (nullable-return-statement)

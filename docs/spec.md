@@ -1,8 +1,10 @@
 # php2rust specification
 
 Status: version 1 written 11 Oct 2026 and revised the same day after review
-by five reviewers. Milestone 2 is added one slice at a time; section 11
-(nullable types) is a draft of 11 Oct 2026.
+by five reviewers. Milestone 2 is added one slice at a time. Section 11
+(nullable types) was written 11 Oct 2026 and built on 12 Oct 2026; the
+final review of the build added the list rules of P2R-102, the `for` step
+rule of P2R-104 and the list places of P2R-106.
 
 php2rust converts typed PHP source into normal, readable Rust (`Vec`,
 `String`, `i64`), without AI. It reads PHP with the Mago crates, uses Mago's
@@ -371,11 +373,20 @@ Sections 3 to 9 apply to nullable values unless this section says otherwise.
   the same variable, or from the declared parameter, return or element type
   it flows into; when no `T` is known, the conversion stops. A variable whose
   assignments mix `null` or `?T` values with `T` values has the type
-  `Option<T>` (an exception to P2R-34). A value of Rust type `T` MUST become
-  `Some(...)` where it goes into an `Option<T>` variable, parameter, return
-  value or list element: `return $y;` in a function declared `?int` gives
-  `return Some(y);`, and `f(5)` for a `?int` parameter gives `f(Some(5))`.
-  P2R-25 applies inside `Some` for `?float` (`f(4)` gives `f(Some(4.0))`).
+  `Option<T>` (an exception to P2R-34); a `?T` value is any value of Rust
+  type `Option<T>`, also where Mago types it as `T`. A value of Rust type `T`
+  MUST become `Some(...)` where it goes into an `Option<T>` variable,
+  parameter, return value or list element: `return $y;` in a function
+  declared `?int` gives `return Some(y);`, and `f(5)` for a `?int` parameter
+  gives `f(Some(5))`. P2R-25 applies inside `Some` for `?float` (`f(4)` gives
+  `f(Some(4.0))`). A list literal where a list of `Option<T>` is expected (a
+  declared parameter or return type, `?list<...>` included, or the type of
+  the variable it is assigned to) MUST take that type: `[1, 2]` gives
+  `[Some(1), Some(2)]`, `[null, null]` gives `[None, None]`, and `[]` takes
+  the expected list type. Any other list of `T` where a list of `Option<T>`
+  is needed stops the conversion. A list variable holds `Option` elements
+  only when its first write does; appending `null` to a list of `T` stops the
+  conversion.
 - **P2R-103** `$v === null` and `null === $v` MUST convert to `v.is_none()`,
   and `$v !== null` and `null !== $v` to `v.is_some()`, for any expression
   `$v` of Rust type `Option<T>`. `===` and `!==` between two `Option<T>`
@@ -405,9 +416,11 @@ Sections 3 to 9 apply to nullable values unless this section says otherwise.
   of P2R-24 (`&str`, `&[T]`) and follows P2R-26 as a parameter does. When
   nothing reads the binding, the condition converts by P2R-103 instead
   (`if v.is_some() {`, `if v.is_none() {`). A write to `$v` in the body of
-  such an `if let`, anywhere after such a `let ... else` in its block (nested
-  blocks included), or in the step of a `for` whose body holds such a
-  `let ... else`, stops the conversion.
+  such an `if let`, or anywhere after such a `let ... else` in its block
+  (nested blocks included), stops the conversion. A read or write of `$v` in
+  the step of a `for` whose body holds such a `let ... else` at any depth
+  stops the conversion: the step also runs at each `continue`, where the
+  binding can shadow the variable or not exist yet.
 - **P2R-105** `$a ?? $b` MUST convert when `$a` is a variable, parameter or
   function call of Rust type `Option<T>` and `$b` has the type `T`. `$b` MUST
   be evaluated only when `$a` is null, as in PHP, and P2R-26 applies to
@@ -420,7 +433,9 @@ Sections 3 to 9 apply to nullable values unless this section says otherwise.
   `null` as an empty string); an operand of `+`, `-`, `*`, `%`, unary minus,
   `+=`, `-=`, `*=`, `++` or `--`; a condition or an operand of `&&`, `||` or
   `!` (P2R-42); the list of a `foreach`; the list or the index of a list
-  read or an append; an argument of a built-in function (P2R-48); an
+  read or an append; an element of a list literal, or an appended value,
+  whose list holds values that cannot be null; an argument of a built-in
+  function (P2R-48); an
   argument for a parameter that is not nullable; and a `return` value in a
   function whose return type is not nullable. These also stop: a parameter
   default value, and `return;` or a path that reaches the end of a function

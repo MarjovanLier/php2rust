@@ -123,6 +123,15 @@ php2rust refuses some valid PHP that version 1 converts in other forms:
 - Every int overflow and every zero divisor that the tool can prove stops (P2R-50), also
   where rustc would accept the code, for example `%` by a variable that is 0 on every
   path through an `if`.
+- A variable that may be null stays an `Option` after an assignment that PHP knows makes
+  it not null: after `if ($c === null) { $c = 0; }`, a plain use such as `$c + 1` or
+  `echo $c` stops. A new variable from `??` works: `$n = $c ?? 0;`.
+- `$a ?? $b ?? 'x'` on local string variables in `echo` or an assignment is wider than
+  rustfmt's 60 columns for call arguments and method chains, so it stops.
+- A list holds `Option` elements only when its first write holds `null`:
+  `$xs = [1, 2]; $xs[] = null;` stops.
+- A `for` step that reads a variable that a let-else in the loop body checks stops, also
+  where Rust would accept the code.
 
 ## Known differences from PHP
 

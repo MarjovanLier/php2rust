@@ -11,3 +11,8 @@ enum Exception
 {
     case Failed;
 }
+
+enum countable
+{
+    case Counted;
+}

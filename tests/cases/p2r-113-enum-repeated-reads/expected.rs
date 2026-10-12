@@ -50,12 +50,18 @@ pub fn never(n: Nothing) -> String {
     return n.name().to_string();
 }
 
+pub fn first(xs: &[Suit]) -> String {
+    return format!("{}{}", xs[0].name(), xs[0].name());
+}
+
 fn main() {
     let e = Suit::Spades;
     print!("{}", e.name());
     print!("{}", e.name());
     print!("\n");
     print!("{}", show(Suit::Hearts));
+    print!("{}", first(&[Suit::Spades]));
+    print!("\n");
     print!("{}{}", e.value(), e.value());
     print!("\n");
     print!("{}", Long::cases().len() as i64);

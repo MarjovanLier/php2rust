@@ -17,6 +17,8 @@ enum Status
 enum Suit
 {
     case Hearts;
+    #[Deprecated]
+    case Spades;
 }
 
 enum Ratio: float

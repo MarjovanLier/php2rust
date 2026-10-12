@@ -1299,10 +1299,10 @@ impl Converter<'_> {
         if matches!(known, RustType::Vec(_)) && self.empty_list(node) {
             return Ok(known.clone());
         }
-        // Mago records no type for an enum variable read again after a property read, as
-        // in `$e->name . $e->name`; every write keeps the one type (P2R-113).
-        if matches!(known, RustType::Enum(_)) && self.artifacts.get_expression_type(node).is_none()
-        {
+        // Mago records no type for a variable read again after a property read, as in
+        // `$e->name . $e->name` or `$xs[0]->name . $xs[0]->name`; every write keeps the one
+        // type (P2R-113).
+        if holds_enum(known) && self.artifacts.get_expression_type(node).is_none() {
             return Ok(known.clone());
         }
         // A read or write of an `Option` variable has its type, also where Mago knows that
@@ -1844,6 +1844,15 @@ fn same_type(php_name: &[u8], known: &RustType, found: RustType) -> Result<RustT
         known.owned(),
         found.owned()
     ))
+}
+
+/// True for an enum, and for a list of enums at any depth.
+fn holds_enum(ty: &RustType) -> bool {
+    match ty {
+        RustType::Enum(_) => true,
+        RustType::Vec(element) => holds_enum(element),
+        _ => false,
+    }
 }
 
 /// Only the types of `types::built` are written so far; the other types follow in later

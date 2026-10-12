@@ -1,0 +1,2 @@
+input.php:23:25: the element type of this empty list is not known (P2R-21)
+input.php:24:6: the right side of ?? must have the type i64 here (P2R-105)

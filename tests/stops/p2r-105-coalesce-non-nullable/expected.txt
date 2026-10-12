@@ -1,0 +1,1 @@
+input.php:6:6: the left side of ?? cannot be null here (P2R-105)

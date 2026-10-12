@@ -77,6 +77,10 @@ impl Converter<'_> {
             }
             // Rust cannot move a string or list out of a list.
             RExpr::Index(..) if !ty.is_copy() => RExpr::Method(Box::new(expr), "clone"),
+            // The `&str` that `??` gives with a borrowed default (P2R-105).
+            lent if *ty == RustType::String && self.lends(&lent) => {
+                RExpr::Method(Box::new(lent), "to_string")
+            }
             other => other,
         }
     }
@@ -96,7 +100,7 @@ impl Converter<'_> {
         let is_reference = match &expr {
             RExpr::Str(_) => true,
             RExpr::Var(name) => self.variables.is_parameter(name),
-            _ => false,
+            other => self.lends(other),
         };
         if matches!(ty, RustType::String | RustType::Vec(_)) && !is_reference {
             RExpr::Ref(Box::new(expr))

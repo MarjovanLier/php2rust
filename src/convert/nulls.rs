@@ -1,6 +1,7 @@
-//! Values that may be null: `Some` where an `Option` is needed, and comparisons with
-//! `null` and between `Option` values (P2R-102, P2R-103).
+//! Values that may be null: `Some` where an `Option` is needed, comparisons with `null`
+//! and between `Option` values, and `??` (P2R-102, P2R-103, P2R-105).
 
+use mago_span::HasSpan;
 use mago_syntax::cst::*;
 
 use super::{Converter, booleans, lists};
@@ -31,6 +32,21 @@ pub(super) fn null_for_plain(ty: &RustType, target: &RustType) -> bool {
     matches!(ty, RustType::Option(_)) && !matches!(target, RustType::Option(_))
 }
 
+/// True for a value with no side effect that cannot panic, so the default of `??` may run
+/// whether or not it is needed (P2R-105).
+fn simple(expr: &RExpr) -> bool {
+    match expr {
+        RExpr::Int(_)
+        | RExpr::Float(_)
+        | RExpr::Bool(_)
+        | RExpr::Str(_)
+        | RExpr::Var(_)
+        | RExpr::Known(..) => true,
+        RExpr::Neg(inner) => matches!(**inner, RExpr::Int(_) | RExpr::Float(_)),
+        _ => false,
+    }
+}
+
 /// The side of `binary` that is not the literal `null`, when exactly one side is.
 fn beside_null<'e, 'a>(binary: &'e Binary<'a>) -> Option<&'e Expression<'a>> {
     match (is_null(binary.lhs), is_null(binary.rhs)) {
@@ -59,7 +75,10 @@ impl Converter<'_> {
             );
             return Some(None);
         }
-        let (expr, ty) = self.expression(value)?;
+        // A value that does not convert has its problem recorded already.
+        let Some((expr, ty)) = self.expression(value) else {
+            return Some(None);
+        };
         if !matches!(ty, RustType::Option(_)) {
             self.refuse(
                 binary,
@@ -103,6 +122,89 @@ impl Converter<'_> {
             RExpr::Binary(Box::new(left), op, Box::new(right)),
             RustType::Bool,
         ))
+    }
+
+    /// `$a ?? $b`, where `$a` is a variable, parameter or call that may be null and `$b`
+    /// has its inner type. `$b` runs only when `$a` is null, as in PHP (P2R-105).
+    pub(super) fn coalesce(&mut self, binary: &Binary<'_>) -> Option<(RExpr, RustType)> {
+        let left_node = lists::unparenthesized(binary.lhs);
+        if !matches!(
+            left_node,
+            Expression::Variable(Variable::Direct(_)) | Expression::Call(Call::Function(_))
+        ) {
+            self.record_refused(binary.lhs);
+            self.record_refused(binary.rhs);
+            self.refuse(
+                binary,
+                "?? converts on a variable, parameter or call only; PHP checks anything else with isset (P2R-105)",
+            );
+            return None;
+        }
+        // Both sides convert first, so problems on both sides are reported.
+        let left = self.expression(binary.lhs);
+        let right = self.expression(binary.rhs);
+        let ((left, left_type), (right, right_type)) = (left?, right?);
+        let RustType::Option(inner) = &left_type else {
+            self.refuse(binary, "the left side of ?? cannot be null here (P2R-105)");
+            return None;
+        };
+        if right_type != **inner {
+            self.refuse(
+                binary,
+                format!(
+                    "the right side of ?? must have the type {} here (P2R-105)",
+                    inner.owned()
+                ),
+            );
+            return None;
+        }
+        let lazy = !simple(&right);
+        let expr = if inner.is_copy() {
+            RExpr::Unwrap {
+                option: Box::new(left),
+                default: Box::new(right),
+                lazy,
+            }
+        } else if **inner == RustType::String && matches!(right, RExpr::Str(_) | RExpr::Var(_)) {
+            // Both sides are borrowed, so neither is copied. The result is a `&str`, which
+            // `owned` copies where a `String` is needed.
+            RExpr::Unwrap {
+                option: Box::new(self.borrowed(left, &left_type)),
+                default: Box::new(self.borrowed(right, &right_type)),
+                lazy: false,
+            }
+        } else {
+            // `unwrap_or` takes the option, so a variable moves unless it is read again.
+            let option = match (left, left_node) {
+                (RExpr::Var(name), _) if self.variables.is_parameter(&name) => {
+                    RExpr::MapOwned(Box::new(RExpr::Var(name)))
+                }
+                (RExpr::Var(name), Expression::Variable(Variable::Direct(variable))) => {
+                    let mark = self.variables.copy_mark(variable.span, binary.span());
+                    RExpr::Var(format!("{name}{mark}"))
+                }
+                (other, _) => other,
+            };
+            let default = self.stored(binary.rhs, right, &right_type, binary.span());
+            RExpr::Unwrap {
+                option: Box::new(option),
+                default: Box::new(default),
+                lazy,
+            }
+        };
+        Some((expr, (**inner).clone()))
+    }
+
+    /// True for the `&str` that `??` gives when both sides are borrowed (P2R-105).
+    pub(super) fn lends(&self, expr: &RExpr) -> bool {
+        let RExpr::Unwrap { option, .. } = expr else {
+            return false;
+        };
+        match &**option {
+            RExpr::Method(_, "as_deref") => true,
+            RExpr::Var(name) => self.variables.is_parameter(name),
+            _ => false,
+        }
     }
 
     /// One side of an `Option` comparison as an `Option`, with a string inside borrowed.

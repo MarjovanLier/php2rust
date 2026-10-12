@@ -112,6 +112,13 @@ pub enum RExpr {
     /// `value.map(ToOwned::to_owned)`: the owned copy of an `Option<&str>` or
     /// `Option<&[T]>` parameter (P2R-101).
     MapOwned(Box<RExpr>),
+    /// `a ?? b`: `option.unwrap_or(default)`, or `option.unwrap_or_else(|| default)` when
+    /// the default must run only when the option is `None` (P2R-105).
+    Unwrap {
+        option: Box<RExpr>,
+        default: Box<RExpr>,
+        lazy: bool,
+    },
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -307,6 +314,24 @@ fn render(expr: &RExpr, anchor: bool, min_precedence: u8) -> Result<String, TooW
             expr,
             format!("{}.map(ToOwned::to_owned)", render(inner, false, POSTFIX)?),
         )?,
+        RExpr::Unwrap {
+            option,
+            default,
+            lazy,
+        } => {
+            let value = render(default, false, 0)?;
+            let (method, argument) = if *lazy {
+                ("unwrap_or_else", format!("|| {value}"))
+            } else {
+                ("unwrap_or", value)
+            };
+            // rustfmt keeps a single string literal argument on the line however wide it is.
+            if argument.len() > ARGS_WIDTH && !matches!(**default, RExpr::Str(_)) {
+                return Err(TooWide);
+            }
+            let option = render(option, false, POSTFIX)?;
+            chained(expr, format!("{option}.{method}({argument})"))?
+        }
     })
 }
 
@@ -314,6 +339,7 @@ fn render(expr: &RExpr, anchor: bool, min_precedence: u8) -> Result<String, TooW
 fn calls(expr: &RExpr) -> usize {
     match expr {
         RExpr::Method(inner, _) | RExpr::Len(inner) | RExpr::MapOwned(inner) => 1 + calls(inner),
+        RExpr::Unwrap { option, .. } => 1 + calls(option),
         _ => 0,
     }
 }
@@ -378,7 +404,7 @@ pub fn anchored(expr: &RExpr) -> bool {
         // `None` alone, or `Some(5)`, leaves the inner type to inference (P2R-49).
         RExpr::None => false,
         RExpr::Some(inner) => anchored(inner),
-        RExpr::MapOwned(_) => true,
+        RExpr::MapOwned(_) | RExpr::Unwrap { .. } => true,
     }
 }
 
@@ -413,7 +439,7 @@ pub fn literal_value(expr: &RExpr) -> Option<i64> {
         RExpr::Bool(_) | RExpr::Not(_) => None,
         RExpr::List(_) | RExpr::Index(..) => None,
         RExpr::Float(_) | RExpr::ToFloat(_) => None,
-        RExpr::None | RExpr::Some(_) | RExpr::MapOwned(_) => None,
+        RExpr::None | RExpr::Some(_) | RExpr::MapOwned(_) | RExpr::Unwrap { .. } => None,
     }
 }
 

@@ -125,6 +125,7 @@ impl Converter<'_> {
                 self.refuse(binary, "<=> is not supported in version 1 (P2R-44)");
                 return None;
             }
+            BinaryOperator::NullCoalesce(_) => return self.coalesce(binary),
             BinaryOperator::Exponentiation(_) => {
                 self.record_refused(binary.lhs);
                 self.record_refused(binary.rhs);

@@ -258,7 +258,7 @@ impl Variables {
     }
 
     /// The copy mark for a statement that moves the variable read at `read`.
-    fn copy_mark(&mut self, read: Span, statement: Span) -> String {
+    pub(super) fn copy_mark(&mut self, read: Span, statement: Span) -> String {
         self.copies.push((read, statement));
         format!("{COPY}{:06x}{COPY}", self.copies.len() - 1)
     }

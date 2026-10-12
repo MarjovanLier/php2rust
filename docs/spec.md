@@ -4,8 +4,10 @@ Status: version 1 written 11 Oct 2026 and revised the same day after review
 by five reviewers. Milestone 2 is added one slice at a time. Section 11
 (nullable types) was written 11 Oct 2026 and built on 12 Oct 2026; the
 final review of the build added the list rules of P2R-102, the `for` step
-rule of P2R-104 and the list places of P2R-106. Section 12 (enums) is a
-draft of 12 Oct 2026.
+rule of P2R-104 and the list places of P2R-106. Section 12 (enums) was
+written and built on 12 Oct 2026; the final review of the build added the
+case, name and call stops of P2R-110, P2R-111 and P2R-114 and the layouts
+of P2R-115.
 
 php2rust converts typed PHP source into normal, readable Rust (`Vec`,
 `String`, `i64`), without AI. It reads PHP with the Mago crates, uses Mago's

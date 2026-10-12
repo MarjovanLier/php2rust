@@ -40,6 +40,17 @@ function no_type(int $n, bool $c): int
     return count($empty) + ($none ?? 0) + count($lists);
 }
 
+function narrowed_arm(?int $m, int $n): int
+{
+    if ($m === null) {
+        $m = 0;
+    }
+    return match ($n) {
+        1 => $m,
+        default => 2,
+    };
+}
+
 function one_arm(int $n): int
 {
     $max = match ($n) {

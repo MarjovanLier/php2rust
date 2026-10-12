@@ -466,7 +466,11 @@ Sections 3 to 9 apply to nullable values unless this section says otherwise.
     with `Class "E" not found`;
   - an enum with a method, a constant, `implements` or `use`, or a backing
     value of any other form (`1 + 1`, `PHP_INT_MAX`);
-  - an enum declared inside another statement.
+  - a case without a value in a backed enum, a case with a value in a pure
+    enum, and a backing type other than `int` or `string`: PHP rejects all
+    three when it compiles the file;
+  - an attribute on an enum or a case (P2R-07);
+  - an enum declared inside a function or another statement.
 - **P2R-111** The Rust names of an enum and its cases MUST be heck's
   `to_upper_camel_case` of the PHP names (`Suit` stays `Suit`, `IN_REVIEW`
   becomes `InReview`), and MUST follow the identifier rules of P2R-30 (an
@@ -474,9 +478,11 @@ Sections 3 to 9 apply to nullable values unless this section says otherwise.
   enum or a case MUST take the Rust name of its declaration, whatever the
   letter case of the use (`suit::Hearts` gives `Suit::Hearts`), as P2R-32
   does for functions. These stop the conversion: a name that breaks those
-  rules; two enums, or two cases of one enum, with the same Rust name; and
-  an enum named `Option`, `String`, `Vec` or `ToOwned`, which the output
-  uses.
+  rules; two enums, or two cases of one enum, with the same Rust name; an
+  enum named `Option`, `String`, `Vec` or `ToOwned`, which the output uses;
+  and an enum with a name PHP reserves for a type (`bool`, `int`, `self` and
+  the others) or the name of a class PHP has built in (`Exception`), which
+  PHP rejects.
 - **P2R-112** An enum type `E` MUST map to the Rust enum `E` (P2R-20), passed
   and returned by value; `?E` maps to `Option<E>` (P2R-100) and `list<E>` to
   `Vec<E>`. A case `E::Name` MUST convert to `E::Name`. An enum value is
@@ -495,8 +501,10 @@ Sections 3 to 9 apply to nullable values unless this section says otherwise.
   `E::cases()` to `E::cases()` of type `Vec<E>`, with the cases in source
   order. The argument of `from` and `try_from` converts as an argument for a
   parameter of the backing type (P2R-24): a string as `&str`, an int as
-  `i64`. `E::from()` with a value that no case has panics (P2R-60). Any
-  other static call on an enum stops the conversion.
+  `i64`. `E::from()` with a value that no case has panics (P2R-60). These
+  stop the conversion: `E::from()` on an enum without cases, which never
+  returns, so rustc rejects the code after it (P2R-50); a named or spread
+  argument (P2R-07); and any other static call on an enum.
 - **P2R-115** The output MUST hold, for each enum, only the methods the file
   uses, in one `impl E` block right after the enum, in the order `name`,
   `value`, `from`, `try_from`, `cases`, with one blank line between methods.
@@ -505,9 +513,12 @@ Sections 3 to 9 apply to nullable values unless this section says otherwise.
   `_ => panic!("{:?} is not a valid backing value", value),` and `try_from`
   with `_ => None,`. All of these take rustfmt's layout (P2R-51): an arm
   wider than 100 columns becomes `=> {`, its value on the next line one level
-  deeper, and `}` with no comma; the `vec!` of `cases` holds the cases on one
-  line when they fit in 60 columns, otherwise one case per line with a comma
-  after each.
+  deeper, and `}` with no comma; a `match` without arms, for an enum without
+  cases, is `match self {}` on one line; the `vec!` of `cases` holds the
+  cases on one line when there is one case or they fit in 60 columns,
+  otherwise one case per line with a comma after each. An arm with non-ASCII
+  text that is longer than 100 bytes stops the conversion, because rustfmt
+  counts columns and the tool counts bytes.
 
 ## Spec checklist
 

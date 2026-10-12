@@ -88,9 +88,10 @@ the others are findings of the Mago analyser. In short:
 - PHP that version 1 does not convert, for example classes, closures, `match`,
   `namespace`, `use`, casts, `print`, `printf`, `exit`, heredoc, constants other than
   `true` and `false`, and built-in functions other than the four above.
-- An enum with a method, a constant, an interface or a backing value that is not a plain
-  literal, and an enum declared after other code outside functions: PHP declares an
-  enum only when execution reaches it.
+- An enum with a method, a constant, an interface, an attribute or a backing value that
+  is not a plain literal, an enum declared inside a function or a block, and an enum
+  declared after other code outside functions: PHP declares an enum only when execution
+  reaches it.
 - A type with no single Rust type: `mixed`, `null` on its own, `array` without a list
   element type, or a union of different types other than `T|null`. A missing parameter or
   return type.
@@ -140,6 +141,10 @@ php2rust refuses some valid PHP that version 1 converts in other forms:
   `$xs = [1, 2]; $xs[] = null;` stops.
 - A `for` step that reads a variable that a let-else in the loop body checks stops, also
   where Rust would accept the code.
+- `Nothing::from($v)` on an enum without cases stops: the call never returns, and rustc
+  rejects the code after it.
+- An enum helper line with non-ASCII text that is longer than 100 bytes stops, also
+  where it fits in 100 columns, for example a long backing value with accents.
 
 ## Known differences from PHP
 

@@ -57,6 +57,9 @@ use crate::types::{self, RustType};
 /// output text holds it.
 const MARK: char = '\u{1}';
 
+/// The problem of a write to the binding of a null check (P2R-104).
+const CHECKED: &str = "a variable that a check against null binds cannot be assigned until the check's block ends (P2R-104)";
+
 /// Stands after a string or list variable that a statement moves, for its `.clone()` when
 /// the variable is read again (P2R-26). The mark is this character, six hex digits and
 /// this character: as wide as `.clone()`, so the widths `printer` checks inside a
@@ -84,6 +87,16 @@ enum Pending {
         by_ref: bool,
         /// The text after the pattern: ` in list {`.
         rest: String,
+    },
+    /// The opening lines of an `if` or `elseif` whose condition checks variables against
+    /// null, laid out as rustfmt does (P2R-51, P2R-104).
+    Condition {
+        /// `if` or `} else if`.
+        keyword: &'static str,
+        parts: Vec<Part>,
+        /// `{`, or `{}` for an empty body.
+        open: &'static str,
+        span: Span,
     },
 }
 
@@ -114,17 +127,38 @@ struct Entry {
     /// The variable holds `[]` and has no type yet; `ty` is `None` until a later read or
     /// write gives it (P2R-21).
     empty: bool,
+    /// A string or list that Rust borrows, as it does a parameter (P2R-24): the binding of
+    /// a null check on an `Option<String>` is a `&str` (P2R-104).
+    borrowed: bool,
     binding: Option<Binding>,
 }
 
-/// A foreach key or value (P2R-41).
+/// A foreach key or value (P2R-41), or the binding of a null check (P2R-104).
 struct Binding {
     /// The snake_case name without `r#`, for the `_` of an unused binding (P2R-35).
     snake: String,
     /// The loop body assigns it again, so the pattern needs `mut`.
     rewritten: bool,
-    /// The loop has ended, so `lookup` no longer finds it.
+    /// The loop or the check has ended, so `lookup` no longer finds it.
     closed: bool,
+    /// The binding of `if ($v !== null)` or of a let-else, which nothing may assign
+    /// (P2R-104).
+    null_check: bool,
+}
+
+/// One operand of the top-level `&&` chain of a condition that checks a variable against
+/// null (P2R-104).
+pub(super) enum Part {
+    /// Any other operand, and whether rustfmt keeps it on the `if` line before a `let`: a
+    /// variable, `!` and a variable, `true` or `false` (P2R-51).
+    Plain { text: String, simple: bool },
+    /// `$v !== null`: `pattern` (`let Some(v) = v`) when the binding is read, otherwise
+    /// `test` (`v.is_some()`).
+    Let {
+        binding: Var,
+        pattern: String,
+        test: String,
+    },
 }
 
 /// The variables of the body being converted, a function or `fn main()`, and the state
@@ -199,13 +233,14 @@ impl Variables {
                 first: 0,
                 common: 0,
                 empty: false,
+                borrowed: false,
                 binding: None,
             });
         }
         variables
     }
 
-    fn read(&mut self, var: Var, span: Span) {
+    pub(super) fn read(&mut self, var: Var, span: Span) {
         self.flow.read(var, span);
         self.touch(var);
     }
@@ -263,15 +298,53 @@ impl Variables {
         format!("{COPY}{:06x}{COPY}", self.copies.len() - 1)
     }
 
-    /// True when `rust_name` is a parameter: a string parameter is a `&str` and a list
-    /// parameter a `&[T]` (P2R-24). A foreach key or value can shadow a parameter of the
-    /// same name, so the entry in scope decides.
-    pub(super) fn is_parameter(&self, rust_name: &str) -> bool {
+    /// True when `rust_name` is a parameter or a borrowed binding: a string is then a
+    /// `&str` and a list a `&[T]` (P2R-24, P2R-104). A foreach key or value can shadow a
+    /// parameter of the same name, so the entry in scope decides.
+    pub(super) fn is_borrowed(&self, rust_name: &str) -> bool {
         self.entries
             .iter()
             .rev()
             .find(|e| e.rust_name == rust_name && !closed(e))
-            .is_some_and(|e| e.parameter.is_some())
+            .is_some_and(|e| e.parameter.is_some() || e.borrowed)
+    }
+
+    /// The pending opening lines of an `if` or `elseif` that checks variables against
+    /// null, at `depth` (P2R-104).
+    pub(super) fn condition_line(
+        &mut self,
+        depth: usize,
+        keyword: &'static str,
+        parts: Vec<Part>,
+        open: &'static str,
+        span: Span,
+    ) -> String {
+        self.pending.push(Pending::Condition {
+            keyword,
+            parts,
+            open,
+            span,
+        });
+        format!("{}{MARK}{}", "    ".repeat(depth), self.pending.len() - 1)
+    }
+
+    /// The Rust type of `var`; `None` once a problem with it is recorded.
+    pub(super) fn ty(&self, var: Var) -> Option<&RustType> {
+        self.entries[var].ty.as_ref()
+    }
+
+    /// The Rust name of `var`.
+    pub(super) fn name_of(&self, var: Var) -> &str {
+        &self.entries[var].rust_name
+    }
+
+    /// Ends the bindings of a null check, when the block they hold for ends (P2R-104).
+    pub(super) fn close_bindings(&mut self, bindings: &[Var]) {
+        for &var in bindings {
+            if let Some(binding) = &mut self.entries[var].binding {
+                binding.closed = true;
+            }
+        }
     }
 
     /// The pending `for` line of a foreach, at `depth` (P2R-41).
@@ -876,6 +949,9 @@ impl Converter<'_> {
                 (var, Some(named))
             }
         };
+        if self.checked(var) {
+            self.fail(var, variable, CHECKED.to_owned());
+        }
         if let Some(binding) = &mut self.variables.entries[var].binding {
             binding.rewritten = true;
         }
@@ -931,6 +1007,11 @@ impl Converter<'_> {
     /// of the loop body (P2R-34, P2R-41). `ty` is `None` when a problem with the list is
     /// recorded.
     pub(super) fn bind(&mut self, variable: &DirectVariable<'_>, ty: Option<RustType>) -> Var {
+        if let Some(checked) = self.lookup(variable)
+            && self.checked(checked)
+        {
+            self.refuse(variable, CHECKED);
+        }
         // A key or value named like a parameter assigns the parameter in PHP: a string or
         // list parameter cannot change (P2R-24), and the parameter's value must be read
         // first, which the end of the body checks from its first assignment (P2R-35).
@@ -956,6 +1037,7 @@ impl Converter<'_> {
             snake: String::from_utf8_lossy(&entry.php_name).to_snake_case(),
             rewritten: false,
             closed: false,
+            null_check: false,
         });
         entry.assigned = Some(variable.span);
         entry.ty = ty.filter(|_| named);
@@ -998,9 +1080,37 @@ impl Converter<'_> {
             first: self.variables.scope,
             common: self.variables.scope,
             empty: false,
+            borrowed: false,
             binding: None,
         });
         (self.variables.entries.len() - 1, named)
+    }
+
+    /// Declares the binding of a null check on `variable` (P2R-104): a new variable of the
+    /// inner type `inner`, written at the check, which `lookup` finds until the block it
+    /// holds for ends. A string or list binding borrows, as a parameter does.
+    pub(super) fn bind_null(&mut self, variable: &DirectVariable<'_>, inner: RustType) -> Var {
+        let (var, named) = self.declare(variable);
+        let entry = &mut self.variables.entries[var];
+        entry.borrowed = !inner.is_copy();
+        entry.ty = named.then_some(inner);
+        entry.assigned = Some(variable.span);
+        entry.binding = Some(Binding {
+            snake: String::from_utf8_lossy(&entry.php_name).to_snake_case(),
+            rewritten: false,
+            closed: false,
+            null_check: true,
+        });
+        self.variables.write(var, Some(variable.span));
+        var
+    }
+
+    /// True when `var` is the binding of a null check that is still open (P2R-104).
+    fn checked(&self, var: Var) -> bool {
+        self.variables.entries[var]
+            .binding
+            .as_ref()
+            .is_some_and(|b| b.null_check && !b.closed)
     }
 
     /// The variable a PHP name refers to, or `None` before its first write. A foreach key
@@ -1217,6 +1327,22 @@ impl Converter<'_> {
                     let text = format!("{}for {pattern}{rest}", &line[..at]);
                     finished.push((entries[*value].assigned, text));
                 }
+                Some((
+                    at,
+                    _,
+                    Pending::Condition {
+                        keyword,
+                        parts,
+                        open,
+                        span,
+                    },
+                )) => match condition_lines(&line[..at], keyword, parts, open, &unused) {
+                    Some(texts) => finished.extend(texts.into_iter().map(|text| (Some(*span), text))),
+                    None => self.refuse(
+                        span,
+                        "rustfmt lays out this check against null in a shape the tool does not write (P2R-51)",
+                    ),
+                },
                 None => finished.push((None, line)),
             }
             for (declared, mut text) in finished {
@@ -1425,6 +1551,56 @@ fn operation(operator: &str) -> Option<BinOp> {
         "*=" => Some(BinOp::Mul),
         _ => None,
     }
+}
+
+/// The opening lines of an `if` or `elseif` that checks variables against null, at
+/// `indent`: each binding that is read becomes `let Some(v) = ..`, each other one
+/// `v.is_some()` (P2R-104). The layouts are rustfmt's (P2R-51); `None` for any other.
+fn condition_lines(
+    indent: &str,
+    keyword: &str,
+    parts: &[Part],
+    open: &str,
+    unused: &[bool],
+) -> Option<Vec<String>> {
+    let operands: Vec<(bool, &str)> = parts
+        .iter()
+        .map(|part| match part {
+            Part::Plain { text, .. } => (false, text.as_str()),
+            Part::Let { binding, test, .. } if unused[*binding] => (false, test.as_str()),
+            Part::Let { pattern, .. } => (true, pattern.as_str()),
+        })
+        .collect();
+    let lets = operands.iter().filter(|(is_let, _)| *is_let).count();
+    // No `let`, or the `let` alone: one line.
+    if lets == 0 || operands.len() == 1 {
+        let joined: Vec<&str> = operands.iter().map(|(_, text)| *text).collect();
+        return Some(vec![format!(
+            "{indent}{keyword} {} {open}",
+            joined.join(" && ")
+        )]);
+    }
+    // A variable, `!` and a variable, `true` or `false`, then the `let`: one line.
+    if let ([Part::Plain { simple: true, .. }, _], [(false, first), (true, second)]) =
+        (parts, operands.as_slice())
+    {
+        return Some(vec![format!(
+            "{indent}{keyword} {first} && {second} {open}"
+        )]);
+    }
+    // The `let` first: each further operand on its own line, then `{` alone.
+    if let [(true, first), rest @ ..] = operands.as_slice()
+        && open == "{"
+    {
+        let mut lines = vec![format!("{indent}{keyword} {first}")];
+        lines.extend(
+            rest.iter()
+                .map(|(_, text)| format!("{indent}    && {text}")),
+        );
+        lines.push(format!("{indent}{{"));
+        return Some(lines);
+    }
+    None
 }
 
 /// The pattern of a foreach: its value, or its key and value (P2R-41).

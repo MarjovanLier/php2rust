@@ -1,9 +1,12 @@
 //! Values that may be null: `Some` where an `Option` is needed, comparisons with `null`
-//! and between `Option` values, and `??` (P2R-102, P2R-103, P2R-105).
+//! and between `Option` values, the bindings of null checks, and `??` (P2R-102 to
+//! P2R-105).
 
 use mago_span::HasSpan;
 use mago_syntax::cst::*;
 
+use super::flow::Var;
+use super::variables::Part;
 use super::{Converter, booleans, lists};
 use crate::printer::{BinOp, RExpr};
 use crate::types::RustType;
@@ -44,6 +47,18 @@ fn simple(expr: &RExpr) -> bool {
         | RExpr::Known(..) => true,
         RExpr::Neg(inner) => matches!(**inner, RExpr::Int(_) | RExpr::Float(_)),
         _ => false,
+    }
+}
+
+/// The operands of the top-level `&&` chain of a condition, left to right.
+fn and_operands<'e, 'a>(condition: &'e Expression<'a>) -> Vec<&'e Expression<'a>> {
+    match condition {
+        Expression::Binary(binary) if matches!(binary.operator, BinaryOperator::And(_)) => {
+            let mut operands = and_operands(binary.lhs);
+            operands.extend(and_operands(binary.rhs));
+            operands
+        }
+        other => vec![other],
     }
 }
 
@@ -124,6 +139,97 @@ impl Converter<'_> {
         ))
     }
 
+    /// The opening line of an `if` or `elseif` whose condition has `$v !== null`, on a
+    /// variable or parameter that may be null, as an operand of its top-level `&&` chain.
+    /// Each such check binds the inner value for the later operands and the body
+    /// (P2R-104). Gives the pending line and the bindings, which end with the branch;
+    /// `None` when the condition has no such check.
+    pub(super) fn checked_condition(
+        &mut self,
+        condition: &Expression<'_>,
+        keyword: &'static str,
+        open: &'static str,
+        depth: usize,
+    ) -> Option<(String, Vec<Var>)> {
+        let operands = and_operands(condition);
+        if !operands.iter().any(|o| self.checked_variable(o).is_some()) {
+            return None;
+        }
+        let mut parts = Vec::new();
+        let mut bindings = Vec::new();
+        let mut converted = true;
+        for operand in operands {
+            if let Some((variable, outer, inner)) = self.checked_variable(operand) {
+                self.variables.read(outer, variable.span);
+                let name = self.variables.name_of(outer).to_owned();
+                // An owned `Option<String>` lends its value, so a later read still has it.
+                let scrutinee = if inner.is_copy() || self.variables.is_borrowed(&name) {
+                    name.clone()
+                } else {
+                    format!("{name}.as_deref()")
+                };
+                let binding = self.bind_null(variable, inner);
+                bindings.push(binding);
+                parts.push(Part::Let {
+                    binding,
+                    pattern: format!("let Some({name}) = {scrutinee}"),
+                    test: format!("{name}.is_some()"),
+                });
+                continue;
+            }
+            let Some(expr) = self.condition(operand) else {
+                converted = false;
+                continue;
+            };
+            let simple = match &expr {
+                RExpr::Var(_) | RExpr::Bool(_) => true,
+                RExpr::Not(inner) => matches!(**inner, RExpr::Var(_)),
+                _ => false,
+            };
+            let or = matches!(expr, RExpr::Binary(_, BinOp::Or, _));
+            match self.render(operand, &expr, false) {
+                Some(text) if or => parts.push(Part::Plain {
+                    text: format!("({text})"),
+                    simple,
+                }),
+                Some(text) => parts.push(Part::Plain { text, simple }),
+                None => converted = false,
+            }
+        }
+        // A problem is recorded for every operand that did not convert.
+        let line = if converted {
+            self.variables
+                .condition_line(depth, keyword, parts, open, condition.span())
+        } else {
+            String::new()
+        };
+        Some((line, bindings))
+    }
+
+    /// The variable or parameter of a `$v !== null` operand, with its id and inner type,
+    /// when its Rust type is `Option` (P2R-104).
+    fn checked_variable<'e, 'a>(
+        &self,
+        operand: &'e Expression<'a>,
+    ) -> Option<(&'e DirectVariable<'a>, Var, RustType)> {
+        let Expression::Binary(binary) = lists::unparenthesized(operand) else {
+            return None;
+        };
+        if !matches!(binary.operator, BinaryOperator::NotIdentical(_)) {
+            return None;
+        }
+        let Expression::Variable(Variable::Direct(variable)) =
+            lists::unparenthesized(beside_null(binary)?)
+        else {
+            return None;
+        };
+        let outer = self.lookup(variable)?;
+        let RustType::Option(inner) = self.variables.ty(outer)? else {
+            return None;
+        };
+        Some((variable, outer, (**inner).clone()))
+    }
+
     /// `$a ?? $b`, where `$a` is a variable, parameter or call that may be null and `$b`
     /// has its inner type. `$b` runs only when `$a` is null, as in PHP (P2R-105).
     pub(super) fn coalesce(&mut self, binary: &Binary<'_>) -> Option<(RExpr, RustType)> {
@@ -176,7 +282,7 @@ impl Converter<'_> {
         } else {
             // `unwrap_or` takes the option, so a variable moves unless it is read again.
             let option = match (left, left_node) {
-                (RExpr::Var(name), _) if self.variables.is_parameter(&name) => {
+                (RExpr::Var(name), _) if self.variables.is_borrowed(&name) => {
                     RExpr::MapOwned(Box::new(RExpr::Var(name)))
                 }
                 (RExpr::Var(name), Expression::Variable(Variable::Direct(variable))) => {
@@ -202,7 +308,7 @@ impl Converter<'_> {
         };
         match &**option {
             RExpr::Method(_, "as_deref") => true,
-            RExpr::Var(name) => self.variables.is_parameter(name),
+            RExpr::Var(name) => self.variables.is_borrowed(name),
             _ => false,
         }
     }
@@ -215,7 +321,7 @@ impl Converter<'_> {
             RustType::String => {
                 let text = match expr {
                     RExpr::Str(_) => expr,
-                    RExpr::Var(ref name) if self.variables.is_parameter(name) => expr,
+                    RExpr::Var(ref name) if self.variables.is_borrowed(name) => expr,
                     other => RExpr::Method(Box::new(other), "as_str"),
                 };
                 RExpr::Some(Box::new(text))

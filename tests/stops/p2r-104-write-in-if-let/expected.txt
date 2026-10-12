@@ -1,0 +1,1 @@
+input.php:15:5: a variable that a check against null binds cannot be assigned until the check's block ends (P2R-104)

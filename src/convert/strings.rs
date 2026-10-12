@@ -58,12 +58,12 @@ impl Converter<'_> {
     pub(super) fn owned(&self, expr: RExpr, ty: &RustType) -> RExpr {
         match expr {
             RExpr::Str(_) => RExpr::Call("String::from".into(), vec![expr]),
-            RExpr::Var(name) if *ty == RustType::String && self.variables.is_parameter(&name) => {
+            RExpr::Var(name) if *ty == RustType::String && self.variables.is_borrowed(&name) => {
                 RExpr::Method(Box::new(RExpr::Var(name)), "to_string")
             }
             // A slice cannot move into a `Vec`.
             RExpr::Var(name)
-                if matches!(ty, RustType::Vec(_)) && self.variables.is_parameter(&name) =>
+                if matches!(ty, RustType::Vec(_)) && self.variables.is_borrowed(&name) =>
             {
                 RExpr::Method(Box::new(RExpr::Var(name)), "to_vec")
             }
@@ -71,7 +71,7 @@ impl Converter<'_> {
             RExpr::Var(name)
                 if matches!(ty, RustType::Option(_))
                     && !ty.is_copy()
-                    && self.variables.is_parameter(&name) =>
+                    && self.variables.is_borrowed(&name) =>
             {
                 RExpr::MapOwned(Box::new(RExpr::Var(name)))
             }
@@ -93,13 +93,13 @@ impl Converter<'_> {
             return match expr {
                 _ if ty.is_copy() => expr,
                 RExpr::None => expr,
-                RExpr::Var(ref name) if self.variables.is_parameter(name) => expr,
+                RExpr::Var(ref name) if self.variables.is_borrowed(name) => expr,
                 other => RExpr::Method(Box::new(other), "as_deref"),
             };
         }
         let is_reference = match &expr {
             RExpr::Str(_) => true,
-            RExpr::Var(name) => self.variables.is_parameter(name),
+            RExpr::Var(name) => self.variables.is_borrowed(name),
             other => self.lends(other),
         };
         if matches!(ty, RustType::String | RustType::Vec(_)) && !is_reference {

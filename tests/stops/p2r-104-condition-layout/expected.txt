@@ -1,0 +1,1 @@
+input.php:15:5: rustfmt lays out this check against null in a shape the tool does not write (P2R-51)

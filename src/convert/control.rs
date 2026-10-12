@@ -101,6 +101,8 @@ impl Converter<'_> {
         let mut arriving: Vec<Values> = Vec::new();
         for (index, (condition, statements)) in branches.iter().enumerate() {
             self.variables.set_values(&before);
+            // The bindings of the null checks in this branch's condition (P2R-104).
+            let mut bindings = Vec::new();
             let opening = match condition {
                 Some(condition) => {
                     if index > 0 {
@@ -110,10 +112,18 @@ impl Converter<'_> {
                         self.variables.flow.enter(block);
                         test = block;
                     }
-                    let text = self.condition_text(condition);
                     let keyword = if index == 0 { "if" } else { "} else if" };
                     let open = if alone { "{}" } else { "{" };
-                    self.emit(*condition, depth, format!("{keyword} {text} {open}"))
+                    match self.checked_condition(condition, keyword, open, depth) {
+                        Some((line, checked)) => {
+                            bindings = checked;
+                            line
+                        }
+                        None => {
+                            let text = self.condition_text(condition);
+                            self.emit(*condition, depth, format!("{keyword} {text} {open}"))
+                        }
+                    }
                 }
                 None => format!("{}}} else {{", indent(depth)),
             };
@@ -127,6 +137,7 @@ impl Converter<'_> {
                 self.statement(inner, depth + 1, context, body);
             }
             self.variables.close(outer);
+            self.variables.close_bindings(&bindings);
             if self.variables.left.is_none() {
                 let end = self.variables.flow.current();
                 self.variables.flow.edge(end, join);

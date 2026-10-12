@@ -4,7 +4,8 @@ Status: version 1 written 11 Oct 2026 and revised the same day after review
 by five reviewers. Milestone 2 is added one slice at a time. Section 11
 (nullable types) was written 11 Oct 2026 and built on 12 Oct 2026; the
 final review of the build added the list rules of P2R-102, the `for` step
-rule of P2R-104 and the list places of P2R-106.
+rule of P2R-104 and the list places of P2R-106. Section 12 (enums) is a
+draft of 12 Oct 2026.
 
 php2rust converts typed PHP source into normal, readable Rust (`Vec`,
 `String`, `i64`), without AI. It reads PHP with the Mago crates, uses Mago's
@@ -45,7 +46,7 @@ requirement IDs.
   leave a partial output file (review concern, not checked mechanically).
 - **P2R-06** The same input MUST always give the same stdout bytes, the same
   output file bytes and the same stderr bytes.
-- **P2R-07** Only the constructs that sections 3 to 5 and section 11 list as
+- **P2R-07** Only the constructs that sections 3 to 5, 11 and 12 list as
   converting may convert. Any other construct MUST stop the conversion,
   which means it is reported as a problem under P2R-03. Examples that stop
   in version 1:
@@ -83,12 +84,14 @@ requirement IDs.
   | `string` | `String` |
   | `list<T>` (one element type) | `Vec<T>` |
   | `?T` and `T\|null` | `Option<T>` (P2R-100) |
+  | an enum `E` | the Rust enum `E` (P2R-112) |
   | `void` (return only) | no return type |
 
 - **P2R-21** Narrowed types MUST widen to their base Rust type: literal values
   (`int(5)`, `'abc'`, `true`), integer ranges (`int<0, max>`,
   `positive-int`), refined strings (`non-empty-string`, `numeric-string`) and
-  refined lists (`non-empty-list<int>`, `list{int, int}`). A union whose
+  refined lists (`non-empty-list<int>`, `list{int, int}`), and enum cases
+  (`Suit::Hearts` widens to `Suit`, section 12). A union whose
   members all widen to the same Rust type maps to that type. The empty array
   `[]` (type `array{}`) widens to `Vec<T>`, with `T` taken from the other
   assignments and reads of the same variable, or from the declared parameter
@@ -97,8 +100,8 @@ requirement IDs.
 - **P2R-22** Any other type (`mixed`, a union of different base types other
   than `T|null` (P2R-100), `array` without a list element type, the type
   `null` of a variable, parameter or return value (the literal `null`
-  converts by P2R-102), objects) MUST stop the conversion with a problem
-  that names the type.
+  converts by P2R-102), objects other than enums) MUST stop the conversion
+  with a problem that names the type.
 - **P2R-23** Every function parameter and return type MUST be declared in the
   signature; a docblock may refine `array` to `list<T>`. A missing
   declaration stops the conversion.
@@ -132,11 +135,14 @@ requirement IDs.
   Rust name of a function in the file; a PHP function named `main`.
 - **P2R-32** A call MUST use the declared or built-in function name,
   whatever the letter case of the call (PHP function names ignore case).
-- **P2R-33** Statements outside functions MUST become `fn main()`. Functions
-  declared at the top level MUST become `pub fn`, callable before their
-  declaration, as in PHP. A file with no statements outside functions other
-  than the P2R-12 `declare` MUST convert to a library file with no `main`.
-  A function declared inside another statement stops the conversion.
+- **P2R-33** Statements outside functions, other than enum declarations
+  (section 12), MUST become `fn main()`. Functions declared at the top level
+  MUST become `pub fn`, callable before their declaration, as in PHP. A file
+  with no statements outside functions other than the P2R-12 `declare` and
+  enum declarations MUST convert to a library file with no `main`. After the
+  P2R-52 line the output holds the enums and functions in source order, then
+  `fn main()`. A function declared inside another statement stops the
+  conversion.
 - **P2R-34** Variables MUST keep PHP's function-wide scope. A variable's Rust
   type is the widened type of every assignment to it and every read of it; a
   `foreach` key is `i64` and a `foreach` value has the list's element type. A
@@ -275,6 +281,8 @@ requirement IDs.
     code 101) with a different message.
   - Reading a list at a negative index or past its end: PHP warns and gives
     `null`. Rust panics.
+  - `E::from()` with a value that no case of the enum `E` has: PHP throws a
+    `ValueError` (exit code 255 when uncaught), Rust panics (exit code 101).
   - Comments and docblocks are not copied (version 1).
 
 ## 8. Tests and CI
@@ -293,7 +301,7 @@ requirement IDs.
   stderr MUST be empty. A case without `fn main()` gets the checks of P2R-70
   and P2R-71 only. Review concern, not checked mechanically: each case's
   stdout depends on every construct the case covers, and every construct of
-  sections 3 to 5 and section 11 appears in at least one case with
+  sections 3 to 5, 11 and 12 appears in at least one case with
   `fn main()`.
 - **P2R-73** Each stop folder `tests/stops/<id>-<slug>/` holds `input.php`
   and `expected.txt`. Run from inside the folder, once as
@@ -337,14 +345,14 @@ requirement IDs.
 
 Each milestone gets its own requirements in this file when its work starts.
 
-- **Milestone 2:** classes, enums, interfaces, closures,
+- **Milestone 2:** classes, enums, `match`, interfaces, closures,
   `array<string, T>` maps that keep insertion order, exceptions, more
   built-in functions and constants (`PHP_EOL`), heredoc, and copying
   comments into the output. It is built one slice at a time, each slice in
   its own section from section 11 on, in this order: nullable types
-  (section 11), enums, readonly classes, classes that change their own
-  properties, interfaces, maps, closures, exceptions, then built-in
-  functions, constants, heredoc and comments. Decided on 11 Oct 2026:
+  (section 11), enums (section 12), `match`, readonly classes, classes that
+  change their own properties, interfaces, maps, closures, exceptions, then
+  built-in functions, constants, heredoc and comments. Decided on 11 Oct 2026:
   objects become plain structs, and code that changes one object through two
   variables stops; maps use the `indexmap` crate, so output with a map needs
   it; a `throw` becomes an `Err` of a `Result`.
@@ -391,7 +399,8 @@ Sections 3 to 9 apply to nullable values unless this section says otherwise.
   and `$v !== null` and `null !== $v` to `v.is_some()`, for any expression
   `$v` of Rust type `Option<T>`. `===` and `!==` between two `Option<T>`
   values, or between an `Option<T>` value and a `T` value, MUST convert to
-  `==` and `!=` on `Option` values when P2R-43 allows `===` on `T`; a string
+  `==` and `!=` on `Option` values when P2R-43 or P2R-112 allows `===` on
+  `T`; a string
   side compares as `Option<&str>` (`v.as_deref()`, `Some("ann")`). These
   stop the conversion: `==`, `!=`, `<`, `>`, `<=` and `>=` with an `Option`
   or `null` operand (`null == 0` is true in PHP), and a comparison with
@@ -421,8 +430,9 @@ Sections 3 to 9 apply to nullable values unless this section says otherwise.
   the step of a `for` whose body holds such a `let ... else` at any depth
   stops the conversion: the step also runs at each `continue`, where the
   binding can shadow the variable or not exist yet.
-- **P2R-105** `$a ?? $b` MUST convert when `$a` is a variable, parameter or
-  function call of Rust type `Option<T>` and `$b` has the type `T`. `$b` MUST
+- **P2R-105** `$a ?? $b` MUST convert when `$a` is a variable, parameter,
+  function call or `E::tryFrom()` call (P2R-114) of Rust type `Option<T>` and
+  `$b` has the type `T`. `$b` MUST
   be evaluated only when `$a` is null, as in PHP, and P2R-26 applies to
   `$a`. These stop the conversion: `??` whose left side has a Rust type that
   is not `Option` or is a list element (PHP checks it with `isset`), any
@@ -435,11 +445,69 @@ Sections 3 to 9 apply to nullable values unless this section says otherwise.
   `!` (P2R-42); the list of a `foreach`; the list or the index of a list
   read or an append; an element of a list literal, or an appended value,
   whose list holds values that cannot be null; an argument of a built-in
-  function (P2R-48); an
-  argument for a parameter that is not nullable; and a `return` value in a
-  function whose return type is not nullable. These also stop: a parameter
+  function (P2R-48), of `E::from()` or of `E::tryFrom()`; the enum of
+  `->name` or `->value`; an argument for a parameter that is not nullable;
+  and a `return` value in a function whose return type is not nullable.
+  These also stop: a parameter
   default value, and `return;` or a path that reaches the end of a function
   with a nullable return type.
+
+## 12. Enums (milestone 2, slice 2)
+
+- **P2R-110** An `enum` declared at the top level, pure or backed by `int` or
+  `string`, whose body holds only `case` lines, MUST become a Rust `pub enum`
+  with `#[derive(Clone, Copy, Debug, PartialEq, Eq)]` and one variant per
+  case, in source order (P2R-33 places it in the output). A backing value
+  MUST be an int literal, with or without unary minus, or a string literal,
+  converted by P2R-49. These stop the conversion:
+  - an enum declaration after a statement outside functions other than the
+    P2R-12 `declare`, a function declaration or an enum declaration: PHP
+    declares an enum only when execution reaches it, so an earlier use dies
+    with `Class "E" not found`;
+  - an enum with a method, a constant, `implements` or `use`, or a backing
+    value of any other form (`1 + 1`, `PHP_INT_MAX`);
+  - an enum declared inside another statement.
+- **P2R-111** The Rust names of an enum and its cases MUST be heck's
+  `to_upper_camel_case` of the PHP names (`Suit` stays `Suit`, `IN_REVIEW`
+  becomes `InReview`), and MUST follow the identifier rules of P2R-30 (an
+  ASCII identifier that is not a keyword, `Self` or empty). Every use of an
+  enum or a case MUST take the Rust name of its declaration, whatever the
+  letter case of the use (`suit::Hearts` gives `Suit::Hearts`), as P2R-32
+  does for functions. These stop the conversion: a name that breaks those
+  rules; two enums, or two cases of one enum, with the same Rust name; and
+  an enum named `Option`, `String`, `Vec` or `ToOwned`, which the output
+  uses.
+- **P2R-112** An enum type `E` MUST map to the Rust enum `E` (P2R-20), passed
+  and returned by value; `?E` maps to `Option<E>` (P2R-100) and `list<E>` to
+  `Vec<E>`. A case `E::Name` MUST convert to `E::Name`. An enum value is
+  Copy, so an assignment needs no copy (P2R-26). `===`, `!==`, `==` and `!=`
+  between two values of one enum type MUST convert to `==` and `!=`: PHP
+  compares enum cases by identity with all four. `<`, `>`, `<=`, `>=`, and
+  every operator with an enum operand and an operand of another type, stop
+  the conversion.
+- **P2R-113** `$e->name` MUST give the case's PHP name and `$e->value` the
+  backing value of a backed enum: `e.name()` and `e.value()`. `name()` and a
+  string `value()` return `&'static str`, which follows P2R-24 and P2R-26 as
+  a string parameter does; an int `value()` returns `i64`. `->name` and
+  `->value` inside an interpolated string stop the conversion (P2R-45).
+- **P2R-114** `E::from($v)` MUST convert to `E::from(v)` of type `E`,
+  `E::tryFrom($v)` to `E::try_from(v)` of type `Option<E>` (P2R-100), and
+  `E::cases()` to `E::cases()` of type `Vec<E>`, with the cases in source
+  order. The argument of `from` and `try_from` converts as an argument for a
+  parameter of the backing type (P2R-24): a string as `&str`, an int as
+  `i64`. `E::from()` with a value that no case has panics (P2R-60). Any
+  other static call on an enum stops the conversion.
+- **P2R-115** The output MUST hold, for each enum, only the methods the file
+  uses, in one `impl E` block right after the enum, in the order `name`,
+  `value`, `from`, `try_from`, `cases`, with one blank line between methods.
+  `name`, `value`, `from` and `try_from` are a `match` with one arm per case
+  in source order; `from` ends with
+  `_ => panic!("{:?} is not a valid backing value", value),` and `try_from`
+  with `_ => None,`. All of these take rustfmt's layout (P2R-51): an arm
+  wider than 100 columns becomes `=> {`, its value on the next line one level
+  deeper, and `}` with no comma; the `vec!` of `cases` holds the cases on one
+  line when they fit in 60 columns, otherwise one case per line with a comma
+  after each.
 
 ## Spec checklist
 

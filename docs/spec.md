@@ -7,7 +7,7 @@ final review of the build added the list rules of P2R-102, the `for` step
 rule of P2R-104 and the list places of P2R-106. Section 12 (enums) was
 written and built on 12 Oct 2026; the final review of the build added the
 case, name and call stops of P2R-110, P2R-111 and P2R-114 and the layouts
-of P2R-115.
+of P2R-115. Section 13 (`match`) is a draft of 12 Oct 2026.
 
 php2rust converts typed PHP source into normal, readable Rust (`Vec`,
 `String`, `i64`), without AI. It reads PHP with the Mago crates, uses Mago's
@@ -48,7 +48,7 @@ requirement IDs.
   leave a partial output file (review concern, not checked mechanically).
 - **P2R-06** The same input MUST always give the same stdout bytes, the same
   output file bytes and the same stderr bytes.
-- **P2R-07** Only the constructs that sections 3 to 5, 11 and 12 list as
+- **P2R-07** Only the constructs that sections 3 to 5 and 11 to 13 list as
   converting may convert. Any other construct MUST stop the conversion,
   which means it is reported as a problem under P2R-03. Examples that stop
   in version 1:
@@ -303,7 +303,7 @@ requirement IDs.
   stderr MUST be empty. A case without `fn main()` gets the checks of P2R-70
   and P2R-71 only. Review concern, not checked mechanically: each case's
   stdout depends on every construct the case covers, and every construct of
-  sections 3 to 5, 11 and 12 appears in at least one case with
+  sections 3 to 5 and 11 to 13 appears in at least one case with
   `fn main()`.
 - **P2R-73** Each stop folder `tests/stops/<id>-<slug>/` holds `input.php`
   and `expected.txt`. Run from inside the folder, once as
@@ -352,9 +352,10 @@ Each milestone gets its own requirements in this file when its work starts.
   built-in functions and constants (`PHP_EOL`), heredoc, and copying
   comments into the output. It is built one slice at a time, each slice in
   its own section from section 11 on, in this order: nullable types
-  (section 11), enums (section 12), `match`, readonly classes, classes that
-  change their own properties, interfaces, maps, closures, exceptions, then
-  built-in functions, constants, heredoc and comments. Decided on 11 Oct 2026:
+  (section 11), enums (section 12), `match` (section 13), readonly classes,
+  classes that change their own properties, interfaces, maps, closures,
+  exceptions, then built-in functions, constants, heredoc and comments.
+  Decided on 11 Oct 2026:
   objects become plain structs, and code that changes one object through two
   variables stops; maps use the `indexmap` crate, so output with a map needs
   it; a `throw` becomes an `Err` of a `Result`.
@@ -521,6 +522,50 @@ Sections 3 to 9 apply to nullable values unless this section says otherwise.
   otherwise one case per line with a comma after each. An arm with non-ASCII
   text that is longer than 100 bytes stops the conversion, because rustfmt
   counts columns and the tool counts bytes.
+
+## 13. match (milestone 2, slice 3)
+
+- **P2R-120** A `match` expression MUST convert to a Rust `match` when it is
+  the whole value of a `return` or of an assignment to a variable
+  (`$v = match (...) {...}`), its subject has type `int`, `bool`, `string`
+  or an enum of the file, and every arm condition is a literal of the
+  subject's type (an int literal with or without unary minus, `true`,
+  `false`, or a string literal, converted by P2R-49) or a case of the
+  subject's enum. These stop the conversion:
+  - a `match` anywhere else: an argument, an operand, `echo`, an append, a
+    compound assignment, an arm result, a statement on its own;
+  - a subject of any other type, among them a subject that may be null
+    (P2R-106);
+  - a condition of any other form: a variable, a call, `null`, or an
+    expression, so `match (true)` with conditions stops;
+  - an arm whose result Mago gives no type, because Mago finds it
+    unreachable after an arm that is always true, other than a `default`
+    that P2R-121 leaves out.
+- **P2R-121** Several conditions in one arm MUST become one pattern joined by
+  ` | `, in source order, and `default` MUST become `_`, written as the
+  last arm wherever it stands in the source: PHP tries `default` only when
+  no other arm matches. When the other arms cover every case of the enum, or
+  both `true` and `false`, the `default` arm is left out, because Rust
+  rejects a `_` that no value reaches. Two conditions with the same value in
+  one `match` (`16` and `0x10`) stop the conversion, because Rust rejects the
+  second as unreachable. A `match` without `default` whose arms do not cover
+  every value of the subject's type (every int or string subject, an enum
+  with a case left out) stops: Mago reports `match-not-exhaustive` at error
+  level (P2R-11), and PHP throws an `UnhandledMatchError` there.
+- **P2R-122** Each arm result MUST convert as the value of its `return` or
+  assignment does, with P2R-25, P2R-26, P2R-102 and P2R-106 applied to each
+  arm result, never to the whole `match`, and the arm results MUST have one
+  Rust type after that. When the `match` is the value of a new variable and
+  every arm result is an int literal, the first one gets `_i64` (P2R-49).
+  Only the arm PHP chooses runs, as in PHP. A string subject compares as
+  `&str`: a `String` value as `s.as_str()`, a string parameter as it is.
+- **P2R-123** The `return`, `let` or assignment line MUST end with
+  `match subject {`; each arm MUST be one line one level deeper, ending with
+  `,`; and `};` closes the `match` at the level of the opening line, as
+  rustfmt writes it. Each arm line follows the one-line rule of P2R-51: when
+  rustfmt would split an arm, its pattern or its value, the conversion stops.
+- **P2R-124** For P2R-34 and P2R-35, each arm MUST be its own path from the
+  subject, and the paths join after the `match`.
 
 ## Spec checklist
 

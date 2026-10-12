@@ -44,11 +44,12 @@ function shapes(int $n, ?int $m, float $f, int $other): void
 
 function defaults(Suit $s): int
 {
+    $four = 4;
     return match ($s) {
         default => 1,
         Suit::Hearts => 2,
         Suit::Spades => 3,
-        default => 4,
+        default => $four,
     };
 }
 

@@ -18,7 +18,7 @@ use mago_names::resolver::NameResolver;
 use mago_php_version::PHPVersion;
 use mago_prelude::Prelude;
 use mago_reporting::{AnnotationKind, Issue, Level};
-use mago_span::HasSpan;
+use mago_span::{HasSpan, Span};
 use mago_syntax::cst::*;
 use mago_syntax::parser::parse_file;
 
@@ -259,6 +259,8 @@ struct Converter<'c> {
     enum_names: EnumNames,
     /// The lowercase names of the file's enums that PHP already has as a class (P2R-111).
     built_in_classes: HashSet<Vec<u8>>,
+    /// The spans of the `default` arm results left out of the output (P2R-121).
+    dropped_defaults: Vec<Span>,
     /// The variables of the body being converted: a function, or `fn main()`.
     variables: Variables,
 }
@@ -273,6 +275,7 @@ impl<'c> Converter<'c> {
             enums: Vec::new(),
             enum_names: EnumNames::new(),
             built_in_classes: HashSet::new(),
+            dropped_defaults: Vec::new(),
             variables: Variables::default(),
         }
     }

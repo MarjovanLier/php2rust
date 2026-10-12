@@ -8,6 +8,7 @@
 //! runs before the next pass. A call in the right operand of `&&` or `||` runs on some
 //! paths only, so it does not cut them.
 
+use mago_span::{HasSpan, Span};
 use mago_syntax::cst::*;
 use mago_syntax::walker::Walker;
 
@@ -34,16 +35,27 @@ impl Exits {
 }
 
 /// True when every path through a function body with these statements calls the
-/// function named `name` (PHP function names ignore case).
-pub(super) fn always_recurses(statements: &[&Statement<'_>], name: &[u8]) -> bool {
-    let exits = sequence(statements, name);
+/// function named `name` (PHP function names ignore case). `dropped` holds the spans of
+/// the `default` arm results that P2R-121 leaves out of the output.
+pub(super) fn always_recurses(
+    statements: &[&Statement<'_>],
+    name: &[u8],
+    dropped: &[Span],
+) -> bool {
+    let exits = sequence(statements, &Target { name, dropped });
     !exits.falls && !exits.ends
 }
 
-fn sequence(statements: &[&Statement<'_>], name: &[u8]) -> Exits {
+/// The function whose calls count, and the left-out `default` arms, which never run.
+struct Target<'t> {
+    name: &'t [u8],
+    dropped: &'t [Span],
+}
+
+fn sequence(statements: &[&Statement<'_>], target: &Target<'_>) -> Exits {
     let mut exits = Exits::default();
     for statement in statements {
-        let next = one(statement, name);
+        let next = one(statement, target);
         let falls = next.falls;
         exits.add(Exits {
             falls: false,
@@ -57,18 +69,20 @@ fn sequence(statements: &[&Statement<'_>], name: &[u8]) -> Exits {
     exits
 }
 
-fn one(statement: &Statement<'_>, name: &[u8]) -> Exits {
+fn one(statement: &Statement<'_>, target: &Target<'_>) -> Exits {
     let falls = Exits {
         falls: true,
         ..Exits::default()
     };
     match statement {
-        Statement::Echo(echo) if echo.values.iter().any(|value| calls(value, name)) => {
+        Statement::Echo(echo) if echo.values.iter().any(|value| calls(value, target)) => {
             Exits::default()
         }
-        Statement::Expression(expression) if calls(expression.expression, name) => Exits::default(),
+        Statement::Expression(expression) if calls(expression.expression, target) => {
+            Exits::default()
+        }
         Statement::Return(ret) => Exits {
-            ends: !ret.value.is_some_and(|value| calls(value, name)),
+            ends: !ret.value.is_some_and(|value| calls(value, target)),
             ..Exits::default()
         },
         Statement::Break(_) => Exits {
@@ -84,10 +98,10 @@ fn one(statement: &Statement<'_>, name: &[u8]) -> Exits {
             let mut exits = Exits::default();
             for (condition, statements) in &branches {
                 // A condition that calls cuts its branch and every later one.
-                if condition.is_some_and(|condition| calls(condition, name)) {
+                if condition.is_some_and(|condition| calls(condition, target)) {
                     return exits;
                 }
-                exits.add(sequence(statements, name));
+                exits.add(sequence(statements, target));
             }
             // Without an else, control goes on when every condition is false.
             exits.falls |= branches
@@ -101,18 +115,18 @@ fn one(statement: &Statement<'_>, name: &[u8]) -> Exits {
                 WhileBody::ColonDelimited(inner) => inner.statements.iter().collect(),
             };
             let condition = Some(statement.condition);
-            looped(condition, &statements, &[], name)
+            looped(condition, &statements, &[], target)
         }
         Statement::For(statement) => {
             if statement
                 .initializations
                 .iter()
-                .any(|&init| calls(init, name))
+                .any(|&init| calls(init, target))
             {
                 return Exits::default();
             }
             let conditions: Vec<&Expression<'_>> = statement.conditions.iter().copied().collect();
-            if conditions.iter().any(|&condition| calls(condition, name)) {
+            if conditions.iter().any(|&condition| calls(condition, target)) {
                 return Exits::default();
             }
             let statements = match &statement.body {
@@ -120,10 +134,10 @@ fn one(statement: &Statement<'_>, name: &[u8]) -> Exits {
                 ForBody::ColonDelimited(inner) => inner.statements.iter().collect(),
             };
             let steps: Vec<&Expression<'_>> = statement.increments.iter().copied().collect();
-            looped(conditions.last().copied(), &statements, &steps, name)
+            looped(conditions.last().copied(), &statements, &steps, target)
         }
         Statement::Foreach(statement) => {
-            if calls(statement.expression, name) {
+            if calls(statement.expression, target) {
                 return Exits::default();
             }
             let statements = match &statement.body {
@@ -131,7 +145,7 @@ fn one(statement: &Statement<'_>, name: &[u8]) -> Exits {
                 ForeachBody::ColonDelimited(inner) => inner.statements.iter().collect(),
             };
             // The head exits at the end of the list.
-            let body = sequence(&statements, name);
+            let body = sequence(&statements, target);
             Exits {
                 falls: true,
                 ends: body.ends || body.falls || body.continues,
@@ -148,15 +162,15 @@ fn looped(
     condition: Option<&Expression<'_>>,
     statements: &[&Statement<'_>],
     steps: &[&Expression<'_>],
-    name: &[u8],
+    target: &Target<'_>,
 ) -> Exits {
-    if condition.is_some_and(|condition| calls(condition, name)) {
+    if condition.is_some_and(|condition| calls(condition, target)) {
         return Exits::default();
     }
     // `while (true)` and `for (;;)` become `loop`, whose head has no exit.
     let exits_at_head = condition.is_some_and(|condition| !always_true(condition));
-    let body = sequence(statements, name);
-    let stepped = steps.iter().any(|&step| calls(step, name));
+    let body = sequence(statements, target);
+    let stepped = steps.iter().any(|&step| calls(step, target));
     Exits {
         falls: exits_at_head || body.breaks,
         ends: body.ends || ((body.falls || body.continues) && !stepped),
@@ -173,19 +187,19 @@ fn always_true(expression: &Expression<'_>) -> bool {
     }
 }
 
-/// True when the expression calls the function named `name` whenever it runs.
-fn calls(expression: &Expression<'_>, name: &[u8]) -> bool {
+/// True when the expression calls the function `target` names whenever it runs.
+fn calls(expression: &Expression<'_>, target: &Target<'_>) -> bool {
     let mut found = false;
-    Calls(name).walk_expression(expression, &mut found);
+    Calls(target).walk_expression(expression, &mut found);
     found
 }
 
-struct Calls<'n>(&'n [u8]);
+struct Calls<'c, 't>(&'c Target<'t>);
 
-impl<'ast, 'arena> Walker<'ast, 'arena, bool> for Calls<'_> {
+impl<'ast, 'arena> Walker<'ast, 'arena, bool> for Calls<'_, '_> {
     fn walk_in_function_call(&self, call: &'ast FunctionCall<'arena>, found: &mut bool) {
         if let Expression::Identifier(Identifier::Local(local)) = call.function
-            && local.value.eq_ignore_ascii_case(self.0)
+            && local.value.eq_ignore_ascii_case(self.0.name)
         {
             *found = true;
         }
@@ -193,15 +207,18 @@ impl<'ast, 'arena> Walker<'ast, 'arena, bool> for Calls<'_> {
 
     fn walk_match(&self, r#match: &'ast Match<'arena>, found: &mut bool) {
         self.walk_expression(r#match.expression, found);
-        // Only one arm runs, so the arms call on every path only when each of them does.
-        // shortcut: a default arm that P2R-121 leaves out still counts here, so a match
-        // whose other arms all call and whose default does not is missed; rustc would then
-        // reject the output, which no input seen so far does.
-        let mut arms = r#match.arms.iter().map(|arm| match arm {
-            MatchArm::Expression(arm) => arm.expression,
-            MatchArm::Default(arm) => arm.expression,
-        });
-        if arms.all(|result| calls(result, self.0)) && !r#match.arms.is_empty() {
+        // Only one arm runs, so the arms call on every path only when each Rust arm does;
+        // a left-out default is no Rust arm (P2R-121).
+        let arms: Vec<&Expression<'_>> = r#match
+            .arms
+            .iter()
+            .map(|arm| match arm {
+                MatchArm::Expression(arm) => arm.expression,
+                MatchArm::Default(arm) => arm.expression,
+            })
+            .filter(|result| !self.0.dropped.contains(&result.span()))
+            .collect();
+        if !arms.is_empty() && arms.iter().all(|result| calls(result, self.0)) {
             *found = true;
         }
     }

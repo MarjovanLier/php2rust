@@ -1,2 +1,8 @@
 input.php:9:20: the arms of a match must give one Rust type (P2R-122)
 input.php:16:12: Function `null_arm` is declared to return `int` but possibly returns a nullable value (inferred as `int(2)|null`). (nullable-return-statement)
+input.php:25:14: the element type of this empty list is not known (P2R-21)
+input.php:26:20: the element type of this empty list is not known (P2R-21)
+input.php:30:14: the type null has no Rust type (P2R-22)
+input.php:31:20: the type null has no Rust type (P2R-22)
+input.php:38:20: the arms of a match must give one Rust type (P2R-122)
+input.php:48:12: this int arithmetic always overflows (P2R-50)

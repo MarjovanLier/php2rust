@@ -36,6 +36,12 @@ pub fn code(t: &str) -> i64 {
     return r;
 }
 
+pub fn literal() -> i64 {
+    return match 3000000000_i64 {
+        _ => 1,
+    };
+}
+
 fn main() {
     print!("{}", colour(Suit::Spades));
     print!(" ");
@@ -44,6 +50,8 @@ fn main() {
     print!("{}", word(-1));
     print!(" ");
     print!("{}", word(7));
+    print!(" ");
+    print!("{}", literal());
     print!("\n");
     print!("{}", sign(true) + sign(false));
     print!(" ");

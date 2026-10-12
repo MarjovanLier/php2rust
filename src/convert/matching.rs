@@ -125,6 +125,12 @@ impl Converter<'_> {
             return true;
         };
         let target = self.variables.ty(var).cloned();
+        // rustc works out the value of a `match` with one arm, so the tool keeps it as for a
+        // plain assignment, and a later overflow it proves stops (P2R-50).
+        if let ([arm], Some(RustType::I64)) = (converted.arms.as_slice(), &target) {
+            self.variables
+                .set_value(var, printer::literal_value(&arm.expr));
+        }
         let mut lines = Vec::new();
         let mut anchored = false;
         for arm in converted.arms {
@@ -189,6 +195,7 @@ impl Converter<'_> {
         for arm in node.arms.iter() {
             match arm {
                 MatchArm::Default(arm) if default.is_some() => {
+                    self.record_refused(arm.expression);
                     self.refuse(
                         arm,
                         "a match can have one default arm only, and PHP rejects a second (P2R-120)",
@@ -226,8 +233,9 @@ impl Converter<'_> {
         let covered = subject.as_ref().map(|(_, ty)| self.covered(ty, &patterns));
         match (default, covered) {
             // The other arms cover every value, so Rust rejects `_` and the default never
-            // runs: it is not converted and its reads do not count (P2R-121).
-            (Some(_), Some(Ok(()))) => {}
+            // runs: it is not converted and its reads do not count (P2R-121), nor its
+            // calls (P2R-50).
+            (Some(result), Some(Ok(()))) => self.dropped_defaults.push(result.span()),
             (Some(result), _) => results.push(("_".to_owned(), result, true)),
             (None, Some(Err(message))) => {
                 self.refuse(node, message);
@@ -293,7 +301,10 @@ impl Converter<'_> {
         } else {
             expr
         };
-        let text = self.render(subject, &expr, false)?;
+        // Nothing else types an int subject of literals only, which Rust makes `i32`
+        // (P2R-49).
+        let anchor = ty == RustType::I64 && !printer::anchored(&expr);
+        let text = self.render(subject, &expr, anchor)?;
         Some((text, ty))
     }
 

@@ -42,5 +42,12 @@ function code(string $t): int
     return $r;
 }
 
-echo colour(Suit::Spades), ' ', word(1), ' ', word(-1), ' ', word(7), "\n";
+function literal(): int
+{
+    return match (3000000000) {
+        default => 1,
+    };
+}
+
+echo colour(Suit::Spades), ' ', word(1), ' ', word(-1), ' ', word(7), ' ', literal(), "\n";
 echo sign(true) + sign(false), ' ', code('a'), ' ', code('b'), "\n";

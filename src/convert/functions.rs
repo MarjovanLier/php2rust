@@ -229,7 +229,7 @@ impl Converter<'_> {
             );
         }
         let statements: Vec<&Statement<'_>> = function.body.statements.iter().collect();
-        if recursion::always_recurses(&statements, function.name.value) {
+        if recursion::always_recurses(&statements, function.name.value, &self.dropped_defaults) {
             self.refuse(
                 &function.name,
                 "this function calls itself on every path, and rustc rejects it (P2R-50)",

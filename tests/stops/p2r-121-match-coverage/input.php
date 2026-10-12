@@ -37,6 +37,15 @@ function enum_half(Suit $s): string
     };
 }
 
+function flip(bool $b): int
+{
+    return match ($b) {
+        true => flip(false),
+        false => flip(true),
+        default => 0,
+    };
+}
+
 function same_value(int $n, string $t): string
 {
     $x = match ($n) {

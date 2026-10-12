@@ -45,6 +45,13 @@ converts:
   (`Vec<T>`), and `void` as a return type. Narrower types such as literal values,
   integer ranges, `non-empty-string` and `non-empty-list<int>` widen to these. A
   docblock may refine `array` to `list<T>`.
+- nullable types: `?T` and `T|null` become `Option<T>`, also as list elements
+  (`list<?int>`); a nullable `string` or list parameter becomes `Option<&str>` or
+  `Option<&[T]>`. `null` becomes `None` and a value goes into an `Option` as `Some(..)`.
+  `=== null` and `!== null` become `is_none()` and `is_some()`, and `$a ?? $b` becomes
+  `unwrap_or` (or `unwrap_or_else` when `$b` could have an effect). Inside
+  `if ($v !== null)`, and after an `if ($v === null)` whose body always leaves, `$v` is
+  a plain value (`if let` and `let ... else`).
 - functions declared at the top level, as `pub fn` that can be called before their
   declaration. Every parameter and return type must be declared. A `string` parameter
   becomes `&str` and a `list<T>` parameter `&[T]`. A call may use any letter case, as
@@ -76,8 +83,14 @@ the others are findings of the Mago analyser. In short:
 - PHP that version 1 does not convert, for example classes, closures, `namespace`,
   `use`, casts, `print`, `printf`, `exit`, heredoc, constants other than `true` and
   `false`, and built-in functions other than the four above.
-- A type with no single Rust type: `mixed`, `null`, `array` without a list element type,
-  or a union of different types. A missing parameter or return type.
+- A type with no single Rust type: `mixed`, `null` on its own, `array` without a list
+  element type, or a union of different types other than `T|null`. A missing parameter or
+  return type.
+- A value that may be null where PHP gives null a meaning Rust does not copy, or where a
+  plain value is needed: in `echo`, string building, arithmetic, a condition, `foreach`,
+  a list read, a built-in function, or for a parameter or return type that is not
+  nullable. Also `==` with `null`, `??` on a list element, `??=`, a parameter default
+  value, and a write to a variable while a check against null binds it.
 - PHP behaviour that Rust would not copy exactly: `/` (use `intdiv()` or `fdiv()`), `**`,
   `<=>`, `==` and ordering on strings, arithmetic or comparison that mixes int and float,
   a float or bool in `echo` or in a string, a condition that is not a bool, an
@@ -130,7 +143,8 @@ php2rust refuses some valid PHP that version 1 converts in other forms:
 The tests need PHP 8.5 on `PATH` and the Rust toolchain pinned in
 `rust-toolchain.toml` (`rustup toolchain install` installs it). Each folder under
 `tests/cases`, `tests/stops` and `tests/errors` is one test, and `cargo test` also checks
-that each requirement from P2R-07 to P2R-49 starts the name of a case or stop folder.
+that each requirement from P2R-07 to P2R-49 and from P2R-100 to P2R-199 starts the name of
+a case or stop folder.
 To rewrite every
 `expected.rs` and `expected.txt` from the current output:
 

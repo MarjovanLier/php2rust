@@ -165,6 +165,13 @@ impl Converter<'_> {
                 self.refuse(value, "echo of a list is not supported (P2R-46)");
                 None
             }
+            _ if matches!(ty, RustType::Option(_)) => {
+                self.refuse(
+                    value,
+                    "echo of a value that may be null is not supported, because PHP prints null as an empty string (P2R-106)",
+                );
+                None
+            }
             _ => {
                 self.refuse(value, "echo of a float or bool is not supported (P2R-46)");
                 None

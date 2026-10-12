@@ -1,0 +1,1 @@
+input.php:5:16: by-reference, variadic and default parameters are not supported (P2R-07)

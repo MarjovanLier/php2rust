@@ -1,0 +1,1 @@
+input.php:14:6: arithmetic on a value that may be null is not supported (P2R-106)

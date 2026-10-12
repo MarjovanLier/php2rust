@@ -173,10 +173,13 @@ impl Converter<'_> {
             && !matches!(ty, RustType::I64 | RustType::String)
         {
             self.record_refused(value);
-            self.refuse(
-                value,
-                "only string and int values can be joined into a string (P2R-45)",
-            );
+            // PHP joins null as an empty string (P2R-106).
+            let message = if matches!(ty, RustType::Option(_)) {
+                "a value that may be null cannot be joined into a string (P2R-106)"
+            } else {
+                "only string and int values can be joined into a string (P2R-45)"
+            };
+            self.refuse(value, message);
             return false;
         }
         let Some((expr, ty)) = self.expression(value) else {

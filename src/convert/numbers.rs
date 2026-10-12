@@ -184,6 +184,9 @@ pub(super) fn arithmetic_refusal(
         (RustType::I64, RustType::F64) | (RustType::F64, RustType::I64) => {
             Some("arithmetic that mixes int and float is not supported (P2R-44)")
         }
+        (RustType::Option(_), _) | (_, RustType::Option(_)) => {
+            Some("arithmetic on a value that may be null is not supported (P2R-106)")
+        }
         _ => Some("arithmetic needs two int or two float operands (P2R-43)"),
     }
 }

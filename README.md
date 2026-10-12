@@ -52,6 +52,11 @@ converts:
   `unwrap_or` (or `unwrap_or_else` when `$b` could have an effect). Inside
   `if ($v !== null)`, and after an `if ($v === null)` whose body always leaves, `$v` is
   a plain value (`if let` and `let ... else`).
+- enums declared at the top level, pure or backed by `int` or `string`, whose body holds
+  only cases: a Copy Rust enum with UpperCamelCase names (`IN_REVIEW` becomes
+  `InReview`). Cases, `===` and `==` comparisons, `?Suit`, lists of enums, `->name`,
+  `->value`, `Suit::from()`, `Suit::tryFrom()` (an `Option`) and `Suit::cases()`
+  convert. The Rust enum holds only the helper methods the file uses.
 - functions declared at the top level, as `pub fn` that can be called before their
   declaration. Every parameter and return type must be declared. A `string` parameter
   becomes `&str` and a `list<T>` parameter `&[T]`. A call may use any letter case, as
@@ -80,9 +85,12 @@ Anything not listed above stops the conversion. php2rust then prints every probl
 its line and column, and writes nothing. Its own messages end with the requirement ID;
 the others are findings of the Mago analyser. In short:
 
-- PHP that version 1 does not convert, for example classes, closures, `namespace`,
-  `use`, casts, `print`, `printf`, `exit`, heredoc, constants other than `true` and
-  `false`, and built-in functions other than the four above.
+- PHP that version 1 does not convert, for example classes, closures, `match`,
+  `namespace`, `use`, casts, `print`, `printf`, `exit`, heredoc, constants other than
+  `true` and `false`, and built-in functions other than the four above.
+- An enum with a method, a constant, an interface or a backing value that is not a plain
+  literal, and an enum declared after other code outside functions: PHP declares an
+  enum only when execution reaches it.
 - A type with no single Rust type: `mixed`, `null` on its own, `array` without a list
   element type, or a union of different types other than `T|null`. A missing parameter or
   return type.
@@ -145,6 +153,8 @@ php2rust refuses some valid PHP that version 1 converts in other forms:
   message.
 - Reading a list at a negative index or past its end: PHP warns and gives `null`. Rust
   panics.
+- `Suit::from()` with a value that no case has: PHP throws a `ValueError` (exit code 255
+  when uncaught), Rust panics (exit code 101).
 - Comments and docblocks are not copied (version 1).
 
 ## Development

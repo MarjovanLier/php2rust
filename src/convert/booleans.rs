@@ -96,9 +96,12 @@ pub(super) fn refusal(
     right: &RustType,
 ) -> Option<&'static str> {
     let numbers = |ty: &RustType| matches!(ty, RustType::I64 | RustType::F64);
+    let enums = |ty: &RustType| matches!(ty, RustType::Enum(_));
     if left != right {
         return Some(if numbers(left) && numbers(right) {
             "a comparison that mixes int and float is not supported (P2R-44)"
+        } else if enums(left) || enums(right) {
+            "an enum compares only with a value of the same enum (P2R-112)"
         } else {
             "a comparison needs two operands of the same type (P2R-43)"
         });
@@ -120,6 +123,11 @@ pub(super) fn refusal(
         RustType::Vec(_) => Some("a comparison of lists is not supported in version 1 (P2R-07)"),
         // Only nulls.rs compares `Option` values, by their inner types.
         RustType::Option(_) => Some("only === and !== compare values that may be null (P2R-103)"),
+        // PHP compares enum cases by identity with ==, != and their strict forms.
+        RustType::Enum(_) if ordering => {
+            Some("<, >, <= and >= on enums are not supported (P2R-112)")
+        }
+        RustType::Enum(_) => None,
     }
 }
 

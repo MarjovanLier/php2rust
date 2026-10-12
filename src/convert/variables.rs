@@ -1277,7 +1277,7 @@ impl Converter<'_> {
             .artifacts
             .get_expression_type(node)
             .ok_or_else(|| "Mago found no type here (P2R-34)".to_owned())?;
-        types::rust_type(&lists::without_empty(union))
+        types::rust_type(&lists::without_empty(union), &self.enum_names)
             .map_err(|name| format!("the type {name} has no Rust type (P2R-22)"))
     }
 
@@ -1318,7 +1318,7 @@ impl Converter<'_> {
                 .get_expression_type(node)
                 .and_then(types::list_elements)
             && (types::only_null(&elements)
-                || types::rust_type(&elements)
+                || types::rust_type(&elements, &self.enum_names)
                     .is_ok_and(|found| found == **element || found == *element.inner()))
         {
             return Ok(known.clone());

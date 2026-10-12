@@ -59,7 +59,8 @@ fn simple(expr: &RExpr) -> bool {
         | RExpr::Bool(_)
         | RExpr::Str(_)
         | RExpr::Var(_)
-        | RExpr::Known(..) => true,
+        | RExpr::Known(..)
+        | RExpr::Path(_) => true,
         RExpr::Neg(inner) => matches!(**inner, RExpr::Int(_) | RExpr::Float(_)),
         _ => false,
     }
@@ -267,7 +268,8 @@ impl Converter<'_> {
         let left_node = lists::unparenthesized(binary.lhs);
         if !matches!(
             left_node,
-            Expression::Variable(Variable::Direct(_)) | Expression::Call(Call::Function(_))
+            Expression::Variable(Variable::Direct(_))
+                | Expression::Call(Call::Function(_) | Call::StaticMethod(_))
         ) {
             self.record_refused(binary.lhs);
             self.record_refused(binary.rhs);
@@ -335,14 +337,17 @@ impl Converter<'_> {
         Some((expr, (**inner).clone()))
     }
 
-    /// True for the `&str` that `??` gives when both sides are borrowed (P2R-105).
+    /// True for a string value that Rust holds as a `&str`: the result of `??` when both
+    /// sides are borrowed (P2R-105), and an enum's `name()` or string `value()`, which
+    /// return `&'static str` (P2R-113). Callers ask only about string values.
     pub(super) fn lends(&self, expr: &RExpr) -> bool {
-        let RExpr::Unwrap { option, .. } = expr else {
-            return false;
-        };
-        match &**option {
-            RExpr::Method(_, "as_deref") => true,
-            RExpr::Var(name) => self.variables.is_borrowed(name),
+        match expr {
+            RExpr::Method(_, "name" | "value") => true,
+            RExpr::Unwrap { option, .. } => match &**option {
+                RExpr::Method(_, "as_deref") => true,
+                RExpr::Var(name) => self.variables.is_borrowed(name),
+                _ => false,
+            },
             _ => false,
         }
     }

@@ -1,6 +1,6 @@
-//! PHP names to Rust names (P2R-30).
+//! PHP names to Rust names (P2R-30, P2R-111).
 
-use heck::ToSnakeCase;
+use heck::{ToSnakeCase, ToUpperCamelCase};
 
 /// Rust 2024 strict and reserved keywords that a raw identifier can carry.
 const KEYWORDS: &[&str] = &[
@@ -25,6 +25,13 @@ pub fn rust_name(php: &str) -> Option<String> {
         return Some(format!("r#{snake}"));
     }
     Some(snake)
+}
+
+/// The Rust name for a PHP enum or case name, in UpperCamelCase, or `None` when Rust cannot
+/// use it: `Self` is the only keyword in that case (P2R-111).
+pub fn type_name(php: &str) -> Option<String> {
+    let camel = php.to_upper_camel_case();
+    (camel != "Self" && ascii_identifier(&camel)).then_some(camel)
 }
 
 /// A letter or `_` first, then only ASCII letters, digits and `_`. heck turns `_2` into
@@ -63,6 +70,17 @@ mod tests {
         assert_eq!(rust_name("Self"), None);
         assert_eq!(rust_name("crate"), None);
         assert_eq!(rust_name("_"), None);
+    }
+
+    #[test]
+    fn enum_names_become_upper_camel_case() {
+        assert_eq!(type_name("Suit").as_deref(), Some("Suit"));
+        assert_eq!(type_name("IN_REVIEW").as_deref(), Some("InReview"));
+        assert_eq!(type_name("done").as_deref(), Some("Done"));
+        assert_eq!(type_name("SELF"), None);
+        assert_eq!(type_name("_1"), None);
+        assert_eq!(type_name("_"), None);
+        assert_eq!(type_name("\u{410}rger"), None);
     }
 
     #[test]

@@ -71,6 +71,7 @@ pub(super) struct SiteTypes {
 struct Sites<'c> {
     artifacts: &'c AnalysisArtifacts,
     functions: &'c HashMap<Vec<u8>, Signature>,
+    enums: &'c types::EnumNames,
     /// The declared return type of a function body.
     returns: Option<&'c RustType>,
     /// By PHP name without `$`; `None` for a name with two different list types.
@@ -86,7 +87,7 @@ impl Sites<'_> {
     /// The type Mago gives `node`, unless it is only `[]`.
     fn type_at(&self, node: &impl HasSpan) -> Option<RustType> {
         let union = self.artifacts.get_expression_type(node)?;
-        types::rust_type(&without_empty(union)).ok()
+        types::rust_type(&without_empty(union), self.enums).ok()
     }
 
     /// A read or write of `variable` with the type `ty`. A declared parameter or return
@@ -203,6 +204,7 @@ impl Converter<'_> {
         let mut sites = Sites {
             artifacts: &self.artifacts,
             functions: &self.functions,
+            enums: &self.enum_names,
             returns,
             found: HashMap::new(),
             inner: HashMap::new(),
@@ -326,7 +328,7 @@ impl Converter<'_> {
             return false;
         };
         types::only_null(&elements)
-            || types::rust_type(&elements)
+            || types::rust_type(&elements, &self.enum_names)
                 .is_ok_and(|found| found == *element || found == *element.inner())
     }
 
@@ -419,7 +421,7 @@ mod tests {
         members.push(empty.clone());
         let maybe_empty = TUnion::from_vec(members);
         assert_eq!(
-            types::rust_type(&without_empty(&maybe_empty)),
+            types::rust_type(&without_empty(&maybe_empty), &types::EnumNames::new()),
             Ok(RustType::Vec(Box::new(RustType::I64)))
         );
         let only = TUnion::from_vec(vec![empty]);

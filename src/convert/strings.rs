@@ -174,7 +174,7 @@ impl Converter<'_> {
         if let Some(Ok(ty)) = self
             .artifacts
             .get_expression_type(value)
-            .map(types::rust_type)
+            .map(|union| types::rust_type(union, &self.enum_names))
             && !matches!(ty, RustType::I64 | RustType::String)
         {
             self.record_refused(value);

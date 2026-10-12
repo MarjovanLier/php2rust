@@ -1,0 +1,2 @@
+input.php:9:5: an enum with a method, constant, property or trait is not supported (P2R-110)
+input.php:18:17: a backing value must be an int or string literal (P2R-110)

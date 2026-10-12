@@ -87,6 +87,9 @@ impl Converter<'_> {
             Expression::Literal(Literal::Float(float)) => {
                 Some((RExpr::Float(*float.value), RustType::F64))
             }
+            Expression::Access(Access::ClassConstant(access)) => self.enum_case(access, expression),
+            Expression::Access(Access::Property(access)) => self.enum_property(access, expression),
+            Expression::Call(Call::StaticMethod(call)) => self.enum_call(call, expression),
             other => {
                 self.record_refused(other);
                 self.refuse(

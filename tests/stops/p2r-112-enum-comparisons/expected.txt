@@ -1,0 +1,2 @@
+input.php:13:9: <, >, <= and >= on enums are not supported (P2R-112)
+input.php:16:9: an enum compares only with a value of the same enum (P2R-112)

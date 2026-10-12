@@ -179,7 +179,7 @@ impl Converter<'_> {
             self.refuse(node, "Mago found no type here (P2R-23)");
             return None;
         };
-        match types::rust_type(union) {
+        match types::rust_type(union, &self.enum_names) {
             Ok(ty) => Some(ty),
             Err(name) => {
                 self.refuse(node, format!("the type {name} has no Rust type (P2R-22)"));

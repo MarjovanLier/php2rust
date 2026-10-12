@@ -112,6 +112,8 @@ pub enum RExpr {
     /// `value.map(ToOwned::to_owned)`: the owned copy of an `Option<&str>` or
     /// `Option<&[T]>` parameter (P2R-101).
     MapOwned(Box<RExpr>),
+    /// A path such as an enum case, `Suit::Hearts` (P2R-112).
+    Path(String),
     /// `a ?? b`: `option.unwrap_or(default)`, or `option.unwrap_or_else(|| default)` when
     /// the default must run only when the option is `None` (P2R-105).
     Unwrap {
@@ -310,6 +312,7 @@ fn render(expr: &RExpr, anchor: bool, min_precedence: u8) -> Result<String, TooW
             }
             format!("Some({text})")
         }
+        RExpr::Path(path) => path.clone(),
         RExpr::MapOwned(inner) => chained(
             expr,
             format!("{}.map(ToOwned::to_owned)", render(inner, false, POSTFIX)?),
@@ -406,7 +409,7 @@ pub fn anchored(expr: &RExpr) -> bool {
         // `None` alone, or `Some(5)`, leaves the inner type to inference (P2R-49).
         RExpr::None => false,
         RExpr::Some(inner) => anchored(inner),
-        RExpr::MapOwned(_) | RExpr::Unwrap { .. } => true,
+        RExpr::MapOwned(_) | RExpr::Unwrap { .. } | RExpr::Path(_) => true,
     }
 }
 
@@ -442,6 +445,7 @@ pub fn literal_value(expr: &RExpr) -> Option<i64> {
         RExpr::List(_) | RExpr::Index(..) => None,
         RExpr::Float(_) | RExpr::ToFloat(_) => None,
         RExpr::None | RExpr::Some(_) | RExpr::MapOwned(_) | RExpr::Unwrap { .. } => None,
+        RExpr::Path(_) => None,
     }
 }
 

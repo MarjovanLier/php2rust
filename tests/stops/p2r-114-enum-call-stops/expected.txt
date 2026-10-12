@@ -1,0 +1,3 @@
+input.php:23:5: only E::cases(), and E::from() and E::tryFrom() with one argument on a backed enum, are supported (P2R-114)
+input.php:26:16: a value that may be null cannot go to E::from() or E::tryFrom() (P2R-106)
+input.php:29:12: only E::cases(), and E::from() and E::tryFrom() with one argument on a backed enum, are supported (P2R-114)

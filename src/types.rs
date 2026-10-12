@@ -1,11 +1,18 @@
-//! PHP types to Rust types (P2R-20 to P2R-22, P2R-24, P2R-100, P2R-101).
+//! PHP types to Rust types (P2R-20 to P2R-22, P2R-24, P2R-100, P2R-101, P2R-112).
+
+use std::collections::HashMap;
 
 use mago_codex::ttype::TType;
 use mago_codex::ttype::atomic::TAtomic;
 use mago_codex::ttype::atomic::array::TArray;
 use mago_codex::ttype::atomic::array::list::TList;
+use mago_codex::ttype::atomic::object::TObject;
 use mago_codex::ttype::atomic::scalar::TScalar;
 use mago_codex::ttype::union::TUnion;
+
+/// The Rust name of each enum the file declares, by its lowercase PHP name: PHP class
+/// names ignore letter case, and Mago lowercases some of them (P2R-111).
+pub type EnumNames = HashMap<Vec<u8>, String>;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum RustType {
@@ -16,6 +23,8 @@ pub enum RustType {
     Vec(Box<RustType>),
     /// `?T` and `T|null` (P2R-100).
     Option(Box<RustType>),
+    /// An enum the file declares, by its Rust name (P2R-112).
+    Enum(String),
 }
 
 impl RustType {
@@ -28,6 +37,7 @@ impl RustType {
             Self::String => "String".into(),
             Self::Vec(element) => format!("Vec<{}>", element.owned()),
             Self::Option(inner) => format!("Option<{}>", inner.owned()),
+            Self::Enum(name) => name.clone(),
         }
     }
 
@@ -54,27 +64,29 @@ impl RustType {
     /// (P2R-26).
     pub fn is_copy(&self) -> bool {
         match self {
-            Self::I64 | Self::F64 | Self::Bool => true,
+            Self::I64 | Self::F64 | Self::Bool | Self::Enum(_) => true,
             Self::String | Self::Vec(_) => false,
             Self::Option(inner) => inner.is_copy(),
         }
     }
 }
 
-/// True for the types built so far: int, float, bool and string, lists of built types,
-/// and an `Option` of a built type that is not an `Option` itself (P2R-20, P2R-100).
+/// True for the types built so far: int, float, bool and string, enums, lists of built
+/// types, and an `Option` of a built type that is not an `Option` itself (P2R-20,
+/// P2R-100, P2R-112).
 pub fn built(ty: &RustType) -> bool {
     match ty {
         RustType::I64 | RustType::F64 | RustType::Bool | RustType::String => true,
+        RustType::Enum(_) => true,
         RustType::Vec(element) => built(element),
         RustType::Option(inner) => !matches!(**inner, RustType::Option(_)) && built(inner),
     }
 }
 
 /// Maps an analysed PHP type to exactly one Rust type, widening literal and refined types
-/// to their base type (P2R-21). A `null` member makes it an `Option` (P2R-100). The error
-/// names the PHP type, for the problem message.
-pub fn rust_type(union: &TUnion) -> Result<RustType, String> {
+/// to their base type (P2R-21), with `enums` naming the enums of the file. A `null` member
+/// makes it an `Option` (P2R-100). The error names the PHP type, for the problem message.
+pub fn rust_type(union: &TUnion, enums: &EnumNames) -> Result<RustType, String> {
     let mut found: Option<RustType> = None;
     let mut nullable = false;
     for atomic in union.types.iter() {
@@ -82,7 +94,7 @@ pub fn rust_type(union: &TUnion) -> Result<RustType, String> {
             nullable = true;
             continue;
         }
-        let this = atomic_type(atomic).ok_or_else(|| union.get_id().to_string())?;
+        let this = atomic_type(atomic, enums).ok_or_else(|| union.get_id().to_string())?;
         if found.as_ref().is_some_and(|seen| *seen != this) {
             return Err(union.get_id().to_string());
         }
@@ -103,13 +115,17 @@ pub fn only_null(union: &TUnion) -> bool {
     !union.types.is_empty() && union.types.iter().all(|a| matches!(a, TAtomic::Null))
 }
 
-fn atomic_type(atomic: &TAtomic) -> Option<RustType> {
+fn atomic_type(atomic: &TAtomic, enums: &EnumNames) -> Option<RustType> {
     match atomic {
         TAtomic::Scalar(TScalar::Integer(_)) => Some(RustType::I64),
         TAtomic::Scalar(TScalar::Float(_)) => Some(RustType::F64),
         TAtomic::Scalar(TScalar::Bool(_)) => Some(RustType::Bool),
         TAtomic::Scalar(TScalar::String(_)) => Some(RustType::String),
-        TAtomic::Array(TArray::List(list)) => list_type(list),
+        TAtomic::Array(TArray::List(list)) => list_type(list, enums),
+        // A single case (`enum(Suit::Hearts)`) widens to its enum (P2R-21).
+        TAtomic::Object(TObject::Enum(found)) => enums
+            .get(&found.name.as_bytes().to_ascii_lowercase())
+            .map(|name| RustType::Enum(name.clone())),
         _ => None,
     }
 }
@@ -118,12 +134,12 @@ fn atomic_type(atomic: &TAtomic) -> Option<RustType> {
 /// `list{int, int}` keeps its element types in `known_elements` and `never` as its
 /// general element type, so both are folded together. They fold as one union, so
 /// `list{int(1), null}` gives `Vec<Option<i64>>` (P2R-100).
-fn list_type(list: &TList) -> Option<RustType> {
+fn list_type(list: &TList, enums: &EnumNames) -> Option<RustType> {
     let members = element_members(list);
     if members.is_empty() {
         return None;
     }
-    let element = rust_type(&TUnion::from_vec(members)).ok()?;
+    let element = rust_type(&TUnion::from_vec(members), enums).ok()?;
     Some(RustType::Vec(Box::new(element)))
 }
 
@@ -167,26 +183,43 @@ mod tests {
 
     use super::*;
 
+    /// The Rust type of `union` in a file that declares no enum.
+    fn rust(union: &TUnion) -> Result<RustType, String> {
+        rust_type(union, &EnumNames::new())
+    }
+
     #[test]
     fn narrowed_ints_and_strings_widen() {
-        assert_eq!(rust_type(&get_literal_int(5)), Ok(RustType::I64));
-        assert_eq!(rust_type(&get_int_range(Some(0), None)), Ok(RustType::I64));
-        assert_eq!(rust_type(&get_positive_int()), Ok(RustType::I64));
-        assert_eq!(rust_type(&get_non_empty_string()), Ok(RustType::String));
+        assert_eq!(rust(&get_literal_int(5)), Ok(RustType::I64));
+        assert_eq!(rust(&get_int_range(Some(0), None)), Ok(RustType::I64));
+        assert_eq!(rust(&get_positive_int()), Ok(RustType::I64));
+        assert_eq!(rust(&get_non_empty_string()), Ok(RustType::String));
     }
 
     #[test]
     fn lists_become_vectors() {
         assert_eq!(
-            rust_type(&get_list(get_float())),
+            rust(&get_list(get_float())),
             Ok(RustType::Vec(Box::new(RustType::F64)))
         );
     }
 
     #[test]
+    fn enums_take_their_declared_rust_name() {
+        let enums = EnumNames::from([(b"suit".to_vec(), "Suit".to_owned())]);
+        let case = TUnion::from_vec(vec![TAtomic::Object(TObject::new_enum_case(
+            "Suit".into(),
+            "Hearts".into(),
+        ))]);
+        assert_eq!(rust_type(&case, &enums), Ok(RustType::Enum("Suit".into())));
+        assert!(rust(&case).is_err());
+        assert!(RustType::Enum("Suit".into()).is_copy());
+    }
+
+    #[test]
     fn mixed_null_and_mixed_unions_have_no_rust_type() {
-        assert!(rust_type(&get_mixed()).is_err());
-        assert!(rust_type(&get_null()).is_err());
+        assert!(rust(&get_mixed()).is_err());
+        assert!(rust(&get_null()).is_err());
         let int_or_string = TUnion::from_vec(
             get_int()
                 .types
@@ -195,7 +228,7 @@ mod tests {
                 .cloned()
                 .collect(),
         );
-        assert!(rust_type(&int_or_string).is_err());
+        assert!(rust(&int_or_string).is_err());
     }
 
     #[test]
@@ -206,11 +239,11 @@ mod tests {
             TUnion::from_vec(members)
         };
         assert_eq!(
-            rust_type(&with_null(get_int())),
+            rust(&with_null(get_int())),
             Ok(RustType::Option(Box::new(RustType::I64)))
         );
         assert_eq!(
-            rust_type(&get_list(with_null(get_string()))),
+            rust(&get_list(with_null(get_string()))),
             Ok(RustType::Vec(Box::new(RustType::Option(Box::new(
                 RustType::String
             )))))

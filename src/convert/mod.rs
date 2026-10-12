@@ -24,11 +24,12 @@ use mago_syntax::parser::parse_file;
 
 use crate::printer::{self, RExpr, TooWide};
 use crate::problem::{self, Origin, Problem};
-use crate::types::RustType;
+use crate::types::{EnumNames, RustType};
 use variables::Variables;
 
 mod booleans;
 mod control;
+mod enums;
 mod expressions;
 mod flow;
 mod foreach;
@@ -236,6 +237,10 @@ struct Converter<'c> {
     problems: Vec<Problem>,
     /// Declared functions by lowercase PHP name, because PHP function names ignore case (P2R-32).
     functions: HashMap<Vec<u8>, Signature>,
+    /// The enums of the file in source order (P2R-110).
+    enums: Vec<enums::EnumInfo>,
+    /// The Rust name of each enum by lowercase PHP name (P2R-111).
+    enum_names: EnumNames,
     /// The variables of the body being converted: a function, or `fn main()`.
     variables: Variables,
 }
@@ -247,6 +252,8 @@ impl<'c> Converter<'c> {
             artifacts,
             problems: Vec::new(),
             functions: HashMap::new(),
+            enums: Vec::new(),
+            enum_names: EnumNames::new(),
             variables: Variables::default(),
         }
     }
@@ -278,14 +285,19 @@ impl<'c> Converter<'c> {
     }
 
     fn program(&mut self, program: &Program<'_>) -> String {
+        self.register_enums(program);
         self.register(program);
         let sites = self.site_types(program.statements.iter(), None);
         self.variables.list_types = sites.lists;
         self.variables.null_types = sites.nulls;
         let mut items: Vec<Vec<String>> = Vec::new();
         let mut main: Vec<String> = Vec::new();
+        // Each enum's place among the items, filled once every use is known (P2R-115).
+        let mut enum_slots: Vec<(usize, usize)> = Vec::new();
         let mut declared = false;
         let mut started = false;
+        // A statement of `fn main()` has run, so a later enum is not declared yet (P2R-110).
+        let mut ran = false;
         let mut after_closing_tag = false;
         for statement in program.statements.iter() {
             match statement {
@@ -315,7 +327,22 @@ impl<'c> Converter<'c> {
                                 items.push(item);
                             }
                         }
-                        _ => self.statement(other, 1, Context::Main, &mut main),
+                        Statement::Enum(declaration) => {
+                            if ran {
+                                self.refuse(
+                                    &declaration.name,
+                                    "an enum must come before the statements outside functions, because PHP declares it only when execution reaches it (P2R-110)",
+                                );
+                            }
+                            if let Some(index) = self.enum_index(declaration) {
+                                items.push(Vec::new());
+                                enum_slots.push((items.len() - 1, index));
+                            }
+                        }
+                        _ => {
+                            ran = true;
+                            self.statement(other, 1, Context::Main, &mut main)
+                        }
                     }
                 }
             }
@@ -330,6 +357,9 @@ impl<'c> Converter<'c> {
             });
         }
         self.finish_variables(&mut main);
+        for (slot, index) in enum_slots {
+            items[slot] = self.enum_item(index);
+        }
         assemble(items, main)
     }
 }

@@ -97,6 +97,12 @@ pub fn rust_type(union: &TUnion) -> Result<RustType, String> {
     }
 }
 
+/// True when every member of `union` is `null`: the type of the literal `null`, and of a
+/// variable that may hold null where Mago knows it does (P2R-104).
+pub fn only_null(union: &TUnion) -> bool {
+    !union.types.is_empty() && union.types.iter().all(|a| matches!(a, TAtomic::Null))
+}
+
 fn atomic_type(atomic: &TAtomic) -> Option<RustType> {
     match atomic {
         TAtomic::Scalar(TScalar::Integer(_)) => Some(RustType::I64),
@@ -113,6 +119,17 @@ fn atomic_type(atomic: &TAtomic) -> Option<RustType> {
 /// general element type, so both are folded together. They fold as one union, so
 /// `list{int(1), null}` gives `Vec<Option<i64>>` (P2R-100).
 fn list_type(list: &TList) -> Option<RustType> {
+    let members = element_members(list);
+    if members.is_empty() {
+        return None;
+    }
+    let element = rust_type(&TUnion::from_vec(members)).ok()?;
+    Some(RustType::Vec(Box::new(element)))
+}
+
+/// The element types of a list: its general element type unless it is `never`, and the
+/// type of each known element.
+fn element_members(list: &TList) -> Vec<TAtomic> {
     let mut members: Vec<TAtomic> = Vec::new();
     if !list
         .element_type
@@ -127,11 +144,21 @@ fn list_type(list: &TList) -> Option<RustType> {
             members.extend(element.types.iter().cloned());
         }
     }
-    if members.is_empty() {
-        return None;
+    members
+}
+
+/// The element types of every list in `union` as one union, when every member is a list.
+/// After an append, Mago types a list that holds null as a union of list shapes, such as
+/// `list{int(1), null}|list{2: int(4)}`, which has no one Rust type (P2R-102).
+pub fn list_elements(union: &TUnion) -> Option<TUnion> {
+    let mut members: Vec<TAtomic> = Vec::new();
+    for atomic in union.types.iter() {
+        let TAtomic::Array(TArray::List(list)) = atomic else {
+            return None;
+        };
+        members.extend(element_members(list));
     }
-    let element = rust_type(&TUnion::from_vec(members)).ok()?;
-    Some(RustType::Vec(Box::new(element)))
+    (!members.is_empty()).then(|| TUnion::from_vec(members))
 }
 
 #[cfg(test)]
@@ -188,6 +215,8 @@ mod tests {
                 RustType::String
             )))))
         );
+        assert!(only_null(&get_null()));
+        assert!(!only_null(&with_null(get_int())));
         let option = RustType::Option(Box::new(RustType::String));
         assert_eq!(option.parameter(), "Option<&str>");
         assert_eq!(option.owned(), "Option<String>");

@@ -3,7 +3,7 @@
 //! `variables.rs`.
 
 use std::borrow::Cow;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use mago_analyzer::artifacts::AnalysisArtifacts;
 use mago_codex::ttype::atomic::TAtomic;
@@ -57,7 +57,16 @@ pub(super) fn unparenthesized<'e, 'a>(expression: &'e Expression<'a>) -> &'e Exp
     }
 }
 
-/// What the reads and writes of one body say about the list type of each variable name.
+/// The types the reads and writes of one body give each variable name, for the literals
+/// that have no type of their own: `[]` and `null`.
+pub(super) struct SiteTypes {
+    /// The list type of each name, for a `[]` (P2R-21).
+    pub(super) lists: HashMap<Vec<u8>, Option<RustType>>,
+    /// The `Option` type of each name that may hold null, when it is known (P2R-102).
+    pub(super) nulls: HashMap<Vec<u8>, RustType>,
+}
+
+/// What the reads and writes of one body say about the type of each variable name.
 struct Sites<'c> {
     artifacts: &'c AnalysisArtifacts,
     functions: &'c HashMap<Vec<u8>, Signature>,
@@ -65,21 +74,46 @@ struct Sites<'c> {
     returns: Option<&'c RustType>,
     /// By PHP name without `$`; `None` for a name with two different list types.
     found: HashMap<Vec<u8>, Option<RustType>>,
+    /// By PHP name: the type of every site with the `Option` taken off; `None` for a name
+    /// whose sites disagree.
+    inner: HashMap<Vec<u8>, Option<RustType>>,
+    /// The names that a read or write gives an `Option` type, or that are assigned `null`.
+    nullable: HashSet<Vec<u8>>,
 }
 
 impl Sites<'_> {
-    /// The list type Mago gives `node`, unless it is only `[]`.
-    fn list_at(&self, node: &impl HasSpan) -> Option<RustType> {
+    /// The type Mago gives `node`, unless it is only `[]`.
+    fn type_at(&self, node: &impl HasSpan) -> Option<RustType> {
         let union = self.artifacts.get_expression_type(node)?;
         types::rust_type(&without_empty(union)).ok()
     }
 
-    fn add(&mut self, variable: &DirectVariable<'_>, ty: Option<RustType>) {
-        let Some(ty @ RustType::Vec(_)) = ty else {
+    /// A read or write of `variable` with the type `ty`. A declared parameter or return
+    /// type that the variable flows into is `flows: true`: it gives the inner type of a
+    /// `null`, but never makes the variable nullable, so `return $n;` in a `?int` function
+    /// leaves `$n` an int.
+    fn add(&mut self, variable: &DirectVariable<'_>, ty: Option<RustType>, flows: bool) {
+        let Some(ty) = ty else {
             return;
         };
+        let name = variable.name[1..].to_vec();
+        if matches!(ty, RustType::Option(_)) && !flows {
+            self.nullable.insert(name.clone());
+        }
+        let inner = ty.inner().clone();
+        self.inner
+            .entry(name.clone())
+            .and_modify(|seen| {
+                if seen.as_ref() != Some(&inner) {
+                    *seen = None;
+                }
+            })
+            .or_insert(Some(inner));
+        if !matches!(ty, RustType::Vec(_)) {
+            return;
+        }
         self.found
-            .entry(variable.name[1..].to_vec())
+            .entry(name)
             .and_modify(|seen| {
                 if seen.as_ref() != Some(&ty) {
                     *seen = None;
@@ -99,8 +133,8 @@ impl<'ast, 'arena, 'c> Walker<'ast, 'arena, Sites<'c>> for ListSites {
         variable: &'ast DirectVariable<'arena>,
         sites: &mut Sites<'c>,
     ) {
-        let ty = sites.list_at(variable);
-        sites.add(variable, ty);
+        let ty = sites.type_at(variable);
+        sites.add(variable, ty, false);
     }
 
     fn walk_in_assignment(&self, assignment: &'ast Assignment<'arena>, sites: &mut Sites<'c>) {
@@ -108,8 +142,14 @@ impl<'ast, 'arena, 'c> Walker<'ast, 'arena, Sites<'c>> for ListSites {
         if matches!(assignment.operator, AssignmentOperator::Assign(_))
             && let Expression::Variable(Variable::Direct(variable)) = assignment.lhs
         {
-            let ty = sites.list_at(assignment);
-            sites.add(variable, ty);
+            if matches!(
+                unparenthesized(assignment.rhs),
+                Expression::Literal(Literal::Null(_))
+            ) {
+                sites.nullable.insert(variable.name[1..].to_vec());
+            }
+            let ty = sites.type_at(assignment);
+            sites.add(variable, ty, false);
         }
     }
 
@@ -117,7 +157,7 @@ impl<'ast, 'arena, 'c> Walker<'ast, 'arena, Sites<'c>> for ListSites {
         if let Some(value) = r#return.value
             && let Expression::Variable(Variable::Direct(variable)) = unparenthesized(value)
         {
-            sites.add(variable, sites.returns.cloned());
+            sites.add(variable, sites.returns.cloned(), true);
         }
     }
 
@@ -136,7 +176,7 @@ impl<'ast, 'arena, 'c> Walker<'ast, 'arena, Sites<'c>> for ListSites {
                 && let Expression::Variable(Variable::Direct(variable)) =
                     unparenthesized(positional.value)
             {
-                sites.add(variable, Some(parameter.ty.clone()));
+                sites.add(variable, Some(parameter.ty.clone()), true);
             }
         }
     }
@@ -150,24 +190,39 @@ impl<'ast, 'arena, 'c> Walker<'ast, 'arena, Sites<'c>> for ListSites {
 }
 
 impl Converter<'_> {
-    /// The list type that the reads and writes of a body give each variable name, so a
-    /// `[]` takes its element type from them, also when it is read while still empty
-    /// (P2R-21). `returns` is the declared return type of a function body.
-    pub(super) fn list_types<'ast, 'arena: 'ast>(
+    /// The types that the reads and writes of a body give each variable name, so a `[]`
+    /// takes its element type from them, also when it is read while still empty (P2R-21),
+    /// and a `null` its `Option` type (P2R-102). `returns` is the declared return type of a
+    /// function body.
+    pub(super) fn site_types<'ast, 'arena: 'ast>(
         &self,
         statements: impl IntoIterator<Item = &'ast Statement<'arena>>,
         returns: Option<&RustType>,
-    ) -> HashMap<Vec<u8>, Option<RustType>> {
+    ) -> SiteTypes {
         let mut sites = Sites {
             artifacts: &self.artifacts,
             functions: &self.functions,
             returns,
             found: HashMap::new(),
+            inner: HashMap::new(),
+            nullable: HashSet::new(),
         };
         for statement in statements {
             ListSites.walk_statement(statement, &mut sites);
         }
-        sites.found
+        let nulls = sites
+            .nullable
+            .iter()
+            .filter_map(|name| {
+                let inner = sites.inner.get(name)?.clone()?;
+                let ty = RustType::Option(Box::new(inner));
+                types::built(&ty).then(|| (name.clone(), ty))
+            })
+            .collect();
+        SiteTypes {
+            lists: sites.found,
+            nulls,
+        }
     }
 
     /// An expression whose type is `expected` when it is known, so `[]` and `null` can take

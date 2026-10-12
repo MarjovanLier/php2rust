@@ -17,6 +17,14 @@ pub(super) fn wrapped(expr: RExpr, ty: &RustType, target: &RustType) -> RExpr {
     }
 }
 
+/// True for the literal `null`.
+pub(super) fn is_null(expression: &Expression<'_>) -> bool {
+    matches!(
+        lists::unparenthesized(expression),
+        Expression::Literal(Literal::Null(_))
+    )
+}
+
 /// True when a value that may be null goes where a value that cannot be null is needed
 /// (P2R-106).
 pub(super) fn null_for_plain(ty: &RustType, target: &RustType) -> bool {
@@ -25,13 +33,7 @@ pub(super) fn null_for_plain(ty: &RustType, target: &RustType) -> bool {
 
 /// The side of `binary` that is not the literal `null`, when exactly one side is.
 fn beside_null<'e, 'a>(binary: &'e Binary<'a>) -> Option<&'e Expression<'a>> {
-    let null = |e: &Expression<'_>| {
-        matches!(
-            lists::unparenthesized(e),
-            Expression::Literal(Literal::Null(_))
-        )
-    };
-    match (null(binary.lhs), null(binary.rhs)) {
+    match (is_null(binary.lhs), is_null(binary.rhs)) {
         (true, false) => Some(binary.rhs),
         (false, true) => Some(binary.lhs),
         _ => None,

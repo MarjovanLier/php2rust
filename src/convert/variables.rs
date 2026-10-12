@@ -48,7 +48,7 @@ use mago_syntax::walker::Walker;
 
 use super::control::Loop;
 use super::flow::{Flow, Var};
-use super::{Converter, ParameterSignature, lists, numbers, strings};
+use super::{Converter, ParameterSignature, lists, nulls, numbers, strings};
 use crate::printer::{self, BinOp, RExpr};
 use crate::types::{self, RustType};
 
@@ -153,8 +153,11 @@ pub(super) struct Variables {
     /// By foreach key or value: the flow block after its loop (P2R-41).
     exits: Vec<(usize, Var)>,
     /// The list type that the reads and writes of the body give each PHP name, for a `[]`
-    /// (P2R-21); see `Converter::list_types`.
+    /// (P2R-21); see `Converter::site_types`.
     pub(super) list_types: HashMap<Vec<u8>, Option<RustType>>,
+    /// The `Option` type of each PHP name that may hold null, for a `null` and for a first
+    /// write of a value that is not null (P2R-102); see `Converter::site_types`.
+    pub(super) null_types: HashMap<Vec<u8>, RustType>,
 }
 
 impl Default for Variables {
@@ -175,6 +178,7 @@ impl Default for Variables {
             iterated: Vec::new(),
             exits: Vec::new(),
             list_types: HashMap::new(),
+            null_types: HashMap::new(),
         }
     }
 }
@@ -454,7 +458,7 @@ impl Converter<'_> {
         statement: Span,
     ) -> RExpr {
         match (self.owned(expr, ty), strings::sole_read(value)) {
-            (RExpr::Var(name), Some(read)) if matches!(ty, RustType::String | RustType::Vec(_)) => {
+            (RExpr::Var(name), Some(read)) if !ty.is_copy() => {
                 // The mark rides in the variable's text, so it lands right after the
                 // variable wherever the value is rendered.
                 let mark = self.variables.copy_mark(read, statement);
@@ -531,6 +535,18 @@ impl Converter<'_> {
             }
             return Some(self.first_write(var, true, "Vec::new()".to_owned()));
         }
+        // `null` has no type of its own either: it has the variable's `Option` type, which
+        // the other reads and writes of its name give (P2R-102).
+        if let (Some("="), Some(null)) = (operator, value)
+            && nulls::is_null(null)
+        {
+            let (var, declares) = self.write_null(variable, expression, null)?;
+            if !declares {
+                let name = &self.variables.entries[var].rust_name;
+                return Some(format!("{name} = None;"));
+            }
+            return Some(self.first_write(var, true, "None".to_owned()));
+        }
         // PHP evaluates the value first. Every operator but `=` then reads the variable
         // before it writes it.
         let source = value;
@@ -573,6 +589,15 @@ impl Converter<'_> {
             self.refuse(expression, message);
             return None;
         }
+        // PHP joins null as an empty string (P2R-106).
+        if operator == ".=" && matches!(&current, Some((_, RustType::Option(_)))) {
+            self.record_write(variable);
+            self.refuse(
+                expression,
+                "a value that may be null cannot be joined into a string (P2R-106)",
+            );
+            return None;
+        }
         let (var, declares) = self.write(variable, expression)?;
         // The value the variable now holds, when rustc can work it out (P2R-50).
         let value = match (current, operation(operator)) {
@@ -591,7 +616,9 @@ impl Converter<'_> {
             }
             _ => printer::literal_value(&expr),
         };
-        self.variables.set_value(var, value);
+        // Only an int variable has a value rustc works out.
+        let nullable = matches!(self.variables.entries[var].ty, Some(RustType::Option(_)));
+        self.variables.set_value(var, value.filter(|_| !nullable));
         let name = &self.variables.entries[var].rust_name;
         let read_itself = matches!(&expr, RExpr::Var(read) | RExpr::Known(read, _) if read == name);
         if operator == "=" && read_itself {
@@ -610,10 +637,14 @@ impl Converter<'_> {
             };
             ("+=", self.borrowed(expr, &value_type))
         } else if let Some(source) = source {
-            (
-                operator,
-                self.stored(source, expr, &value_type, expression.span()),
-            )
+            // A value that cannot be null becomes `Some(..)` in an `Option` variable
+            // (P2R-102).
+            let stored = self.stored(source, expr, &value_type, expression.span());
+            let expr = match &self.variables.entries[var].ty {
+                Some(target) => nulls::wrapped(stored, &value_type, target),
+                None => stored,
+            };
+            (operator, expr)
         } else {
             (operator, expr)
         };
@@ -645,6 +676,17 @@ impl Converter<'_> {
         value: &Expression<'_>,
     ) -> Option<String> {
         let source = value;
+        let element = self
+            .lookup(list)
+            .and_then(|var| match &self.variables.entries[var].ty {
+                Some(RustType::Vec(element)) if matches!(**element, RustType::Option(_)) => {
+                    Some((**element).clone())
+                }
+                _ => None,
+            });
+        if let Some(element) = element {
+            return self.append_option(expression, list, source, element);
+        }
         let value = self.expression(value);
         let current = self.variable(list);
         let (Some((value, value_type)), Some((_, current_type))) = (value, current) else {
@@ -664,6 +706,46 @@ impl Converter<'_> {
         let name = &self.variables.entries[var].rust_name;
         // rustfmt lays out the arguments of a method call as those of a call (P2R-51).
         let push = RExpr::Call(format!("{name}.push"), vec![value]);
+        Some(format!("{};", self.render(expression, &push, false)?))
+    }
+
+    /// `$a[] = x` on a list of `Option`, whose elements are `element`: `null` is `None` and
+    /// any other value `Some(..)` (P2R-102). Mago types the `$a` of such an append as a
+    /// union of list shapes that has no one Rust type, so the element type alone decides.
+    fn append_option(
+        &mut self,
+        expression: &Expression<'_>,
+        list: &DirectVariable<'_>,
+        value: &Expression<'_>,
+        element: RustType,
+    ) -> Option<String> {
+        let converted = self.value(value, Some(&element));
+        let var = self.lookup(list)?;
+        self.variables.read(var, list.span);
+        let Some((expr, value_type)) = converted else {
+            self.record_write(list);
+            return None;
+        };
+        if value_type != element && value_type != *element.inner() {
+            self.record_write(list);
+            self.refuse(
+                expression,
+                format!(
+                    "a {} cannot be appended to a list of {} (P2R-47)",
+                    value_type.owned(),
+                    element.owned()
+                ),
+            );
+            return None;
+        }
+        let (var, _) = self.record_write(list);
+        if self.refuse_borrowed_parameter(var, list) {
+            return None;
+        }
+        let stored = self.stored(value, expr, &value_type, expression.span());
+        let pushed = nulls::wrapped(stored, &value_type, &element);
+        let name = &self.variables.entries[var].rust_name;
+        let push = RExpr::Call(format!("{name}.push"), vec![pushed]);
         Some(format!("{};", self.render(expression, &push, false)?))
     }
 
@@ -691,7 +773,15 @@ impl Converter<'_> {
                     }
                 }
             }
-            Some(true) => found,
+            // A value that cannot be null starts a variable that may hold null later as an
+            // `Option` (P2R-102).
+            Some(true) => found.map(|found| {
+                let name = &self.variables.entries[var].php_name;
+                match self.variables.null_types.get(name) {
+                    Some(nullable) if *nullable.inner() == found => nullable.clone(),
+                    _ => found,
+                }
+            }),
             None => {
                 self.settle(var, node);
                 if self.variables.entries[var].empty {
@@ -711,6 +801,49 @@ impl Converter<'_> {
                 None
             }
         }
+    }
+
+    /// Records `$x = null` at `node`. Gives the variable and whether this write declares
+    /// it. The `Option` type comes from the other reads and writes of the name, as a `[]`
+    /// takes its list type, or from the variable's type (P2R-102).
+    fn write_null(
+        &mut self,
+        variable: &DirectVariable<'_>,
+        node: &impl HasSpan,
+        null: &Expression<'_>,
+    ) -> Option<(Var, bool)> {
+        let (var, declared) = self.record_write(variable);
+        if self.refuse_borrowed_parameter(var, node) {
+            return None;
+        }
+        let entry = &self.variables.entries[var];
+        let ty = match (declared, &entry.ty) {
+            // The name problem is recorded.
+            (Some(false), _) => return None,
+            (Some(true), _) => self.variables.null_types.get(&entry.php_name).cloned(),
+            (None, Some(known @ RustType::Option(_))) => Some(known.clone()),
+            (None, Some(known)) => {
+                let message = format!(
+                    "the variable ${} changes type from {} to null (P2R-34)",
+                    String::from_utf8_lossy(&entry.php_name),
+                    known.owned()
+                );
+                self.fail(var, null, message);
+                return None;
+            }
+            // A problem with the variable's type is recorded.
+            (None, None) => return None,
+        };
+        let Some(ty) = ty else {
+            self.fail(
+                var,
+                null,
+                "the type null has no Rust type (P2R-22)".to_owned(),
+            );
+            return None;
+        };
+        self.variables.entries[var].ty = Some(ty);
+        Some((var, declared.is_some()))
     }
 
     /// Refuses a change of `var` at `node` when it is a string or list parameter: PHP passes
@@ -906,6 +1039,30 @@ impl Converter<'_> {
         node: &impl HasSpan,
     ) -> Result<RustType, String> {
         if matches!(known, RustType::Vec(_)) && self.empty_list(node) {
+            return Ok(known.clone());
+        }
+        // A read or write of an `Option` variable has its type, also where Mago knows that
+        // the value is null there, or that it is not (P2R-102, P2R-104).
+        if let RustType::Option(inner) = known
+            && (self
+                .artifacts
+                .get_expression_type(node)
+                .is_some_and(types::only_null)
+                || self.site_type(node).is_ok_and(|found| found == **inner))
+        {
+            return Ok(known.clone());
+        }
+        // A list of `Option` after an append: every element fits (P2R-102).
+        if let RustType::Vec(element) = known
+            && matches!(**element, RustType::Option(_))
+            && let Some(elements) = self
+                .artifacts
+                .get_expression_type(node)
+                .and_then(types::list_elements)
+            && (types::only_null(&elements)
+                || types::rust_type(&elements)
+                    .is_ok_and(|found| found == **element || found == *element.inner()))
+        {
             return Ok(known.clone());
         }
         let php_name = &self.variables.entries[var].php_name;

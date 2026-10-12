@@ -279,7 +279,9 @@ impl<'c> Converter<'c> {
 
     fn program(&mut self, program: &Program<'_>) -> String {
         self.register(program);
-        self.variables.list_types = self.list_types(program.statements.iter(), None);
+        let sites = self.site_types(program.statements.iter(), None);
+        self.variables.list_types = sites.lists;
+        self.variables.null_types = sites.nulls;
         let mut items: Vec<Vec<String>> = Vec::new();
         let mut main: Vec<String> = Vec::new();
         let mut declared = false;

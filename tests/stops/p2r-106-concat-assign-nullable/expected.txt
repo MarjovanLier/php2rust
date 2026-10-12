@@ -1,0 +1,1 @@
+input.php:14:1: a value that may be null cannot be joined into a string (P2R-106)

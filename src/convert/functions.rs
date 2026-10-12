@@ -209,8 +209,9 @@ impl Converter<'_> {
             &mut self.variables,
             Variables::with_parameters(&signature.parameters),
         );
-        self.variables.list_types =
-            self.list_types(function.body.statements.iter(), signature.returns.as_ref());
+        let sites = self.site_types(function.body.statements.iter(), signature.returns.as_ref());
+        self.variables.list_types = sites.lists;
+        self.variables.null_types = sites.nulls;
         let mut body = Vec::new();
         for statement in function.body.statements.iter() {
             self.statement(

@@ -107,8 +107,7 @@ impl Converter<'_> {
             return (None, false, String::new());
         };
         // A Copy value comes out of a borrowed list as a plain value.
-        let by_ref =
-            holder(list).is_some() && !matches!(**element, RustType::String | RustType::Vec(_));
+        let by_ref = holder(list).is_some() && element.is_copy();
         let expr = if by_ref {
             self.borrowed(expr, &ty)
         } else {

@@ -1,0 +1,1 @@
+input.php:14:33: a for step cannot read a variable that a let-else in the loop body checks against null (P2R-104)

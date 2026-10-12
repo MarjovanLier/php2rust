@@ -98,6 +98,19 @@ enum Pending {
         open: &'static str,
         span: Span,
     },
+    /// The opening line of `if ($v === null)`: `let Some(v) = v else {` when its body
+    /// always leaves and `binding` is read after it, otherwise `if v.is_none() {`
+    /// (P2R-104).
+    Guard {
+        binding: Option<Var>,
+        /// `let Some(v) = v`.
+        pattern: String,
+        /// `v.is_none()`.
+        test: String,
+        span: Span,
+    },
+    /// The closing line of a guard: `};` after a let-else, otherwise `}`.
+    GuardEnd { guard: usize },
 }
 
 /// A Rust block of the body: the body itself, a branch or a loop body.
@@ -192,6 +205,12 @@ pub(super) struct Variables {
     /// The `Option` type of each PHP name that may hold null, for a `null` and for a first
     /// write of a value that is not null (P2R-102); see `Converter::site_types`.
     pub(super) null_types: HashMap<Vec<u8>, RustType>,
+    /// The bindings of let-else guards, with the Rust block each holds for until it ends
+    /// (P2R-104).
+    guards: Vec<(usize, Var)>,
+    /// A `for` step is being converted, which must not read a guarded variable: at a
+    /// `continue` inside the guard, the binding does not exist yet (P2R-104).
+    pub(super) in_step: bool,
 }
 
 impl Default for Variables {
@@ -213,6 +232,8 @@ impl Default for Variables {
             exits: Vec::new(),
             list_types: HashMap::new(),
             null_types: HashMap::new(),
+            guards: Vec::new(),
+            in_step: false,
         }
     }
 }
@@ -266,8 +287,55 @@ impl Variables {
         std::mem::replace(&mut self.scope, self.scopes.len() - 1)
     }
 
+    /// Goes back to block `outer`. A let-else binding holds until its block ends, so every
+    /// guard whose block is no longer open ends too (P2R-104).
     pub(super) fn close(&mut self, outer: usize) {
         self.scope = outer;
+        let open = chain(&self.scopes, outer);
+        for &(block, var) in &self.guards {
+            if !open.contains(&block)
+                && let Some(binding) = &mut self.entries[var].binding
+            {
+                binding.closed = true;
+            }
+        }
+    }
+
+    /// Holds the binding of a let-else until the current block ends (P2R-104).
+    pub(super) fn guard(&mut self, binding: Var) {
+        self.guards.push((self.scope, binding));
+    }
+
+    /// The pending opening line of `if ($v === null)`, at `depth`, and its index for
+    /// [`Variables::guard_end`] and [`Variables::set_guard`] (P2R-104).
+    pub(super) fn guard_line(
+        &mut self,
+        depth: usize,
+        pattern: String,
+        test: String,
+        span: Span,
+    ) -> (String, usize) {
+        self.pending.push(Pending::Guard {
+            binding: None,
+            pattern,
+            test,
+            span,
+        });
+        let index = self.pending.len() - 1;
+        (format!("{}{MARK}{index}", "    ".repeat(depth)), index)
+    }
+
+    /// The pending closing line of the guard at `guard`.
+    pub(super) fn guard_end(&mut self, depth: usize, guard: usize) -> String {
+        self.pending.push(Pending::GuardEnd { guard });
+        format!("{}{MARK}{}", "    ".repeat(depth), self.pending.len() - 1)
+    }
+
+    /// Gives the guard at `guard` its binding, once its body is known to always leave.
+    pub(super) fn set_guard(&mut self, guard: usize, var: Var) {
+        if let Some(Pending::Guard { binding, .. }) = self.pending.get_mut(guard) {
+            *binding = Some(var);
+        }
     }
 
     /// The known value of every variable (P2R-50).
@@ -492,6 +560,15 @@ impl Converter<'_> {
             return None;
         };
         self.variables.read(var, variable.span);
+        // The step also runs at each `continue`, which can sit inside the guard, before the
+        // binding exists (P2R-104).
+        if self.variables.in_step && self.checked(var) {
+            self.refuse(
+                variable,
+                "a for step cannot read a variable that a let-else in the loop body checks against null (P2R-104)",
+            );
+            return None;
+        }
         if self.variables.entries[var].empty && self.empty_list(variable) {
             // The converter needs the read's type, and no read or write has given it yet.
             self.fail(var, variable, lists::UNKNOWN_ELEMENT.to_owned());
@@ -1343,6 +1420,30 @@ impl Converter<'_> {
                         "rustfmt lays out this check against null in a shape the tool does not write (P2R-51)",
                     ),
                 },
+                Some((
+                    at,
+                    _,
+                    Pending::Guard {
+                        binding,
+                        pattern,
+                        test,
+                        span,
+                    },
+                )) => {
+                    let indent = &line[..at];
+                    let text = if let_else(*binding, &unused) {
+                        format!("{indent}{pattern} else {{")
+                    } else {
+                        format!("{indent}if {test} {{")
+                    };
+                    finished.push((Some(*span), text));
+                }
+                Some((at, _, Pending::GuardEnd { guard })) => {
+                    let after_let = matches!(pending.get(*guard),
+                        Some(Pending::Guard { binding, .. }) if let_else(*binding, &unused));
+                    let end = if after_let { "};" } else { "}" };
+                    finished.push((None, format!("{}{end}", &line[..at])));
+                }
                 None => finished.push((None, line)),
             }
             for (declared, mut text) in finished {
@@ -1551,6 +1652,12 @@ fn operation(operator: &str) -> Option<BinOp> {
         "*=" => Some(BinOp::Mul),
         _ => None,
     }
+}
+
+/// True when a guard with this binding becomes a let-else: its body always leaves and
+/// the binding is read after it (P2R-104).
+fn let_else(binding: Option<Var>, unused: &[bool]) -> bool {
+    binding.is_some_and(|var| !unused[var])
 }
 
 /// The opening lines of an `if` or `elseif` that checks variables against null, at

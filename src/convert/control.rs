@@ -93,6 +93,14 @@ impl Converter<'_> {
         let branches = branches(statement);
         // rustfmt keeps an empty block on the opening line only without an else.
         let alone = branches.len() == 1 && empty(&branches[0].1);
+        // `if ($v === null)` alone, on a variable that may be null, becomes a let-else when
+        // its body always leaves (P2R-104).
+        let guarded = match branches.as_slice() {
+            [(Some(condition), _)] if !alone => self.null_checked(condition, false),
+            _ => None,
+        };
+        let mut guard: Option<usize> = None;
+        let mut body_leaves = false;
         let slot = self.slot(depth, body);
         let before = self.variables.values();
         let join = self.variables.flow.block();
@@ -114,14 +122,24 @@ impl Converter<'_> {
                     }
                     let keyword = if index == 0 { "if" } else { "} else if" };
                     let open = if alone { "{}" } else { "{" };
-                    match self.checked_condition(condition, keyword, open, depth) {
-                        Some((line, checked)) => {
-                            bindings = checked;
-                            line
-                        }
-                        None => {
-                            let text = self.condition_text(condition);
-                            self.emit(*condition, depth, format!("{keyword} {text} {open}"))
+                    if let Some((_, outer, inner)) = &guarded {
+                        let test = self.condition_text(condition);
+                        let pattern = self.pattern(*outer, inner);
+                        let (line, at) =
+                            self.variables
+                                .guard_line(depth, pattern, test, condition.span());
+                        guard = Some(at);
+                        line
+                    } else {
+                        match self.checked_condition(condition, keyword, open, depth) {
+                            Some((line, checked)) => {
+                                bindings = checked;
+                                line
+                            }
+                            None => {
+                                let text = self.condition_text(condition);
+                                self.emit(*condition, depth, format!("{keyword} {text} {open}"))
+                            }
                         }
                     }
                 }
@@ -138,7 +156,8 @@ impl Converter<'_> {
             }
             self.variables.close(outer);
             self.variables.close_bindings(&bindings);
-            if self.variables.left.is_none() {
+            body_leaves = self.variables.left.is_some();
+            if !body_leaves {
                 let end = self.variables.flow.current();
                 self.variables.flow.edge(end, join);
                 arriving.push(self.variables.values());
@@ -153,10 +172,20 @@ impl Converter<'_> {
             arriving.push(before);
         }
         if !alone {
-            body.push(format!("{}}}", indent(depth)));
+            let end = match guard {
+                Some(at) => self.variables.guard_end(depth, at),
+                None => format!("{}}}", indent(depth)),
+            };
+            body.push(end);
         }
         self.variables.flow.enter(join);
         self.join(arriving, "an if whose every branch leaves");
+        // The statements after a let-else in its block read the binding (P2R-104).
+        if let (Some((variable, _, inner)), Some(at), true) = (guarded, guard, body_leaves) {
+            let binding = self.bind_null(variable, inner);
+            self.variables.guard(binding);
+            self.variables.set_guard(at, binding);
+        }
     }
 
     pub(super) fn while_statement(
@@ -342,9 +371,11 @@ impl Converter<'_> {
         }
         let falls_through = self.variables.left.is_none();
         if falls_through {
+            self.variables.in_step = true;
             for &step in parts.steps {
                 self.simple_expression(step, depth + 1, body);
             }
+            self.variables.in_step = false;
             let end = self.variables.flow.current();
             self.variables.flow.edge(end, head);
         }
@@ -364,9 +395,11 @@ impl Converter<'_> {
             self.variables.set_values(&site.values);
             self.variables.flow.enter(site.block);
             let mut lines = Vec::new();
+            self.variables.in_step = true;
             for &step in parts.steps {
                 self.simple_expression(step, site.depth, &mut lines);
             }
+            self.variables.in_step = false;
             body.splice(site.line..site.line, lines);
         }
         self.variables.close(outer);

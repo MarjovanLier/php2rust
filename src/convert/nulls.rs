@@ -152,28 +152,26 @@ impl Converter<'_> {
         depth: usize,
     ) -> Option<(String, Vec<Var>)> {
         let operands = and_operands(condition);
-        if !operands.iter().any(|o| self.checked_variable(o).is_some()) {
+        if !operands
+            .iter()
+            .any(|o| self.null_checked(o, true).is_some())
+        {
             return None;
         }
         let mut parts = Vec::new();
         let mut bindings = Vec::new();
         let mut converted = true;
         for operand in operands {
-            if let Some((variable, outer, inner)) = self.checked_variable(operand) {
+            if let Some((variable, outer, inner)) = self.null_checked(operand, true) {
                 self.variables.read(outer, variable.span);
-                let name = self.variables.name_of(outer).to_owned();
-                // An owned `Option<String>` lends its value, so a later read still has it.
-                let scrutinee = if inner.is_copy() || self.variables.is_borrowed(&name) {
-                    name.clone()
-                } else {
-                    format!("{name}.as_deref()")
-                };
+                let pattern = self.pattern(outer, &inner);
+                let test = format!("{}.is_some()", self.variables.name_of(outer));
                 let binding = self.bind_null(variable, inner);
                 bindings.push(binding);
                 parts.push(Part::Let {
                     binding,
-                    pattern: format!("let Some({name}) = {scrutinee}"),
-                    test: format!("{name}.is_some()"),
+                    pattern,
+                    test,
                 });
                 continue;
             }
@@ -206,16 +204,34 @@ impl Converter<'_> {
         Some((line, bindings))
     }
 
-    /// The variable or parameter of a `$v !== null` operand, with its id and inner type,
-    /// when its Rust type is `Option` (P2R-104).
-    fn checked_variable<'e, 'a>(
+    /// `let Some(v) = v`, the pattern that binds the inner value of `outer` (P2R-104). An
+    /// owned `Option<String>` or `Option<Vec<T>>` lends its value, so a later read of the
+    /// variable still has it.
+    pub(super) fn pattern(&self, outer: Var, inner: &RustType) -> String {
+        let name = self.variables.name_of(outer);
+        if inner.is_copy() || self.variables.is_borrowed(name) {
+            format!("let Some({name}) = {name}")
+        } else {
+            format!("let Some({name}) = {name}.as_deref()")
+        }
+    }
+
+    /// The variable or parameter of a `$v !== null` operand (`$v === null` when not
+    /// `negated`), with its id and inner type, when its Rust type is `Option` (P2R-104).
+    pub(super) fn null_checked<'e, 'a>(
         &self,
         operand: &'e Expression<'a>,
+        negated: bool,
     ) -> Option<(&'e DirectVariable<'a>, Var, RustType)> {
         let Expression::Binary(binary) = lists::unparenthesized(operand) else {
             return None;
         };
-        if !matches!(binary.operator, BinaryOperator::NotIdentical(_)) {
+        let operator = if negated {
+            matches!(binary.operator, BinaryOperator::NotIdentical(_))
+        } else {
+            matches!(binary.operator, BinaryOperator::Identical(_))
+        };
+        if !operator {
             return None;
         }
         let Expression::Variable(Variable::Direct(variable)) =

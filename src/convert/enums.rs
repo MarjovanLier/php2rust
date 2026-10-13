@@ -12,12 +12,16 @@ use crate::types::RustType;
 /// Type names the output itself uses, which an enum must not take (P2R-111).
 const TAKEN: &[&str] = &["Option", "String", "Vec", "ToOwned"];
 
-/// Names PHP reserves for types, which no enum may take; Mago does not report them
-/// (P2R-111).
-const RESERVED: &[&str] = &[
-    "array", "bool", "callable", "false", "float", "int", "iterable", "mixed", "never", "null",
-    "object", "parent", "self", "static", "string", "true", "void",
-];
+/// Names PHP reserves, its keywords and type names, which no enum may take; each one fails
+/// `php -l` as an enum name on PHP 8.5, while Mago's parser accepts them (P2R-111). `enum`
+/// itself is allowed.
+const RESERVED: &str = "abstract and array as bool break callable case catch class clone \
+    const continue declare default die do echo else elseif empty enddeclare endfor endforeach \
+    endif endswitch endwhile eval exit extends false final finally float fn for foreach \
+    function global goto if implements include include_once instanceof insteadof int \
+    interface isset iterable list match mixed namespace never new null object or parent print \
+    private protected public readonly require require_once return self static string switch \
+    throw trait true try unset use var void while xor yield";
 
 /// An enum of the file (P2R-110).
 pub(super) struct EnumInfo {
@@ -86,7 +90,9 @@ impl Converter<'_> {
     fn enum_info(&mut self, declaration: &Enum<'_>) -> Option<EnumInfo> {
         let php = String::from_utf8_lossy(declaration.name.value);
         let lower = php.to_ascii_lowercase();
-        if RESERVED.contains(&lower.as_str()) || self.built_in_classes.contains(lower.as_bytes()) {
+        if RESERVED.split_whitespace().any(|word| word == lower)
+            || self.built_in_classes.contains(lower.as_bytes())
+        {
             self.refuse(
                 &declaration.name,
                 format!("PHP reserves the name {php} or has a class of that name (P2R-111)"),

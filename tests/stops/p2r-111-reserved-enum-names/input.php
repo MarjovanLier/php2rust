@@ -16,3 +16,13 @@ enum countable
 {
     case Counted;
 }
+
+enum List
+{
+    case Item;
+}
+
+enum Readonly
+{
+    case Fixed;
+}

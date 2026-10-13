@@ -9,7 +9,8 @@ written and built on 12 Oct 2026; the final review of the build added the
 case, name and call stops of P2R-110, P2R-111 and P2R-114 and the layouts
 of P2R-115. Section 13 (`match`) was written and built on 12 Oct 2026;
 the final review of the build added the type, constant and subject rules
-at the end of P2R-122 and the call rule of P2R-121.
+at the end of P2R-122 and the call rule of P2R-121. Section 14 (readonly
+classes) is a draft of 13 Oct 2026.
 
 php2rust converts typed PHP source into normal, readable Rust (`Vec`,
 `String`, `i64`), without AI. It reads PHP with the Mago crates, uses Mago's
@@ -50,7 +51,7 @@ requirement IDs.
   leave a partial output file (review concern, not checked mechanically).
 - **P2R-06** The same input MUST always give the same stdout bytes, the same
   output file bytes and the same stderr bytes.
-- **P2R-07** Only the constructs that sections 3 to 5 and 11 to 13 list as
+- **P2R-07** Only the constructs that sections 3 to 5 and 11 to 14 list as
   converting may convert. Any other construct MUST stop the conversion,
   which means it is reported as a problem under P2R-03. Examples that stop
   in version 1:
@@ -89,6 +90,7 @@ requirement IDs.
   | `list<T>` (one element type) | `Vec<T>` |
   | `?T` and `T\|null` | `Option<T>` (P2R-100) |
   | an enum `E` | the Rust enum `E` (P2R-112) |
+  | a class `C` | the Rust struct `C` (P2R-132) |
   | `void` (return only) | no return type |
 
 - **P2R-21** Narrowed types MUST widen to their base Rust type: literal values
@@ -104,7 +106,8 @@ requirement IDs.
 - **P2R-22** Any other type (`mixed`, a union of different base types other
   than `T|null` (P2R-100), `array` without a list element type, the type
   `null` of a variable, parameter or return value (the literal `null`
-  converts by P2R-102), objects other than enums) MUST stop the conversion
+  converts by P2R-102), objects other than enums and the classes of
+  section 14) MUST stop the conversion
   with a problem that names the type.
 - **P2R-23** Every function parameter and return type MUST be declared in the
   signature; a docblock may refine `array` to `list<T>`. A missing
@@ -139,14 +142,14 @@ requirement IDs.
   Rust name of a function in the file; a PHP function named `main`.
 - **P2R-32** A call MUST use the declared or built-in function name,
   whatever the letter case of the call (PHP function names ignore case).
-- **P2R-33** Statements outside functions, other than enum declarations
-  (section 12), MUST become `fn main()`. Functions declared at the top level
-  MUST become `pub fn`, callable before their declaration, as in PHP. A file
-  with no statements outside functions other than the P2R-12 `declare` and
-  enum declarations MUST convert to a library file with no `main`. After the
-  P2R-52 line the output holds the enums and functions in source order, then
-  `fn main()`. A function declared inside another statement stops the
-  conversion.
+- **P2R-33** Statements outside functions, other than enum and class
+  declarations (sections 12 and 14), MUST become `fn main()`. Functions
+  declared at the top level MUST become `pub fn`, callable before their
+  declaration, as in PHP. A file with no statements outside functions other
+  than the P2R-12 `declare`, enum declarations and class declarations MUST
+  convert to a library file with no `main`. After the P2R-52 line the output
+  holds the enums, classes and functions in source order, then `fn main()`.
+  A function declared inside another statement stops the conversion.
 - **P2R-34** Variables MUST keep PHP's function-wide scope. A variable's Rust
   type is the widened type of every assignment to it and every read of it; a
   `foreach` key is `i64` and a `foreach` value has the list's element type. A
@@ -305,7 +308,7 @@ requirement IDs.
   stderr MUST be empty. A case without `fn main()` gets the checks of P2R-70
   and P2R-71 only. Review concern, not checked mechanically: each case's
   stdout depends on every construct the case covers, and every construct of
-  sections 3 to 5 and 11 to 13 appears in at least one case with
+  sections 3 to 5 and 11 to 14 appears in at least one case with
   `fn main()`.
 - **P2R-73** Each stop folder `tests/stops/<id>-<slug>/` holds `input.php`
   and `expected.txt`. Run from inside the folder, once as
@@ -354,10 +357,10 @@ Each milestone gets its own requirements in this file when its work starts.
   built-in functions and constants (`PHP_EOL`), heredoc, and copying
   comments into the output. It is built one slice at a time, each slice in
   its own section from section 11 on, in this order: nullable types
-  (section 11), enums (section 12), `match` (section 13), readonly classes,
-  classes that change their own properties, interfaces, maps, closures,
-  exceptions, then built-in functions, constants, heredoc and comments.
-  Decided on 11 Oct 2026:
+  (section 11), enums (section 12), `match` (section 13), readonly classes
+  (section 14), classes that change their own properties, interfaces, maps,
+  closures, exceptions, then built-in functions, constants, heredoc and
+  comments. Decided on 11 Oct 2026:
   objects become plain structs, and code that changes one object through two
   variables stops; maps use the `indexmap` crate, so output with a map needs
   it; a `throw` becomes an `Err` of a `Result`.
@@ -596,6 +599,87 @@ Sections 3 to 9 apply to nullable values unless this section says otherwise.
   or value, the conversion stops.
 - **P2R-124** For P2R-34 and P2R-35, each arm MUST be its own path from the
   subject, and the paths join after the `match`.
+
+## 14. Readonly classes (milestone 2, slice 4)
+
+- **P2R-130** A `readonly class` declared at the top level, with or without
+  `final`, MUST become a Rust `pub struct` with `#[derive(Clone, Debug)]` and
+  one `pub` field per property, in source order, followed by an `impl` block
+  that holds `pub fn new` and the class's methods (P2R-33 places both). Its
+  body MUST hold only methods (P2R-135) and at most one constructor
+  `__construct` whose parameters all promote to properties
+  (`public int $x`, any visibility) and whose body is empty. A class
+  without a constructor gets a `new` without parameters. PHP declares such a
+  class before any statement runs, so it may come after the statements
+  outside functions. These stop the conversion:
+  - `extends`, `implements`, `abstract`, a trait, a constant, a property that
+    is not promoted, a static member, a constructor parameter that is not
+    promoted, a constructor with a body, and a parameter default value;
+  - a magic method other than the constructor (`__toString`, `__get` and the
+    others), and an attribute on the class or a member (P2R-07);
+  - a class that is not `readonly` (a later slice), and a class declared
+    inside a function or another statement;
+  - a property whose type does not convert (P2R-20, P2R-22), a nullable
+    class type (`?C`, a later slice), and a property that holds its own
+    class, directly or through other classes other than through a list,
+    because the Rust struct would have no size.
+- **P2R-131** The Rust name of a class MUST follow P2R-111: heck's
+  `to_upper_camel_case` of the PHP name, the identifier rules of P2R-30, and
+  every use takes the declaration's Rust name, whatever its letter case.
+  Classes and enums share one namespace, as in PHP: two classes, or a class
+  and an enum, with the same Rust name stop the conversion, and so does every
+  name P2R-111 refuses for an enum. Property names follow P2R-30
+  (`$firstName` becomes `first_name`); method names follow P2R-30, and a call
+  may use any letter case (P2R-32). Two properties or two methods of one
+  class with the same Rust name, and a method whose Rust name is `new`, stop
+  the conversion.
+- **P2R-132** A class type `C` MUST map to the Rust struct `C` (P2R-20), and
+  `list<C>` to `Vec<C>`. A `C` parameter becomes `&C`, as a string parameter
+  becomes `&str` (P2R-24), and a returned `C` is owned. A value of class type
+  is not Copy: an assignment, an append and a return copy it as P2R-26 copies
+  a string, with `.clone()` unless the source is not read again. A nullable
+  class type `?C` stops the conversion.
+- **P2R-133** `new C(args)` MUST convert to `C::new(args)`, with the arguments
+  converted as for a function whose parameters are the constructor's (P2R-24,
+  P2R-25). `C::new` takes `&str` for a string, `&[T]` for a list and `&D` for
+  a class, and stores an owned copy of each: `name.to_string()`,
+  `xs.to_vec()`, `d.clone()`, and `s.map(ToOwned::to_owned)` for an
+  `Option<&str>` or `Option<&[T]>`; a Copy value is stored as it is. `new`
+  with any other class form (a variable, `static`, `self`, an anonymous
+  class) stops the conversion.
+- **P2R-134** A property read `$o->p` MUST convert to `o.p`, and `$this->p`
+  inside a method to `self.p`. A field of a Copy type reads as its value. A
+  field of type `String`, `Vec<T>` or a class lends a reference, as a string
+  parameter does: it is read in place where Rust takes a reference (`echo`,
+  joining, a comparison, an argument), and copied where an owned value is
+  needed (`self.name.clone()` in a `return` or an assignment, P2R-26). These
+  stop the conversion: a write to a property (Mago reports one outside the
+  constructor, P2R-11), `?->`, a property name that is not a plain
+  identifier, and a property read inside an interpolated string (P2R-45).
+- **P2R-135** A method MUST become `pub fn name(&self, params) -> R` in the
+  `impl` block, after `new`, in source order, with one blank line between
+  methods. Its parameters, return type and body follow the rules for
+  functions (sections 3 to 5 and 11 to 13), with `$this` read as `self`.
+  `$o->m(args)` MUST convert to `o.m(args)`, and `$this->m(args)` to
+  `self.m(args)`. A method that calls itself through `$this` on every path
+  stops the conversion, as a function does (P2R-50). These stop the
+  conversion: a static method; `self::`, `static::` and `parent::`; the
+  types `self` and `static`; `$this` outside a method and a write to
+  `$this`; a by-reference parameter; and a call to a method the class does
+  not declare (Mago reports it, P2R-11).
+- **P2R-136** These MUST stop the conversion: `===`, `!==`, `==`, `!=`, `<`,
+  `>`, `<=`, `>=` and `<=>` with an object operand, because Rust has no
+  object identity and PHP compares properties loosely; `echo` and string
+  joining of an object; `instanceof`; `clone`, also with new property
+  values; a cast of an object; and an object as a condition.
+- **P2R-137** The struct MUST list one field per line (`    pub x: i64,`).
+  `new` has the constructor's parameters on its `fn` line (the one-line rule
+  of P2R-51) and its body is the struct literal: on one line, `C { x, y }`,
+  when the text between the braces is at most 18 columns, otherwise one field
+  per line with a comma after each, as rustfmt writes it. A field that stores
+  its parameter unchanged uses the shorthand `x`; any other field is
+  `name: name.to_string()`. A class without properties gives
+  `pub struct C {}` and `C {}`.
 
 ## Spec checklist
 

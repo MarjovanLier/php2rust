@@ -306,7 +306,7 @@ impl Converter<'_> {
                     self.refuse(value, nulls::NULL_ELEMENT);
                     return None;
                 }
-                let expr = self.stored(value, expr, &element, array.span());
+                let expr = self.stored(value, expr, &element, array.span())?;
                 Some(match &wanted {
                     Some(wanted) => nulls::wrapped(expr, &element, wanted),
                     None => expr,

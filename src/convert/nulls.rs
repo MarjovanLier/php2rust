@@ -327,12 +327,14 @@ impl Converter<'_> {
                     RExpr::MapOwned(Box::new(RExpr::Var(name)))
                 }
                 (RExpr::Var(name), Expression::Variable(Variable::Direct(variable))) => {
-                    let mark = self.variables.copy_mark(variable.span, binary.span());
+                    let mark = self
+                        .variables
+                        .copy_mark(variable.span, binary.span(), false);
                     RExpr::Var(format!("{name}{mark}"))
                 }
                 (other, _) => other,
             };
-            let default = self.stored(binary.rhs, right, &right_type, binary.span());
+            let default = self.stored(binary.rhs, right, &right_type, binary.span())?;
             RExpr::Unwrap {
                 option: Box::new(option),
                 default: Box::new(default),

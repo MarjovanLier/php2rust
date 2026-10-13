@@ -10,33 +10,42 @@ use mago_syntax::cst::*;
 use super::enums::class_key;
 use super::recursion::{self, Target};
 use super::variables::THIS;
-use super::{Context, Converter, ParameterSignature, Signature, Variables};
-use crate::printer::RExpr;
+use super::{Context, Converter, Mode, ParameterSignature, Signature, Variables, lists, nulls};
+use crate::printer::{self, RExpr};
 use crate::types::{self, RustType};
 
 /// rustfmt keeps a struct literal on one line when the text between its braces is at
 /// most this wide (P2R-137).
 const LITERAL_WIDTH: usize = 18;
 
-/// A readonly class of the file (P2R-130).
+/// A class of the file (P2R-130, P2R-140).
 pub(super) struct ClassInfo {
     /// The lowercase PHP name, by which every use finds it (P2R-131).
-    key: Vec<u8>,
-    rust_name: String,
-    /// The promoted constructor parameters, which are the properties and the parameters
-    /// of `new`, in source order (P2R-133).
-    fields: Vec<ParameterSignature>,
+    pub(super) key: Vec<u8>,
+    pub(super) rust_name: String,
+    /// The promoted constructor parameters, which are the first properties and the
+    /// parameters of `new`, in source order (P2R-133).
+    pub(super) fields: Vec<ParameterSignature>,
+    /// The properties the class body declares, each with the Rust text of its default,
+    /// after `fields` in the struct (P2R-140).
+    declared: Vec<(ParameterSignature, String)>,
     /// False when a constructor parameter was refused, so `new` cannot check its
     /// arguments against `fields`.
     complete: bool,
-    methods: Vec<MethodInfo>,
+    /// True when the class itself has a property that can change (P2R-141).
+    writable: bool,
+    /// True for a changing type: a value of it is never copied (P2R-141, P2R-145).
+    pub(super) changing: bool,
+    pub(super) methods: Vec<MethodInfo>,
 }
 
-struct MethodInfo {
+pub(super) struct MethodInfo {
     /// The lowercase PHP name: PHP method names ignore letter case (P2R-131).
     key: Vec<u8>,
     /// The parameters without `$this`.
-    signature: Signature,
+    pub(super) signature: Signature,
+    /// `Mut` for a method that changes its object, `&mut self` (P2R-143).
+    pub(super) self_mode: Mode,
 }
 
 impl Converter<'_> {
@@ -68,7 +77,10 @@ impl Converter<'_> {
                 key,
                 rust_name,
                 fields: Vec::new(),
+                declared: Vec::new(),
                 complete: true,
+                writable: false,
+                changing: false,
                 methods: Vec::new(),
             });
         }
@@ -89,12 +101,66 @@ impl Converter<'_> {
             if let Some(index) = self.class_index(declaration) {
                 self.class_shape(declaration);
                 self.fields(declaration, index);
+                self.declared_properties(declaration, index);
                 self.method_signatures(declaration, index, &taken);
             }
         }
         for index in 0..self.classes.len() {
             self.check_containment(program, index);
         }
+        self.mark_changing();
+    }
+
+    /// Finds the changing types: a class holding one is one too, so this repeats until no
+    /// class is added. `new` then takes their values by value (P2R-141, P2R-144).
+    fn mark_changing(&mut self) {
+        let mut grew = true;
+        while grew {
+            grew = false;
+            for index in 0..self.classes.len() {
+                let changing = self.classes[index].writable
+                    || self.properties(index).any(|f| self.is_changing(&f.ty));
+                if changing && !self.classes[index].changing {
+                    self.classes[index].changing = true;
+                    grew = true;
+                }
+            }
+        }
+        for index in 0..self.classes.len() {
+            for at in 0..self.classes[index].fields.len() {
+                if self.is_changing(&self.classes[index].fields[at].ty) {
+                    self.classes[index].fields[at].mode = Mode::Owned;
+                }
+            }
+        }
+    }
+
+    /// True for a changing type: a changing class, or a list or `Option` of one (P2R-141).
+    pub(super) fn is_changing(&self, ty: &RustType) -> bool {
+        match ty {
+            RustType::Class(name) => self
+                .class_named(name)
+                .is_some_and(|index| self.classes[index].changing),
+            RustType::Vec(inner) | RustType::Option(inner) => self.is_changing(inner),
+            _ => false,
+        }
+    }
+
+    /// The type of the property with the PHP name `php` of the class `rust_name`.
+    pub(super) fn property_type(&self, rust_name: &str, php: &[u8]) -> Option<RustType> {
+        let index = self.class_named(rust_name)?;
+        self.properties(index)
+            .find(|f| f.php_name == php)
+            .map(|f| f.ty.clone())
+    }
+
+    /// Every property of the class at `index`, in struct order.
+    fn properties(&self, index: usize) -> impl Iterator<Item = &ParameterSignature> {
+        let class = &self.classes[index];
+        class
+            .fields
+            .iter()
+            .chain(class.declared.iter().map(|(f, _)| f))
     }
 
     /// The class a class declaration registered, when its name converts.
@@ -103,12 +169,12 @@ impl Converter<'_> {
         self.classes.iter().position(|c| c.key == key)
     }
 
-    fn class_named(&self, rust_name: &str) -> Option<usize> {
+    pub(super) fn class_named(&self, rust_name: &str) -> Option<usize> {
         self.classes.iter().position(|c| c.rust_name == rust_name)
     }
 
     /// The method of the class at `index` with the PHP name `php`, in any letter case.
-    fn method_index(&self, index: usize, php: &[u8]) -> Option<usize> {
+    pub(super) fn method_index(&self, index: usize, php: &[u8]) -> Option<usize> {
         let key = php.to_ascii_lowercase();
         self.classes[index]
             .methods
@@ -116,21 +182,12 @@ impl Converter<'_> {
             .position(|m| m.key == key)
     }
 
-    /// Refuses everything a readonly class of this slice may not hold (P2R-130).
+    /// Refuses everything a class of these slices may not hold (P2R-130, P2R-140).
     fn class_shape(&mut self, declaration: &Class<'_>) {
         if let Some(attributes) = declaration.attribute_lists.first() {
             self.refuse(attributes, "attributes are not supported (P2R-07)");
         }
-        let readonly = declaration
-            .modifiers
-            .iter()
-            .any(|m| matches!(m, Modifier::Readonly(_)));
-        if !readonly {
-            self.refuse(
-                &declaration.name,
-                "a class that is not readonly is not supported yet (P2R-130)",
-            );
-        }
+        let readonly = is_readonly(declaration);
         if let Some(modifier) = declaration
             .modifiers
             .iter()
@@ -138,7 +195,7 @@ impl Converter<'_> {
         {
             self.refuse(
                 modifier,
-                "only final may stand beside readonly on a class (P2R-130)",
+                "only readonly and final may stand on a class (P2R-130)",
             );
         }
         if let Some(extends) = &declaration.extends {
@@ -155,12 +212,23 @@ impl Converter<'_> {
         }
         let mut constructors = 0;
         for member in declaration.members.iter() {
-            let ClassLikeMember::Method(method) = member else {
-                self.refuse(
-                    member,
-                    "a readonly class may hold only a constructor and methods (P2R-130)",
-                );
-                continue;
+            let method = match member {
+                ClassLikeMember::Method(method) => method,
+                ClassLikeMember::Property(_) if !readonly => continue,
+                _ if readonly => {
+                    self.refuse(
+                        member,
+                        "a readonly class may hold only a constructor and methods (P2R-130)",
+                    );
+                    continue;
+                }
+                _ => {
+                    self.refuse(
+                        member,
+                        "a class may hold only a constructor, methods and properties (P2R-140)",
+                    );
+                    continue;
+                }
             };
             if let Some(attributes) = method.attribute_lists.first() {
                 self.refuse(attributes, "attributes are not supported (P2R-07)");
@@ -249,6 +317,14 @@ impl Converter<'_> {
             if !parameter.is_promoted_property() || parameter.hint.is_none() {
                 continue;
             }
+            if !is_readonly(declaration)
+                && !parameter
+                    .modifiers
+                    .iter()
+                    .any(|m| matches!(m, Modifier::Readonly(_)))
+            {
+                self.classes[index].writable = true;
+            }
             let php_name = &parameter.variable.name[1..];
             let Some(rust_name) = self.rust_name(php_name, &parameter.variable) else {
                 continue;
@@ -286,10 +362,164 @@ impl Converter<'_> {
                     .unwrap_or_default()
                     .to_snake_case(),
                 ty,
+                mode: Mode::Shared,
             });
         }
         self.classes[index].complete = fields.len() == constructor.parameter_list.parameters.len();
         self.classes[index].fields = fields;
+    }
+
+    /// The properties a class that is not readonly declares in its body, each with a type
+    /// and a literal default (P2R-140). Each one can change.
+    fn declared_properties(&mut self, declaration: &Class<'_>, index: usize) {
+        if is_readonly(declaration) {
+            return;
+        }
+        let codebase = self.codebase;
+        for member in declaration.members.iter() {
+            let ClassLikeMember::Property(property) = member else {
+                continue;
+            };
+            let Property::Plain(plain) = property else {
+                self.refuse(property, "a property hook is not supported (P2R-140)");
+                continue;
+            };
+            let problem = if let Some(var) = &plain.var {
+                Some((var.span(), "var is not supported (P2R-140)"))
+            } else if let Some(attributes) = plain.attribute_lists.first() {
+                Some((attributes.span(), "attributes are not supported (P2R-07)"))
+            } else {
+                plain
+                    .modifiers
+                    .iter()
+                    .find(|m| {
+                        matches!(
+                            m,
+                            Modifier::Static(_) | Modifier::Readonly(_) | Modifier::Abstract(_)
+                        )
+                    })
+                    .map(|modifier| {
+                        (
+                            modifier.span(),
+                            "a static, readonly or abstract declared property is not supported; PHP rejects a default on a readonly one (P2R-140)",
+                        )
+                    })
+            };
+            if let Some((span, message)) = problem {
+                self.refuse(&span, message);
+                continue;
+            }
+            for item in plain.items.iter() {
+                let PropertyItem::Concrete(item) = item else {
+                    self.refuse(item, NEEDS_DEFAULT);
+                    continue;
+                };
+                if plain.hint.is_none() {
+                    self.refuse(item, NEEDS_DEFAULT);
+                    continue;
+                }
+                let php_name = &item.variable.name[1..];
+                let Some(rust_name) = self.rust_name(php_name, &item.variable) else {
+                    continue;
+                };
+                if self.properties(index).any(|f| f.rust_name == rust_name) {
+                    self.refuse(
+                        &item.variable,
+                        format!(
+                            "{rust_name} is already the Rust name of another property (P2R-131)"
+                        ),
+                    );
+                    continue;
+                }
+                let declared = codebase
+                    .get_property(declaration.name.value, item.variable.name)
+                    .and_then(|p| p.type_metadata.as_ref())
+                    .map(|t| &t.type_union);
+                let Some(ty) = self.declared_type(&item.variable, declared) else {
+                    continue;
+                };
+                if types::nullable_object(&ty) {
+                    self.refuse(&item.variable, types::NULLABLE_OBJECT);
+                    continue;
+                }
+                if !types::built(&ty) {
+                    self.refuse(
+                        &item.variable,
+                        "only int, float, bool, string, list, nullable, enum and object properties are built so far (P2R-20)",
+                    );
+                    continue;
+                }
+                let Some(default) = self.default_value(item.value, &ty) else {
+                    continue;
+                };
+                let signature = ParameterSignature {
+                    php_name: php_name.to_vec(),
+                    rust_name,
+                    snake: std::str::from_utf8(php_name)
+                        .unwrap_or_default()
+                        .to_snake_case(),
+                    ty,
+                    mode: Mode::Shared,
+                };
+                self.classes[index].declared.push((signature, default));
+                self.classes[index].writable = true;
+            }
+        }
+    }
+
+    /// The Rust text of a declared property's default: a literal of the property's type,
+    /// `null`, `[]` or an enum case (P2R-140).
+    fn default_value(&mut self, value: &Expression<'_>, ty: &RustType) -> Option<String> {
+        let literal = match lists::unparenthesized(value) {
+            Expression::Literal(_) | Expression::Access(Access::ClassConstant(_)) => true,
+            Expression::UnaryPrefix(unary) => {
+                matches!(unary.operator, UnaryPrefixOperator::Negation(_))
+                    && matches!(
+                        lists::unparenthesized(unary.operand),
+                        Expression::Literal(Literal::Integer(_) | Literal::Float(_))
+                    )
+            }
+            Expression::Array(array) => array.elements.is_empty(),
+            _ => false,
+        };
+        if !literal {
+            self.refuse(
+                value,
+                "a property default must be a literal of the property's type, null, [] or an enum case (P2R-140)",
+            );
+            return None;
+        }
+        let inner = ty.inner();
+        let (expr, found) = match lists::unparenthesized(value) {
+            Expression::Array(_) if matches!(inner, RustType::Vec(_)) => {
+                (RExpr::List(Vec::new()), inner.clone())
+            }
+            Expression::Literal(Literal::Null(_)) if matches!(ty, RustType::Option(_)) => {
+                (RExpr::None, ty.clone())
+            }
+            other => self.expression(other)?,
+        };
+        // An int literal fits a float property (P2R-25); every other value must have the
+        // property's type, or its inner type for a nullable one.
+        if found != *ty && found != *inner && !(found == RustType::I64 && *inner == RustType::F64) {
+            self.refuse(
+                value,
+                "a property default must have the property's type (P2R-140)",
+            );
+            return None;
+        }
+        let expr = self.declared_value(value, expr, &found, ty)?;
+        let expr = nulls::wrapped(self.owned(expr, &found), &found, ty);
+        match printer::expr(&expr, false) {
+            Ok(text) => Some(text),
+            Err(_) => {
+                self.refuse(
+                    value,
+                    "this property default is too wide for one line (P2R-140)",
+                );
+                None
+            }
+        }
     }
 
     /// The signature of every method of the class at `index`, other than the constructor
@@ -391,6 +621,7 @@ impl Converter<'_> {
                         parameters,
                         returns,
                     },
+                    self_mode: Mode::Shared,
                 });
             }
         }
@@ -405,7 +636,7 @@ impl Converter<'_> {
         let mut pending = vec![index];
         let mut problem = None;
         while let Some(at) = pending.pop() {
-            for field in &self.classes[at].fields {
+            for field in self.properties(at) {
                 match &field.ty {
                     RustType::Class(name) => match self.class_named(name) {
                         Some(found) if found == index => {
@@ -452,12 +683,19 @@ impl Converter<'_> {
     pub(super) fn class_item(&mut self, declaration: &Class<'_>, index: usize) -> Vec<String> {
         let name = self.classes[index].rust_name.clone();
         let fields = self.classes[index].fields.clone();
-        let mut lines = vec!["#[derive(Clone, Debug)]".to_owned()];
-        if fields.is_empty() {
+        let properties: Vec<ParameterSignature> = self.properties(index).cloned().collect();
+        // A value of a changing type is never copied (P2R-141).
+        let derive = if self.classes[index].changing {
+            "#[derive(Debug)]"
+        } else {
+            "#[derive(Clone, Debug)]"
+        };
+        let mut lines = vec![derive.to_owned()];
+        if properties.is_empty() {
             lines.push(format!("pub struct {name} {{}}"));
         } else {
             lines.push(format!("pub struct {name} {{"));
-            for field in &fields {
+            for field in &properties {
                 let line = format!("pub {}: {},", field.rust_name, field.ty.owned());
                 lines.push(self.emit(&declaration.name, 1, line));
             }
@@ -467,11 +705,20 @@ impl Converter<'_> {
         lines.push(format!("impl {name} {{"));
         let parameters: Vec<String> = fields
             .iter()
-            .map(|f| format!("{}: {}", f.rust_name, f.ty.parameter()))
+            .map(|f| format!("{}: {}", f.rust_name, f.mode.parameter(&f.ty)))
             .collect();
         let open = format!("pub fn new({}) -> {name} {{", parameters.join(", "));
         lines.push(self.emit(&declaration.name, 1, open));
-        let stores: Vec<String> = fields.iter().map(store).collect();
+        let stores: Vec<String> = fields
+            .iter()
+            .map(store)
+            .chain(
+                self.classes[index]
+                    .declared
+                    .iter()
+                    .map(|(f, default)| format!("{}: {default}", f.rust_name)),
+            )
+            .collect();
         let inner = stores.join(", ");
         if inner.is_empty() {
             lines.push(format!("        {name} {{}}"));
@@ -514,6 +761,7 @@ impl Converter<'_> {
             rust_name: "self".to_owned(),
             snake: "self".to_owned(),
             ty: RustType::Class(self.classes[class].rust_name.clone()),
+            mode: self.classes[class].methods[at].self_mode,
         };
         let mut parameters = vec![this];
         parameters.extend(signature.parameters.iter().cloned());
@@ -630,12 +878,7 @@ impl Converter<'_> {
         // PHP property names keep their letter case.
         let field = self
             .class_named(class)
-            .and_then(|index| {
-                self.classes[index]
-                    .fields
-                    .iter()
-                    .find(|f| f.php_name == name.value)
-            })
+            .and_then(|index| self.properties(index).find(|f| f.php_name == name.value))
             .map(|f| (f.rust_name.clone(), f.ty.clone()));
         let Some((field, ty)) = field else {
             self.refuse(node, "this class has no property of that name (P2R-134)");
@@ -687,6 +930,12 @@ impl Converter<'_> {
         };
         let signature = self.classes[index].methods[at].signature.clone();
         let arguments = self.arguments(&call.argument_list, &signature.parameters, node)?;
+        // A `&mut self` method changes the object its receiver chain starts from (P2R-144).
+        if self.classes[index].methods[at].self_mode == Mode::Mut
+            && !self.change_root(node, &object)
+        {
+            return None;
+        }
         // rustc counts a call of the method through any object of its class (P2R-50).
         if self.current_method == Some((index, at)) {
             self.self_calls.push(call.span());
@@ -729,6 +978,17 @@ impl Converter<'_> {
     }
 }
 
+/// The problem of a declared property without a type or a default (P2R-140).
+const NEEDS_DEFAULT: &str = "a declared property needs a type and a default value (P2R-140)";
+
+/// True for a class declared `readonly` (P2R-130).
+fn is_readonly(declaration: &Class<'_>) -> bool {
+    declaration
+        .modifiers
+        .iter()
+        .any(|m| matches!(m, Modifier::Readonly(_)))
+}
+
 /// True for `__construct`, in any letter case.
 fn is_constructor(method: &Method<'_>) -> bool {
     method.name.value.eq_ignore_ascii_case(b"__construct")
@@ -745,12 +1005,13 @@ fn names_own_class(hint: &Hint<'_>) -> bool {
     }
 }
 
-/// How `new` stores a parameter in its field: a Copy value as it is, with the shorthand,
-/// and any other value as an owned copy (P2R-133, P2R-137).
+/// How `new` stores a parameter in its field: a Copy value or a value it takes by value as
+/// it is, with the shorthand, and any other value as an owned copy (P2R-133, P2R-137,
+/// P2R-144).
 fn store(field: &ParameterSignature) -> String {
     let name = &field.rust_name;
     match &field.ty {
-        ty if ty.is_copy() => name.clone(),
+        ty if ty.is_copy() || field.mode == Mode::Owned => name.clone(),
         RustType::String => format!("{name}: {name}.to_string()"),
         RustType::Vec(_) => format!("{name}: {name}.to_vec()"),
         RustType::Option(_) => format!("{name}: {name}.map(ToOwned::to_owned)"),

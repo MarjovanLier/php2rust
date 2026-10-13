@@ -49,7 +49,8 @@ impl Converter<'_> {
             }
             let rendered = self
                 .declared_value(arm.node, arm.expr, &arm.ty, returns)
-                .map(|expr| nulls::wrapped(self.owned(expr, &arm.ty), &arm.ty, returns))
+                .and_then(|expr| self.kept(arm.node, expr, &arm.ty))
+                .map(|expr| nulls::wrapped(expr, &arm.ty, returns))
                 .and_then(|expr| self.render(arm.node, &expr, false));
             match rendered {
                 Some(text) => lines.push((arm.node, format!("{} => {text},", arm.pattern))),
@@ -134,7 +135,9 @@ impl Converter<'_> {
         let mut lines = Vec::new();
         let mut anchored = false;
         for arm in converted.arms {
-            let stored = self.stored(arm.node, arm.expr, &arm.ty, expression.span());
+            let Some(stored) = self.stored(arm.node, arm.expr, &arm.ty, expression.span()) else {
+                return true;
+            };
             let expr = match &target {
                 Some(target) => nulls::wrapped(stored, &arm.ty, target),
                 None => stored,

@@ -1,4 +1,4 @@
-input.php:5:7: a class that is not readonly is not supported yet (P2R-130)
+input.php:5:1: only readonly and final may stand on a class (P2R-130)
 input.php:14:33: a promoted property cannot be by reference or variadic (P2R-130)
 input.php:14:49: a promoted property cannot be by reference or variadic (P2R-130)
 input.php:21:33: a promoted property needs a declared type, as PHP requires (P2R-130)

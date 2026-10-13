@@ -28,6 +28,7 @@ use crate::types::{RustType, TypeNames};
 use variables::Variables;
 
 mod booleans;
+mod changes;
 mod classes;
 mod control;
 mod enums;
@@ -37,6 +38,7 @@ mod foreach;
 mod functions;
 mod lists;
 mod matching;
+mod modes;
 mod nulls;
 mod numbers;
 mod recursion;
@@ -89,6 +91,19 @@ pub fn convert(path: &str, source: Vec<u8>) -> Result<String, Failure> {
                 .then(|| name.to_ascii_lowercase())
         })
         .collect();
+    // PHP rejects a function named like one it has built in; Mago does not (P2R-31).
+    let built_in_functions: HashSet<Vec<u8>> = program
+        .statements
+        .iter()
+        .filter_map(|statement| match statement {
+            Statement::Function(function)
+                if codebase.get_function(function.name.value).is_some() =>
+            {
+                Some(function.name.value.to_ascii_lowercase())
+            }
+            _ => None,
+        })
+        .collect();
     codebase.extend(scan_program(
         &arena,
         &file,
@@ -125,6 +140,7 @@ pub fn convert(path: &str, source: Vec<u8>) -> Result<String, Failure> {
         .collect();
     let mut converter = Converter::new(&codebase, artifacts);
     converter.built_in_classes = built_in_classes;
+    converter.built_in_functions = built_in_functions;
     let rust = converter.program(program);
     problems.append(&mut converter.problems);
     if problems.is_empty() {
@@ -241,6 +257,31 @@ struct ParameterSignature {
     /// The snake_case name without `r#`, for the `_` prefix of an unused parameter.
     snake: String,
     ty: RustType,
+    mode: Mode,
+}
+
+/// How a parameter of a changing type takes its argument; any other parameter is
+/// `Shared` (P2R-143).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Mode {
+    /// `&C`, `&str`, `&[T]`, or a Copy value.
+    Shared,
+    /// `&mut C` or `&mut [C]`.
+    Mut,
+    /// `C` or `Vec<C>`, which the body moves.
+    Owned,
+}
+
+impl Mode {
+    /// The Rust type of a parameter of type `ty` in this mode.
+    fn parameter(self, ty: &RustType) -> String {
+        match (self, ty) {
+            (Mode::Shared, ty) => ty.parameter(),
+            (Mode::Mut, RustType::Vec(element)) => format!("&mut [{}]", element.owned()),
+            (Mode::Mut, ty) => format!("&mut {}", ty.owned()),
+            (Mode::Owned, ty) => ty.owned(),
+        }
+    }
 }
 
 /// Where a statement sits: `fn main()`, or a function with this return type.
@@ -270,8 +311,12 @@ struct Converter<'c> {
     /// The lowercase names of the file's enums and classes that PHP already has as a
     /// class-like (P2R-111, P2R-131).
     built_in_classes: HashSet<Vec<u8>>,
+    /// The lowercase names of the file's functions that PHP already has (P2R-31).
+    built_in_functions: HashSet<Vec<u8>>,
     /// The spans of the `default` arm results left out of the output (P2R-121).
     dropped_defaults: Vec<Span>,
+    /// The foreach loops that iterate by `&mut` or over a copy (P2R-146).
+    loops: modes::Loops,
     /// The variables of the body being converted: a function, or `fn main()`.
     variables: Variables,
 }
@@ -289,7 +334,9 @@ impl<'c> Converter<'c> {
             current_method: None,
             self_calls: Vec::new(),
             built_in_classes: HashSet::new(),
+            built_in_functions: HashSet::new(),
             dropped_defaults: Vec::new(),
+            loops: modes::Loops::default(),
             variables: Variables::default(),
         }
     }
@@ -325,6 +372,10 @@ impl<'c> Converter<'c> {
         self.register_class_names(program);
         self.register(program);
         self.register_class_members(program);
+        self.decide_modes(program);
+        for (span, message) in std::mem::take(&mut self.loops.problems) {
+            self.refuse(&span, message);
+        }
         let sites = self.site_types(program.statements.iter(), None);
         self.variables.list_types = sites.lists;
         self.variables.null_types = sites.nulls;

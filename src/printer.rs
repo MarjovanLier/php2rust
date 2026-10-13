@@ -90,6 +90,8 @@ pub enum RExpr {
     Format(String, Vec<RExpr>),
     /// `&value`, where Rust takes a `&str` or a `&[T]`.
     Ref(Box<RExpr>),
+    /// `&mut value`, where a parameter takes an object to change (P2R-144).
+    RefMut(Box<RExpr>),
     /// `value.method()`, for the copies PHP makes (P2R-26).
     Method(Box<RExpr>, &'static str),
     /// The byte length of a string, or the length of a list (`count()`), as `i64`
@@ -267,6 +269,7 @@ fn render(expr: &RExpr, anchor: bool, min_precedence: u8) -> Result<String, TooW
             RExpr::List(items) => format!("&[{}]", elements(items, false)?),
             other => format!("&{}", render(other, false, UNARY)?),
         },
+        RExpr::RefMut(inner) => format!("&mut {}", render(inner, false, UNARY)?),
         RExpr::Method(inner, method) => chained(
             expr,
             format!("{}.{method}()", render(inner, false, POSTFIX)?),
@@ -422,6 +425,7 @@ pub fn anchored(expr: &RExpr) -> bool {
         }
         RExpr::Known(..) => true,
         RExpr::Format(..) | RExpr::Ref(_) | RExpr::Method(..) | RExpr::Len(_) => true,
+        RExpr::RefMut(_) => true,
         RExpr::Bool(_) | RExpr::Not(_) => true,
         RExpr::List(items) => items.iter().any(anchored),
         RExpr::Index(list, _) => anchored(list),
@@ -464,6 +468,7 @@ pub fn literal_value(expr: &RExpr) -> Option<i64> {
         RExpr::Str(_) | RExpr::Var(_) | RExpr::Call(..) => None,
         RExpr::Known(_, value) => Some(*value),
         RExpr::Format(..) | RExpr::Ref(_) | RExpr::Method(..) | RExpr::Len(_) => None,
+        RExpr::RefMut(_) => None,
         RExpr::Bool(_) | RExpr::Not(_) => None,
         RExpr::List(_) | RExpr::Index(..) => None,
         RExpr::Float(_) | RExpr::ToFloat(_) => None,

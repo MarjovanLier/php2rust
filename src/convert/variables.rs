@@ -48,7 +48,7 @@ use mago_syntax::walker::Walker;
 
 use super::control::Loop;
 use super::flow::{Flow, Var};
-use super::{Converter, ParameterSignature, lists, nulls, numbers, strings};
+use super::{Converter, Mode, ParameterSignature, lists, nulls, numbers, strings};
 use crate::printer::{self, BinOp, RExpr};
 use crate::types::{self, RustType};
 
@@ -60,6 +60,9 @@ const MARK: char = '\u{1}';
 /// The PHP name of `$this` without `$`, which a method holds as its first parameter, `self`
 /// (P2R-135).
 pub(super) const THIS: &[u8] = b"this";
+
+/// The problem of a copy of a value of a changing type (P2R-145).
+const NO_COPY: &str = "an object whose class changes its objects is never copied; it moves only from a local variable or an owned parameter that is not read again (P2R-145)";
 
 /// The problem of a write to the binding of a null check (P2R-104).
 const CHECKED: &str = "a variable that a check against null binds cannot be assigned until the check's block ends (P2R-104)";
@@ -150,6 +153,10 @@ struct Entry {
     /// a null check on an `Option<String>` is a `&str` (P2R-104).
     borrowed: bool,
     binding: Option<Binding>,
+    /// How a parameter takes its argument (P2R-143).
+    mode: Mode,
+    /// A change goes through the variable, so it needs `mut` (P2R-148).
+    changed: bool,
 }
 
 /// A foreach key or value (P2R-41), or the binding of a null check (P2R-104).
@@ -187,8 +194,9 @@ pub(super) struct Variables {
     /// hashing (P2R-06).
     entries: Vec<Entry>,
     pub(super) flow: Flow,
-    /// By copy mark: the read that moves, and the statement that holds it.
-    copies: Vec<(Span, Span)>,
+    /// By copy mark: the read that moves, the statement that holds it, and whether the
+    /// value may never be copied (P2R-145).
+    copies: Vec<(Span, Span, bool)>,
     /// The Rust blocks, indexed from 0, the body itself.
     scopes: Vec<Scope>,
     /// The Rust block that new lines go into.
@@ -264,6 +272,8 @@ impl Variables {
                 empty: false,
                 borrowed: false,
                 binding: None,
+                mode: parameter.mode,
+                changed: false,
             });
         }
         variables
@@ -368,9 +378,11 @@ impl Variables {
         self.entries[var].value = value;
     }
 
-    /// The copy mark for a statement that moves the variable read at `read`.
-    pub(super) fn copy_mark(&mut self, read: Span, statement: Span) -> String {
-        self.copies.push((read, statement));
+    /// The copy mark for a statement that moves the variable read at `read`. A `strict`
+    /// mark is for a value of a changing type, which stops when it is read again instead of
+    /// taking a `.clone()` (P2R-145).
+    pub(super) fn copy_mark(&mut self, read: Span, statement: Span, strict: bool) -> String {
+        self.copies.push((read, statement, strict));
         format!("{COPY}{:06x}{COPY}", self.copies.len() - 1)
     }
 
@@ -382,7 +394,33 @@ impl Variables {
             .iter()
             .rev()
             .find(|e| e.rust_name == rust_name && !closed(e))
-            .is_some_and(|e| e.parameter.is_some() || e.borrowed)
+            .is_some_and(|e| (e.parameter.is_some() && e.mode != Mode::Owned) || e.borrowed)
+    }
+
+    /// The mode of the parameter or foreach value named `rust_name`, or `Owned` for a
+    /// plain variable, which owns its value (P2R-143, P2R-144).
+    pub(super) fn mode_of(&self, rust_name: &str) -> Mode {
+        let entry = self
+            .entries
+            .iter()
+            .rev()
+            .find(|e| e.rust_name == rust_name && !closed(e));
+        match entry {
+            Some(e) if e.parameter.is_some() || e.borrowed => e.mode,
+            _ => Mode::Owned,
+        }
+    }
+
+    /// Records that a change goes through `var`, so it needs `mut` (P2R-148).
+    pub(super) fn set_changed(&mut self, var: Var) {
+        self.entries[var].changed = true;
+    }
+
+    /// Makes the foreach value `var` a reference into the list it iterates, `&mut` when
+    /// `mode` is `Mut`: it never moves and is never assigned (P2R-146).
+    pub(super) fn lend(&mut self, var: Var, mode: Mode) {
+        self.entries[var].borrowed = true;
+        self.entries[var].mode = mode;
     }
 
     /// The pending opening lines of an `if` or `elseif` that checks variables against
@@ -465,6 +503,17 @@ impl Variables {
 /// True for a foreach key or value whose loop has ended.
 fn closed(entry: &Entry) -> bool {
     entry.binding.as_ref().is_some_and(|b| b.closed)
+}
+
+/// The Rust name of the variable a chain of field and index reads starts from: `x` for
+/// `x`, `x.p` and `x.p[0].q` (P2R-142). `None` for any other expression.
+pub(super) fn chain_root(expr: &RExpr) -> Option<&str> {
+    match expr {
+        RExpr::Var(name) | RExpr::Known(name, _) => Some(name),
+        RExpr::Field(object, _) => chain_root(object),
+        RExpr::Index(list, _) => chain_root(list),
+        _ => None,
+    }
 }
 
 /// True for the expressions that change a variable: an assignment, `++` and `--`.
@@ -610,22 +659,75 @@ impl Converter<'_> {
     /// appends or puts in a list. `owned` gives the owned form Rust needs, and a string or
     /// list variable read alone moves, with a copy mark for the `.clone()` it needs when it
     /// is read again (P2R-26).
+    ///
+    /// A value of a changing type is never copied: it moves, or the conversion stops
+    /// (P2R-145).
     pub(super) fn stored(
         &mut self,
         value: &Expression<'_>,
         expr: RExpr,
         ty: &RustType,
         statement: Span,
-    ) -> RExpr {
-        match (self.owned(expr, ty), strings::sole_read(value)) {
+    ) -> Option<RExpr> {
+        match (self.kept(value, expr, ty)?, strings::sole_read(value)) {
             (RExpr::Var(name), Some(read)) if !ty.is_copy() => {
                 // The mark rides in the variable's text, so it lands right after the
                 // variable wherever the value is rendered.
-                let mark = self.variables.copy_mark(read, statement);
-                RExpr::Var(format!("{name}{mark}"))
+                let strict = self.is_changing(ty);
+                let mark = self.variables.copy_mark(read, statement, strict);
+                Some(RExpr::Var(format!("{name}{mark}")))
             }
-            (expr, _) => expr,
+            (expr, _) => Some(expr),
         }
+    }
+
+    /// Records a change of the object that the chain `expr` starts from: a local variable
+    /// or an owned parameter then needs `mut` (P2R-148). False, with a problem, when the
+    /// forms decided for the whole file give that root no way to change, which would be a
+    /// fault of the tool (P2R-143). True for an expression that is no chain.
+    pub(super) fn change_root(&mut self, node: &impl HasSpan, expr: &RExpr) -> bool {
+        let Some(name) = chain_root(expr) else {
+            return true;
+        };
+        let Some(var) = self
+            .variables
+            .entries
+            .iter()
+            .rposition(|e| e.rust_name == name && !closed(e))
+        else {
+            return true;
+        };
+        let entry = &self.variables.entries[var];
+        match (entry.parameter.is_some() || entry.borrowed, entry.mode) {
+            (true, Mode::Mut) => true,
+            (true, Mode::Shared) => {
+                self.refuse(
+                    node,
+                    "the tool decided that nothing changes this object here, so it cannot convert the change; please report this (P2R-143)",
+                );
+                false
+            }
+            _ => {
+                self.variables.set_changed(var);
+                true
+            }
+        }
+    }
+
+    /// `owned`, refused where it would copy a value of a changing type: `$this`, a
+    /// borrowed parameter, a property read and a list element never move (P2R-145).
+    pub(super) fn kept(
+        &mut self,
+        node: &impl HasSpan,
+        expr: RExpr,
+        ty: &RustType,
+    ) -> Option<RExpr> {
+        let owned = self.owned(expr, ty);
+        if self.is_changing(ty) && matches!(owned, RExpr::Method(_, "clone" | "to_vec")) {
+            self.refuse(node, NO_COPY);
+            return None;
+        }
+        Some(owned)
     }
 
     /// The Rust statement for an assignment, `++` or `--`, or `None` when a problem is
@@ -665,6 +767,9 @@ impl Converter<'_> {
             && let Expression::Variable(Variable::Direct(list)) = append.array
         {
             return self.append(expression, list, value);
+        }
+        if let Some(converted) = self.property_change(expression, target, operator, value) {
+            return converted;
         }
         let Expression::Variable(Variable::Direct(variable)) = target else {
             // The value's reads and the target's writes still count, so no false P2R-34 or
@@ -813,7 +918,7 @@ impl Converter<'_> {
         } else if let Some(source) = source {
             // A value that cannot be null becomes `Some(..)` in an `Option` variable
             // (P2R-102).
-            let stored = self.stored(source, expr, &value_type, expression.span());
+            let stored = self.stored(source, expr, &value_type, expression.span())?;
             let expr = match &self.variables.entries[var].ty {
                 Some(target) => nulls::wrapped(stored, &value_type, target),
                 None => stored,
@@ -908,7 +1013,7 @@ impl Converter<'_> {
         // Mago types the `$a` of `$a[]` as the list after the append, so a value of another
         // type shows as a type change.
         let (var, _) = self.write(list, list, None)?;
-        let value = self.stored(source, value, &value_type, expression.span());
+        let value = self.stored(source, value, &value_type, expression.span())?;
         let name = &self.variables.entries[var].rust_name;
         // rustfmt lays out the arguments of a method call as those of a call (P2R-51).
         let push = RExpr::Call(format!("{name}.push"), vec![value]);
@@ -948,7 +1053,7 @@ impl Converter<'_> {
         if self.refuse_borrowed_parameter(var, list) {
             return None;
         }
-        let stored = self.stored(value, expr, &value_type, expression.span());
+        let stored = self.stored(value, expr, &value_type, expression.span())?;
         let pushed = nulls::wrapped(stored, &value_type, &element);
         let name = &self.variables.entries[var].rust_name;
         let push = RExpr::Call(format!("{name}.push"), vec![pushed]);
@@ -1085,6 +1190,13 @@ impl Converter<'_> {
     /// P2R-135).
     fn refuse_borrowed_parameter(&mut self, var: Var, node: &impl HasSpan) -> bool {
         let entry = &self.variables.entries[var];
+        if entry.borrowed && entry.ty.as_ref().is_some_and(|ty| self.is_changing(ty)) {
+            self.refuse(
+                node,
+                "an assignment to a foreach value of a class that changes its objects is not supported, because PHP then leaves the list unchanged (P2R-142)",
+            );
+            return true;
+        }
         let borrowed = entry.parameter.is_some()
             && entry
                 .ty
@@ -1258,6 +1370,8 @@ impl Converter<'_> {
             empty: false,
             borrowed: false,
             binding: None,
+            mode: Mode::Shared,
+            changed: false,
         });
         (self.variables.entries.len() - 1, named)
     }
@@ -1451,7 +1565,7 @@ impl Converter<'_> {
             })
             .collect();
         let let_keyword = |var: Var| {
-            if facts.reassigned[var] {
+            if facts.reassigned[var] || entries[var].changed {
                 "let mut "
             } else {
                 "let "
@@ -1564,7 +1678,11 @@ impl Converter<'_> {
                 None => finished.push((None, line)),
             }
             for (declared, mut text) in finished {
-                let moved = resolve_copy(&mut text, &copies, &facts.read_again);
+                let mut copied = Vec::new();
+                let moved = resolve_copy(&mut text, &copies, &facts.read_again, &mut copied);
+                for span in copied {
+                    self.refuse(&span, NO_COPY);
+                }
                 if text.len() > printer::MAX_WIDTH
                     && let Some(span) = declared.or(moved)
                 {
@@ -1579,18 +1697,30 @@ impl Converter<'_> {
             .enumerate()
             .filter_map(|(var, entry)| {
                 let snake = entry.parameter.as_ref()?;
-                // A method takes `&self`, read or not (P2R-135).
+                // A method takes `&self`, read or not, or `&mut self` when it changes its
+                // object (P2R-135, P2R-143).
                 if entry.php_name == THIS {
-                    return Some("&self".to_owned());
+                    let this = if entry.mode == Mode::Mut {
+                        "&mut self"
+                    } else {
+                        "&self"
+                    };
+                    return Some(this.to_owned());
                 }
+                // An owned parameter that a change goes through needs `mut`; a `&mut`
+                // parameter is a reference, which needs none (P2R-148).
+                let changed = entry.changed && entry.mode == Mode::Owned;
                 let name = if unused[var] {
                     format!("_{snake}")
-                } else if facts.reassigned[var] {
+                } else if facts.reassigned[var] || changed {
                     format!("mut {}", entry.rust_name)
                 } else {
                     entry.rust_name.clone()
                 };
-                Some(format!("{name}: {}", entry.ty.as_ref()?.parameter()))
+                Some(format!(
+                    "{name}: {}",
+                    entry.mode.parameter(entry.ty.as_ref()?)
+                ))
             })
             .collect()
     }
@@ -1671,19 +1801,24 @@ impl<'ast, 'arena> Walker<'ast, 'arena, Vec<&'ast DirectVariable<'arena>>> for W
 
 /// Replaces each copy mark with `.clone()` when the variable it moves is read again, or
 /// with nothing, and gives the statement of the first mark (P2R-26). A list literal can
-/// move several variables on one line.
+/// move several variables on one line. A strict mark read again is pushed to `copied`
+/// instead, for its P2R-145 problem.
 fn resolve_copy(
     line: &mut String,
-    copies: &[(Span, Span)],
+    copies: &[(Span, Span, bool)],
     read_again: &[(Var, Span)],
+    copied: &mut Vec<Span>,
 ) -> Option<Span> {
     let mut first = None;
     while let Some(start) = line.find(COPY) {
         let end = start + 1 + line[start + 1..].find(COPY)?;
         let number = usize::from_str_radix(&line[start + 1..end], 16).ok()?;
-        let (read, statement) = *copies.get(number)?;
+        let (read, statement, strict) = *copies.get(number)?;
         let again = read_again.iter().any(|&(_, span)| span == read);
-        line.replace_range(start..=end, if again { ".clone()" } else { "" });
+        if again && strict {
+            copied.push(read);
+        }
+        line.replace_range(start..=end, if again && !strict { ".clone()" } else { "" });
         first.get_or_insert(statement);
     }
     first
@@ -1766,7 +1901,7 @@ impl Accesses {
 }
 
 /// The operation of a compound assignment, `++` or `--`; `None` for `=`.
-fn operation(operator: &str) -> Option<BinOp> {
+pub(super) fn operation(operator: &str) -> Option<BinOp> {
     match operator {
         "+=" => Some(BinOp::Add),
         "-=" => Some(BinOp::Sub),

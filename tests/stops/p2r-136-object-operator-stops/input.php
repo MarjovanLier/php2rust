@@ -19,7 +19,7 @@ function show(Point $a): void
     echo $a, "\n";
 }
 
-function copy(Point $a): Point
+function duplicate(Point $a): Point
 {
     return clone $a;
 }

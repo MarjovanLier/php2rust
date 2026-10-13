@@ -7,7 +7,7 @@ use mago_codex::ttype::union::TUnion;
 use mago_span::HasSpan;
 use mago_syntax::cst::*;
 
-use super::{Context, Converter, ParameterSignature, Signature, Variables, recursion};
+use super::{Context, Converter, Mode, ParameterSignature, Signature, Variables, recursion};
 use crate::names;
 use crate::types::{self, RustType};
 
@@ -28,6 +28,16 @@ impl Converter<'_> {
                 self.refuse(
                     &function.name,
                     "a function named main is not supported (P2R-31)",
+                );
+                continue;
+            }
+            if self
+                .built_in_functions
+                .contains(&function.name.value.to_ascii_lowercase())
+            {
+                self.refuse(
+                    &function.name,
+                    "PHP has a built-in function of this name and rejects the file (P2R-31)",
                 );
                 continue;
             }
@@ -153,6 +163,7 @@ impl Converter<'_> {
             rust_name,
             snake,
             ty,
+            mode: Mode::Shared,
         })
     }
 

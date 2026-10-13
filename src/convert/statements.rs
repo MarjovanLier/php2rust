@@ -103,7 +103,10 @@ impl Converter<'_> {
                 let Some(expr) = self.declared_value(value, expr, &ty, returns) else {
                     return;
                 };
-                let expr = nulls::wrapped(self.owned(expr, &ty), &ty, returns);
+                let Some(expr) = self.kept(value, expr, &ty) else {
+                    return;
+                };
+                let expr = nulls::wrapped(expr, &ty, returns);
                 let Some(rendered) = self.render(value, &expr, false) else {
                     return;
                 };

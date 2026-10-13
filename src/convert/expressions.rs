@@ -3,8 +3,8 @@
 use mago_span::HasSpan;
 use mago_syntax::cst::*;
 
-use super::variables::changes_variable;
-use super::{Converter, ParameterSignature, nulls, numbers, strings};
+use super::variables::{self, changes_variable};
+use super::{Converter, Mode, ParameterSignature, lists, nulls, numbers, strings};
 use crate::printer::{self, BinOp, RExpr};
 use crate::types::RustType;
 
@@ -286,12 +286,18 @@ impl Converter<'_> {
                         }
                         Some((expr, ty)) => {
                             let declared = parameter.unwrap_or(&ty);
-                            match self.declared_value(positional.value, expr, &ty, declared) {
-                                Some(expr) => arguments.push(nulls::wrapped(
-                                    self.borrowed(expr, &ty),
-                                    &ty,
-                                    declared,
-                                )),
+                            let mode = parameters.get(position).map_or(Mode::Shared, |p| p.mode);
+                            let passed = self
+                                .declared_value(positional.value, expr, &ty, declared)
+                                .and_then(|expr| match mode {
+                                    Mode::Shared => Some(self.borrowed(expr, &ty)),
+                                    Mode::Mut => self.lent(positional.value, expr),
+                                    Mode::Owned => {
+                                        self.stored(positional.value, expr, &ty, node.span())
+                                    }
+                                });
+                            match passed {
+                                Some(expr) => arguments.push(nulls::wrapped(expr, &ty, declared)),
                                 None => converted = false,
                             }
                         }
@@ -318,6 +324,31 @@ impl Converter<'_> {
             converted = false;
         }
         converted.then_some(arguments)
+    }
+
+    /// The argument `expr`, converted from `value`, for a parameter that changes its
+    /// object: `&mut` before a variable, a chain or `new`; a `&mut` parameter, `self` in a
+    /// `&mut self` method and the value of a foreach by `&mut` are references already
+    /// (P2R-144).
+    fn lent(&mut self, value: &Expression<'_>, expr: RExpr) -> Option<RExpr> {
+        if matches!(lists::unparenthesized(value), Expression::Instantiation(_)) {
+            return Some(RExpr::RefMut(Box::new(expr)));
+        }
+        let Some(root) = variables::chain_root(&expr).map(str::to_owned) else {
+            self.refuse(
+                value,
+                "only a variable, a parameter, $this, a foreach value, a chain of property and list reads on one of them, or new can go to a parameter that changes its object (P2R-144)",
+            );
+            return None;
+        };
+        if !self.change_root(value, &expr) {
+            return None;
+        }
+        if matches!(expr, RExpr::Var(_)) && self.variables.mode_of(&root) == Mode::Mut {
+            Some(expr)
+        } else {
+            Some(RExpr::RefMut(Box::new(expr)))
+        }
     }
 
     /// The text of a PHP string literal, decoded by PHP's rules (P2R-49).

@@ -1,5 +1,5 @@
 input.php:16:16: a value that may be null cannot be joined into a string (P2R-106)
-input.php:21:9: only a plain variable can be assigned to in version 1 (P2R-07)
+input.php:21:16: Cannot modify a readonly property after initialization. (invalid-property-write)
 input.php:41:16: this statement is too long for one line (P2R-51)
 input.php:47:5: the value assigned to $field is never read (P2R-35)
 input.php:48:10: a property name must be a plain identifier (P2R-134)

@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-class Plain
+abstract class Plain
 {
     public function __construct(public int $x)
     {

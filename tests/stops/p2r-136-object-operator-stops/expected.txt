@@ -1,0 +1,5 @@
+input.php:14:12: an object cannot be compared (P2R-136)
+input.php:19:10: echo of an object is not supported (P2R-136)
+input.php:24:12: clone is not supported (P2R-136)
+input.php:29:12: this operator is not supported in version 1 (P2R-07)
+input.php:34:9: this value is Point, not bool, and PHP truthiness is not supported (P2R-42)

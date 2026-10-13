@@ -4,7 +4,7 @@ use mago_span::HasSpan;
 use mago_syntax::cst::*;
 
 use super::variables::changes_variable;
-use super::{Converter, nulls, numbers, strings};
+use super::{Converter, ParameterSignature, nulls, numbers, strings};
 use crate::printer::{self, BinOp, RExpr};
 use crate::types::RustType;
 
@@ -88,8 +88,29 @@ impl Converter<'_> {
                 Some((RExpr::Float(*float.value), RustType::F64))
             }
             Expression::Access(Access::ClassConstant(access)) => self.enum_case(access, expression),
-            Expression::Access(Access::Property(access)) => self.enum_property(access, expression),
-            Expression::Call(Call::StaticMethod(call)) => self.enum_call(call, expression),
+            Expression::Access(Access::Property(access)) => self.property(access, expression),
+            Expression::Call(Call::StaticMethod(call)) => self.static_call(call, expression),
+            Expression::Call(Call::Method(call)) => match self.method_call(call, expression)? {
+                (call, Some(ty)) => Some((call, ty)),
+                (_, None) => {
+                    self.refuse(expression, "a void method has no value (P2R-20)");
+                    None
+                }
+            },
+            Expression::Instantiation(instantiation) => {
+                self.instantiation(instantiation, expression)
+            }
+            Expression::Access(Access::NullSafeProperty(_))
+            | Expression::Call(Call::NullSafeMethod(_)) => {
+                self.record_refused(expression);
+                self.refuse(expression, "?-> is not supported (P2R-134)");
+                None
+            }
+            Expression::Clone(_) => {
+                self.record_refused(expression);
+                self.refuse(expression, "clone is not supported (P2R-136)");
+                None
+            }
             Expression::Match(_) => {
                 self.record_refused(expression);
                 self.refuse(
@@ -230,13 +251,29 @@ impl Converter<'_> {
             self.refuse(node, format!("calls to {text} are not supported (P2R-48)"));
             return None;
         };
+        let arguments = self.arguments(&call.argument_list, &signature.parameters, node)?;
+        Some((
+            RExpr::Call(signature.rust_name, arguments),
+            signature.returns,
+        ))
+    }
+
+    /// The arguments of a call to a function, method or constructor with these
+    /// parameters, each converted as for its parameter (P2R-24, P2R-25, P2R-133). `None`
+    /// when a problem is recorded.
+    pub(super) fn arguments(
+        &mut self,
+        list: &ArgumentList<'_>,
+        parameters: &[ParameterSignature],
+        node: &Expression<'_>,
+    ) -> Option<Vec<RExpr>> {
         let mut arguments = Vec::new();
         let mut converted = true;
-        for (position, argument) in call.argument_list.arguments.iter().enumerate() {
+        for (position, argument) in list.arguments.iter().enumerate() {
             match argument {
                 // Mago reports an argument whose type does not match the parameter (P2R-11).
                 Argument::Positional(positional) if positional.ellipsis.is_none() => {
-                    let parameter = signature.parameters.get(position).map(|p| &p.ty);
+                    let parameter = parameters.get(position).map(|p| &p.ty);
                     match self.value(positional.value, parameter) {
                         Some((_, ty))
                             if parameter.is_some_and(|p| nulls::null_for_plain(&ty, p)) =>
@@ -276,14 +313,11 @@ impl Converter<'_> {
             }
         }
         // PHP accepts extra arguments to a user function; Rust does not.
-        if converted && arguments.len() != signature.parameters.len() {
+        if converted && arguments.len() != parameters.len() {
             self.refuse(node, "a call must pass one argument per parameter (P2R-07)");
             converted = false;
         }
-        converted.then_some((
-            RExpr::Call(signature.rust_name, arguments),
-            signature.returns,
-        ))
+        converted.then_some(arguments)
     }
 
     /// The text of a PHP string literal, decoded by PHP's rules (P2R-49).

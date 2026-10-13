@@ -73,10 +73,39 @@ impl Converter<'_> {
                 );
                 continue;
             }
-            self.enum_names
-                .insert(info.key.clone(), info.rust_name.clone());
+            self.type_names
+                .insert(info.key.clone(), RustType::Enum(info.rust_name.clone()));
             self.enums.push(info);
         }
+    }
+
+    /// The Rust name of an enum or class declaration (`kind`), refused when PHP reserves
+    /// the name or has a class-like of that name, when it has no Rust form, or when the
+    /// output uses it (P2R-111, P2R-131).
+    pub(super) fn declared_type_name(
+        &mut self,
+        name: &LocalIdentifier<'_>,
+        kind: &str,
+    ) -> Option<String> {
+        let php = String::from_utf8_lossy(name.value);
+        let lower = php.to_ascii_lowercase();
+        if RESERVED.split_whitespace().any(|word| word == lower)
+            || self.built_in_classes.contains(lower.as_bytes())
+        {
+            self.refuse(
+                name,
+                format!("PHP reserves the name {php} or has a class of that name (P2R-111)"),
+            );
+            return None;
+        }
+        let rust_name = names::type_name(&php).filter(|name| !TAKEN.contains(&name.as_str()));
+        if rust_name.is_none() {
+            self.refuse(
+                name,
+                format!("the {kind} name {php} has no Rust form, or the output uses it (P2R-111)"),
+            );
+        }
+        rust_name
     }
 
     /// The enum an enum declaration registered, when its name converts.
@@ -88,25 +117,7 @@ impl Converter<'_> {
     /// Checks an enum declaration. A problem with a member is recorded and the enum still
     /// registers, so its uses find their type; a name problem leaves it out.
     fn enum_info(&mut self, declaration: &Enum<'_>) -> Option<EnumInfo> {
-        let php = String::from_utf8_lossy(declaration.name.value);
-        let lower = php.to_ascii_lowercase();
-        if RESERVED.split_whitespace().any(|word| word == lower)
-            || self.built_in_classes.contains(lower.as_bytes())
-        {
-            self.refuse(
-                &declaration.name,
-                format!("PHP reserves the name {php} or has a class of that name (P2R-111)"),
-            );
-            return None;
-        }
-        let Some(rust_name) = names::type_name(&php).filter(|name| !TAKEN.contains(&name.as_str()))
-        else {
-            self.refuse(
-                &declaration.name,
-                format!("the enum name {php} has no Rust form, or the output uses it (P2R-111)"),
-            );
-            return None;
-        };
+        let rust_name = self.declared_type_name(&declaration.name, "enum")?;
         if let Some(attributes) = declaration.attribute_lists.first() {
             self.refuse(attributes, "attributes are not supported (P2R-07)");
         }
@@ -240,18 +251,7 @@ impl Converter<'_> {
 
     /// The enum a class name in a use refers to, whatever its letter case (P2R-111).
     fn enum_of(&self, class: &Expression<'_>) -> Option<usize> {
-        let Expression::Identifier(identifier) = class else {
-            return None;
-        };
-        let name = match identifier {
-            Identifier::Local(local) => local.value,
-            Identifier::Qualified(qualified) => qualified.value,
-            Identifier::FullyQualified(full) => full.value,
-        };
-        let key = name
-            .strip_prefix(b"\\")
-            .unwrap_or(name)
-            .to_ascii_lowercase();
+        let key = class_key(class)?;
         self.enums.iter().position(|e| e.key == key)
     }
 
@@ -284,13 +284,13 @@ impl Converter<'_> {
         ))
     }
 
-    /// `$e->name` and `$e->value` (P2R-113).
+    /// `$e->name` and `$e->value`, on the converted `object` of type `ty` (P2R-113).
     pub(super) fn enum_property(
         &mut self,
         access: &PropertyAccess<'_>,
         node: &Expression<'_>,
+        (object, ty): (RExpr, RustType),
     ) -> Option<(RExpr, RustType)> {
-        let (object, ty) = self.expression(access.object)?;
         if matches!(ty, RustType::Option(_)) {
             self.refuse(
                 access.object,
@@ -449,6 +449,24 @@ impl Converter<'_> {
         }
         lines
     }
+}
+
+/// The lowercase PHP name a class name in a use refers to, without a leading `\`, whatever
+/// its letter case (P2R-111, P2R-131).
+pub(super) fn class_key(class: &Expression<'_>) -> Option<Vec<u8>> {
+    let Expression::Identifier(identifier) = class else {
+        return None;
+    };
+    let name = match identifier {
+        Identifier::Local(local) => local.value,
+        Identifier::Qualified(qualified) => qualified.value,
+        Identifier::FullyQualified(full) => full.value,
+    };
+    Some(
+        name.strip_prefix(b"\\")
+            .unwrap_or(name)
+            .to_ascii_lowercase(),
+    )
 }
 
 /// The methods the file uses, in the order `name`, `value`, `from`, `try_from`, `cases`,

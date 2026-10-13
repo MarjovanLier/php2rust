@@ -72,6 +72,14 @@ impl Converter<'_> {
             {
                 RExpr::Method(Box::new(RExpr::Var(name)), "to_vec")
             }
+            // `self` and an object parameter are references (P2R-132).
+            RExpr::Var(name)
+                if matches!(ty, RustType::Class(_)) && self.variables.is_borrowed(&name) =>
+            {
+                RExpr::Method(Box::new(RExpr::Var(name)), "clone")
+            }
+            // Rust cannot move a field out of an object it borrows (P2R-134).
+            RExpr::Field(..) if !ty.is_copy() => RExpr::Method(Box::new(expr), "clone"),
             // An `Option<&str>` or `Option<&[T]>` parameter (P2R-101).
             RExpr::Var(name)
                 if matches!(ty, RustType::Option(_))
@@ -90,9 +98,9 @@ impl Converter<'_> {
         }
     }
 
-    /// A value where Rust takes a `&str` or a `&[T]`: a call argument or the right side of
-    /// `.=`. An owned `Option<String>` or `Option<Vec<T>>` lends `Option<&str>` or
-    /// `Option<&[T]>` (P2R-101).
+    /// A value where Rust takes a `&str`, a `&[T]` or a `&C`: a call argument or the right
+    /// side of `.=`. An owned `Option<String>` or `Option<Vec<T>>` lends `Option<&str>` or
+    /// `Option<&[T]>` (P2R-101, P2R-132).
     pub(super) fn borrowed(&self, expr: RExpr, ty: &RustType) -> RExpr {
         if matches!(ty, RustType::Option(_)) {
             return match expr {
@@ -102,7 +110,9 @@ impl Converter<'_> {
                 other => RExpr::Method(Box::new(other), "as_deref"),
             };
         }
-        if matches!(ty, RustType::String | RustType::Vec(_)) && !self.is_reference(&expr) {
+        if matches!(ty, RustType::String | RustType::Vec(_) | RustType::Class(_))
+            && !self.is_reference(&expr)
+        {
             RExpr::Ref(Box::new(expr))
         } else {
             expr
@@ -179,7 +189,7 @@ impl Converter<'_> {
         if let Some(Ok(ty)) = self
             .artifacts
             .get_expression_type(value)
-            .map(|union| types::rust_type(union, &self.enum_names))
+            .map(|union| types::rust_type(union, &self.type_names))
             && !matches!(ty, RustType::I64 | RustType::String)
         {
             self.record_refused(value);

@@ -57,6 +57,10 @@ use crate::types::{self, RustType};
 /// output text holds it.
 const MARK: char = '\u{1}';
 
+/// The PHP name of `$this` without `$`, which a method holds as its first parameter, `self`
+/// (P2R-135).
+pub(super) const THIS: &[u8] = b"this";
+
 /// The problem of a write to the binding of a null check (P2R-104).
 const CHECKED: &str = "a variable that a check against null binds cannot be assigned until the check's block ends (P2R-104)";
 
@@ -1068,8 +1072,9 @@ impl Converter<'_> {
         Some((var, declared.is_some()))
     }
 
-    /// Refuses a change of `var` at `node` when it is a string or list parameter: PHP passes
-    /// the function a copy, but Rust borrows it (P2R-24).
+    /// Refuses a change of `var` at `node` when it is a string, list or object parameter, or
+    /// `$this`: PHP passes the function a copy, but Rust borrows it (P2R-24, P2R-132,
+    /// P2R-135).
     fn refuse_borrowed_parameter(&mut self, var: Var, node: &impl HasSpan) -> bool {
         let entry = &self.variables.entries[var];
         let borrowed = entry.parameter.is_some()
@@ -1078,10 +1083,14 @@ impl Converter<'_> {
                 .as_ref()
                 .is_some_and(|ty| ty.parameter() != ty.owned());
         if borrowed {
-            self.refuse(
-                node,
-                "a string or list parameter cannot be changed, because PHP passes a copy (P2R-24)",
-            );
+            let message = if entry.php_name == THIS {
+                "$this cannot be assigned (P2R-135)"
+            } else if matches!(entry.ty, Some(RustType::Class(_))) {
+                "an object parameter cannot be assigned, because Rust borrows it (P2R-132)"
+            } else {
+                "a string or list parameter cannot be changed, because PHP passes a copy (P2R-24)"
+            };
+            self.refuse(node, message);
         }
         borrowed
     }
@@ -1288,7 +1297,7 @@ impl Converter<'_> {
             .artifacts
             .get_expression_type(node)
             .ok_or_else(|| "Mago found no type here (P2R-34)".to_owned())?;
-        types::rust_type(&lists::without_empty(union), &self.enum_names)
+        types::rust_type(&lists::without_empty(union), &self.type_names)
             .map_err(|name| format!("the type {name} has no Rust type (P2R-22)"))
     }
 
@@ -1311,8 +1320,8 @@ impl Converter<'_> {
             return Ok(known.clone());
         }
         // Mago records no type for a variable read again after a property read, as in
-        // `$e->name . $e->name` or `$xs[0]->name . $xs[0]->name`; every write keeps the one
-        // type (P2R-113).
+        // `$e->name . $e->name` or `$xs[0]->name . $xs[0]->name`, nor for `$this` as the
+        // object of a property read; every write keeps the one type (P2R-113, P2R-134).
         if holds_enum(known) && self.artifacts.get_expression_type(node).is_none() {
             return Ok(known.clone());
         }
@@ -1335,7 +1344,7 @@ impl Converter<'_> {
                 .get_expression_type(node)
                 .and_then(types::list_elements)
             && (types::only_null(&elements)
-                || types::rust_type(&elements, &self.enum_names)
+                || types::rust_type(&elements, &self.type_names)
                     .is_ok_and(|found| found == **element || found == *element.inner()))
         {
             return Ok(known.clone());
@@ -1561,6 +1570,10 @@ impl Converter<'_> {
             .enumerate()
             .filter_map(|(var, entry)| {
                 let snake = entry.parameter.as_ref()?;
+                // A method takes `&self`, read or not (P2R-135).
+                if entry.php_name == THIS {
+                    return Some("&self".to_owned());
+                }
                 let name = if unused[var] {
                     format!("_{snake}")
                 } else if facts.reassigned[var] {
@@ -1868,10 +1881,10 @@ fn same_type(php_name: &[u8], known: &RustType, found: RustType) -> Result<RustT
     ))
 }
 
-/// True for an enum, and for a list of enums at any depth.
+/// True for an enum or a class, and for a list of them at any depth.
 fn holds_enum(ty: &RustType) -> bool {
     match ty {
-        RustType::Enum(_) => true,
+        RustType::Enum(_) | RustType::Class(_) => true,
         RustType::Vec(element) => holds_enum(element),
         _ => false,
     }
@@ -1882,6 +1895,9 @@ fn holds_enum(ty: &RustType) -> bool {
 fn built_yet(ty: RustType) -> Result<RustType, String> {
     if types::built(&ty) {
         return Ok(ty);
+    }
+    if types::nullable_object(&ty) {
+        return Err(types::NULLABLE_OBJECT.to_owned());
     }
     Err(format!(
         "variables of type {} are not built yet (P2R-20)",

@@ -24,10 +24,11 @@ use mago_syntax::parser::parse_file;
 
 use crate::printer::{self, RExpr, TooWide};
 use crate::problem::{self, Origin, Problem};
-use crate::types::{EnumNames, RustType};
+use crate::types::{RustType, TypeNames};
 use variables::Variables;
 
 mod booleans;
+mod classes;
 mod control;
 mod enums;
 mod expressions;
@@ -71,18 +72,21 @@ pub fn convert(path: &str, source: Vec<u8>) -> Result<String, Failure> {
     }
     let resolved = NameResolver::new(&arena).resolve(program);
     let mut codebase = Prelude::build().metadata;
-    // An enum may not take the name of a class PHP has built in, and once the file is
-    // scanned the two cannot be told apart (P2R-111).
+    // An enum or class may not take the name of a class-like PHP has built in, and once the
+    // file is scanned the two cannot be told apart (P2R-111, P2R-131).
     let built_in_classes: HashSet<Vec<u8>> = program
         .statements
         .iter()
-        .filter_map(|statement| match statement {
-            Statement::Enum(declaration)
-                if codebase.get_class_like(declaration.name.value).is_some() =>
-            {
-                Some(declaration.name.value.to_ascii_lowercase())
-            }
-            _ => None,
+        .filter_map(|statement| {
+            let name = match statement {
+                Statement::Enum(declaration) => declaration.name.value,
+                Statement::Class(declaration) => declaration.name.value,
+                _ => return None,
+            };
+            codebase
+                .get_class_like(name)
+                .is_some()
+                .then(|| name.to_ascii_lowercase())
         })
         .collect();
     codebase.extend(scan_program(
@@ -255,9 +259,16 @@ struct Converter<'c> {
     functions: HashMap<Vec<u8>, Signature>,
     /// The enums of the file in source order (P2R-110).
     enums: Vec<enums::EnumInfo>,
-    /// The Rust name of each enum by lowercase PHP name (P2R-111).
-    enum_names: EnumNames,
-    /// The lowercase names of the file's enums that PHP already has as a class (P2R-111).
+    /// The Rust type of each enum and class by lowercase PHP name (P2R-111, P2R-131).
+    type_names: TypeNames,
+    /// The readonly classes of the file in source order (P2R-130).
+    classes: Vec<classes::ClassInfo>,
+    /// The class and method whose body is converting, by index (P2R-135).
+    current_method: Option<(usize, usize)>,
+    /// The method calls of that body that call the method itself (P2R-50, P2R-135).
+    self_calls: Vec<Span>,
+    /// The lowercase names of the file's enums and classes that PHP already has as a
+    /// class-like (P2R-111, P2R-131).
     built_in_classes: HashSet<Vec<u8>>,
     /// The spans of the `default` arm results left out of the output (P2R-121).
     dropped_defaults: Vec<Span>,
@@ -273,7 +284,10 @@ impl<'c> Converter<'c> {
             problems: Vec::new(),
             functions: HashMap::new(),
             enums: Vec::new(),
-            enum_names: EnumNames::new(),
+            type_names: TypeNames::new(),
+            classes: Vec::new(),
+            current_method: None,
+            self_calls: Vec::new(),
             built_in_classes: HashSet::new(),
             dropped_defaults: Vec::new(),
             variables: Variables::default(),
@@ -308,7 +322,9 @@ impl<'c> Converter<'c> {
 
     fn program(&mut self, program: &Program<'_>) -> String {
         self.register_enums(program);
+        self.register_class_names(program);
         self.register(program);
+        self.register_class_members(program);
         let sites = self.site_types(program.statements.iter(), None);
         self.variables.list_types = sites.lists;
         self.variables.null_types = sites.nulls;
@@ -359,6 +375,14 @@ impl<'c> Converter<'c> {
                             if let Some(index) = self.enum_index(declaration) {
                                 items.push(Vec::new());
                                 enum_slots.push((items.len() - 1, index));
+                            }
+                        }
+                        // PHP declares a readonly class before any statement runs, so it may
+                        // come after them (P2R-130).
+                        Statement::Class(declaration) => {
+                            if let Some(index) = self.class_index(declaration) {
+                                let item = self.class_item(declaration, index);
+                                items.push(item);
                             }
                         }
                         _ => {

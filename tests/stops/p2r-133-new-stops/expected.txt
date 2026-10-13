@@ -1,0 +1,3 @@
+input.php:15:5: a method whose name starts with __ cannot be called (P2R-133)
+input.php:16:10: new converts only for a readonly class of this file (P2R-133)
+input.php:18:10: new converts only for a readonly class of this file (P2R-133)

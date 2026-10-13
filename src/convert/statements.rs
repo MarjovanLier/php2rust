@@ -55,6 +55,10 @@ impl Converter<'_> {
                 &declaration.name,
                 "an enum must be declared outside functions and blocks (P2R-110)",
             ),
+            Statement::Class(declaration) => self.refuse(
+                &declaration.name,
+                "a class must be declared outside functions and blocks (P2R-130)",
+            ),
             other => self.refuse(
                 other,
                 format!(
@@ -117,22 +121,27 @@ impl Converter<'_> {
         body.push(line);
     }
 
-    /// A call as a statement, or as a `for` initialisation or step (P2R-43).
+    /// A function or method call as a statement, or as a `for` initialisation or step
+    /// (P2R-43, P2R-135).
     pub(super) fn expression_statement(
         &mut self,
         expression: &Expression<'_>,
         depth: usize,
         body: &mut Vec<String>,
     ) {
-        let Expression::Call(Call::Function(call)) = expression else {
-            self.record_refused(expression);
-            self.refuse(
-                expression,
-                "this expression statement is not supported (P2R-43)",
-            );
-            return;
+        let converted = match expression {
+            Expression::Call(Call::Function(call)) => self.call(call, expression),
+            Expression::Call(Call::Method(call)) => self.method_call(call, expression),
+            _ => {
+                self.record_refused(expression);
+                self.refuse(
+                    expression,
+                    "this expression statement is not supported (P2R-43)",
+                );
+                return;
+            }
         };
-        let Some((expr, _)) = self.call(call, expression) else {
+        let Some((expr, _)) = converted else {
             return;
         };
         let Some(rendered) = self.render(expression, &expr, false) else {
@@ -176,6 +185,10 @@ impl Converter<'_> {
             }
             _ if matches!(ty, RustType::Vec(_)) => {
                 self.refuse(value, "echo of a list is not supported (P2R-46)");
+                None
+            }
+            _ if matches!(ty, RustType::Class(_)) => {
+                self.refuse(value, "echo of an object is not supported (P2R-136)");
                 None
             }
             _ if matches!(ty, RustType::Option(_)) => {

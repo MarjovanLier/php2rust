@@ -1,4 +1,5 @@
-//! PHP types to Rust types (P2R-20 to P2R-22, P2R-24, P2R-100, P2R-101, P2R-112).
+//! PHP types to Rust types (P2R-20 to P2R-22, P2R-24, P2R-100, P2R-101, P2R-112,
+//! P2R-132).
 
 use std::collections::HashMap;
 
@@ -10,9 +11,9 @@ use mago_codex::ttype::atomic::object::TObject;
 use mago_codex::ttype::atomic::scalar::TScalar;
 use mago_codex::ttype::union::TUnion;
 
-/// The Rust name of each enum the file declares, by its lowercase PHP name: PHP class
-/// names ignore letter case, and Mago lowercases some of them (P2R-111).
-pub type EnumNames = HashMap<Vec<u8>, String>;
+/// The Rust type of each enum and class the file declares, by its lowercase PHP name: PHP
+/// class names ignore letter case, and Mago keeps the case a use wrote (P2R-111, P2R-131).
+pub type TypeNames = HashMap<Vec<u8>, RustType>;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum RustType {
@@ -25,6 +26,8 @@ pub enum RustType {
     Option(Box<RustType>),
     /// An enum the file declares, by its Rust name (P2R-112).
     Enum(String),
+    /// A readonly class the file declares, as a struct, by its Rust name (P2R-132).
+    Class(String),
 }
 
 impl RustType {
@@ -37,16 +40,17 @@ impl RustType {
             Self::String => "String".into(),
             Self::Vec(element) => format!("Vec<{}>", element.owned()),
             Self::Option(inner) => format!("Option<{}>", inner.owned()),
-            Self::Enum(name) => name.clone(),
+            Self::Enum(name) | Self::Class(name) => name.clone(),
         }
     }
 
-    /// The type of a function parameter: strings and lists are borrowed, also inside an
-    /// `Option` (P2R-24, P2R-101).
+    /// The type of a function parameter: strings, lists and objects are borrowed, also
+    /// inside an `Option` (P2R-24, P2R-101, P2R-132).
     pub fn parameter(&self) -> String {
         match self {
             Self::String => "&str".into(),
             Self::Vec(element) => format!("&[{}]", element.owned()),
+            Self::Class(name) => format!("&{name}"),
             Self::Option(inner) => format!("Option<{}>", inner.parameter()),
             other => other.owned(),
         }
@@ -65,28 +69,43 @@ impl RustType {
     pub fn is_copy(&self) -> bool {
         match self {
             Self::I64 | Self::F64 | Self::Bool | Self::Enum(_) => true,
-            Self::String | Self::Vec(_) => false,
+            Self::String | Self::Vec(_) | Self::Class(_) => false,
             Self::Option(inner) => inner.is_copy(),
         }
     }
 }
 
-/// True for the types built so far: int, float, bool and string, enums, lists of built
-/// types, and an `Option` of a built type that is not an `Option` itself (P2R-20,
-/// P2R-100, P2R-112).
+/// True for the types built so far: int, float, bool and string, enums, classes, lists of
+/// built types, and an `Option` of a built type that is neither an `Option` nor a class
+/// (P2R-20, P2R-100, P2R-112, P2R-132).
 pub fn built(ty: &RustType) -> bool {
     match ty {
         RustType::I64 | RustType::F64 | RustType::Bool | RustType::String => true,
-        RustType::Enum(_) => true,
+        RustType::Enum(_) | RustType::Class(_) => true,
         RustType::Vec(element) => built(element),
-        RustType::Option(inner) => !matches!(**inner, RustType::Option(_)) && built(inner),
+        RustType::Option(inner) => {
+            !matches!(**inner, RustType::Option(_) | RustType::Class(_)) && built(inner)
+        }
     }
 }
 
+/// True for `?C`, a nullable object type, which a later slice builds (P2R-132).
+pub fn nullable_object(ty: &RustType) -> bool {
+    match ty {
+        RustType::Option(inner) => matches!(**inner, RustType::Class(_)),
+        RustType::Vec(element) => nullable_object(element),
+        _ => false,
+    }
+}
+
+/// The problem of a nullable object type (P2R-132).
+pub const NULLABLE_OBJECT: &str = "a nullable object type is not supported yet (P2R-132)";
+
 /// Maps an analysed PHP type to exactly one Rust type, widening literal and refined types
-/// to their base type (P2R-21), with `enums` naming the enums of the file. A `null` member
-/// makes it an `Option` (P2R-100). The error names the PHP type, for the problem message.
-pub fn rust_type(union: &TUnion, enums: &EnumNames) -> Result<RustType, String> {
+/// to their base type (P2R-21), with `enums` naming the enums and classes of the file. A
+/// `null` member makes it an `Option` (P2R-100). The error names the PHP type, for the
+/// problem message.
+pub fn rust_type(union: &TUnion, enums: &TypeNames) -> Result<RustType, String> {
     let mut found: Option<RustType> = None;
     let mut nullable = false;
     for atomic in union.types.iter() {
@@ -115,7 +134,7 @@ pub fn only_null(union: &TUnion) -> bool {
     !union.types.is_empty() && union.types.iter().all(|a| matches!(a, TAtomic::Null))
 }
 
-fn atomic_type(atomic: &TAtomic, enums: &EnumNames) -> Option<RustType> {
+fn atomic_type(atomic: &TAtomic, enums: &TypeNames) -> Option<RustType> {
     match atomic {
         TAtomic::Scalar(TScalar::Integer(_)) => Some(RustType::I64),
         TAtomic::Scalar(TScalar::Float(_)) => Some(RustType::F64),
@@ -123,9 +142,16 @@ fn atomic_type(atomic: &TAtomic, enums: &EnumNames) -> Option<RustType> {
         TAtomic::Scalar(TScalar::String(_)) => Some(RustType::String),
         TAtomic::Array(TArray::List(list)) => list_type(list, enums),
         // A single case (`enum(Suit::Hearts)`) widens to its enum (P2R-21).
-        TAtomic::Object(TObject::Enum(found)) => enums
+        TAtomic::Object(TObject::Enum(found)) => {
+            match enums.get(&found.name.as_bytes().to_ascii_lowercase()) {
+                Some(ty @ RustType::Enum(_)) => Some(ty.clone()),
+                _ => None,
+            }
+        }
+        // `$this(C)` widens to `C` (P2R-132).
+        TAtomic::Object(TObject::Named(found)) => enums
             .get(&found.name.as_bytes().to_ascii_lowercase())
-            .map(|name| RustType::Enum(name.clone())),
+            .cloned(),
         _ => None,
     }
 }
@@ -134,7 +160,7 @@ fn atomic_type(atomic: &TAtomic, enums: &EnumNames) -> Option<RustType> {
 /// `list{int, int}` keeps its element types in `known_elements` and `never` as its
 /// general element type, so both are folded together. They fold as one union, so
 /// `list{int(1), null}` gives `Vec<Option<i64>>` (P2R-100).
-fn list_type(list: &TList, enums: &EnumNames) -> Option<RustType> {
+fn list_type(list: &TList, enums: &TypeNames) -> Option<RustType> {
     let members = element_members(list);
     if members.is_empty() {
         return None;
@@ -185,7 +211,7 @@ mod tests {
 
     /// The Rust type of `union` in a file that declares no enum.
     fn rust(union: &TUnion) -> Result<RustType, String> {
-        rust_type(union, &EnumNames::new())
+        rust_type(union, &TypeNames::new())
     }
 
     #[test]
@@ -206,7 +232,7 @@ mod tests {
 
     #[test]
     fn enums_take_their_declared_rust_name() {
-        let enums = EnumNames::from([(b"suit".to_vec(), "Suit".to_owned())]);
+        let enums = TypeNames::from([(b"suit".to_vec(), RustType::Enum("Suit".to_owned()))]);
         let case = TUnion::from_vec(vec![TAtomic::Object(TObject::new_enum_case(
             "Suit".into(),
             "Hearts".into(),
@@ -256,6 +282,16 @@ mod tests {
         assert!(!option.is_copy());
         assert!(built(&option));
         assert!(!built(&RustType::Option(Box::new(option))));
+    }
+
+    #[test]
+    fn classes_are_borrowed_structs_and_never_nullable() {
+        let class = RustType::Class("Point".into());
+        assert_eq!(class.owned(), "Point");
+        assert_eq!(class.parameter(), "&Point");
+        assert!(!class.is_copy());
+        assert!(built(&RustType::Vec(Box::new(class.clone()))));
+        assert!(!built(&RustType::Option(Box::new(class))));
     }
 
     #[test]

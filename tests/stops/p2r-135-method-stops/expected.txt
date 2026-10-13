@@ -1,0 +1,6 @@
+input.php:11:12: a static or abstract method is not supported (P2R-135)
+input.php:16:25: the types self, static and parent are not supported yet (P2R-135)
+input.php:21:21: this method calls itself on every path, and rustc rejects it (P2R-50)
+input.php:27:21: this method calls itself on every path, and rustc rejects it (P2R-50)
+input.php:34:9: $this cannot be assigned (P2R-135)
+input.php:39:16: Could not infer a precise return type for function `Node::calls`. Saw type `mixed`. (mixed-return-statement)

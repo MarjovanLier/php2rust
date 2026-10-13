@@ -1,0 +1,8 @@
+input.php:16:16: a value that may be null cannot be joined into a string (P2R-106)
+input.php:21:9: only a plain variable can be assigned to in version 1 (P2R-07)
+input.php:41:16: this statement is too long for one line (P2R-51)
+input.php:47:5: the value assigned to $field is never read (P2R-35)
+input.php:48:10: a property name must be a plain identifier (P2R-134)
+input.php:49:10: ?-> is not supported (P2R-134)
+input.php:50:10: ?? converts on a variable, parameter or call only; PHP checks anything else with isset (P2R-105)
+input.php:51:13: only $name and {$name} can be interpolated into a string (P2R-45)

@@ -1,0 +1,7 @@
+input.php:11:21: a method named clone is not supported, because Rust uses that name (P2R-131)
+input.php:16:21: a method named new is not supported, because Rust uses that name (P2R-131)
+input.php:26:21: size is already the Rust name of another method (P2R-131)
+input.php:32:16: PHP reserves the name Countable or has a class of that name (P2R-111)
+input.php:36:16: PHP reserves the name Clone or has a class of that name (P2R-111)
+input.php:45:16: Shade is already the Rust name of an enum or class (P2R-131)
+input.php:51:68: first_name is already the Rust name of another property (P2R-131)

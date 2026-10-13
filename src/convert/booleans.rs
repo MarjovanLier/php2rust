@@ -97,6 +97,10 @@ pub(super) fn refusal(
 ) -> Option<&'static str> {
     let numbers = |ty: &RustType| matches!(ty, RustType::I64 | RustType::F64);
     let enums = |ty: &RustType| matches!(ty, RustType::Enum(_));
+    // Rust has no object identity, and PHP's == compares properties loosely.
+    if matches!(left, RustType::Class(_)) || matches!(right, RustType::Class(_)) {
+        return Some("an object cannot be compared (P2R-136)");
+    }
     if left != right {
         return Some(if numbers(left) && numbers(right) {
             "a comparison that mixes int and float is not supported (P2R-44)"
@@ -128,6 +132,7 @@ pub(super) fn refusal(
             Some("<, >, <= and >= on enums are not supported (P2R-112)")
         }
         RustType::Enum(_) => None,
+        RustType::Class(_) => Some("an object cannot be compared (P2R-136)"),
     }
 }
 

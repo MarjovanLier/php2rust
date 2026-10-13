@@ -10,7 +10,7 @@ case, name and call stops of P2R-110, P2R-111 and P2R-114 and the layouts
 of P2R-115. Section 13 (`match`) was written and built on 12 Oct 2026;
 the final review of the build added the type, constant and subject rules
 at the end of P2R-122 and the call rule of P2R-121. Section 14 (readonly
-classes) is a draft of 13 Oct 2026.
+classes) was written and built on 13 Oct 2026.
 
 php2rust converts typed PHP source into normal, readable Rust (`Vec`,
 `String`, `i64`), without AI. It reads PHP with the Mago crates, uses Mago's

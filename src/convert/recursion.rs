@@ -1,4 +1,4 @@
-//! A function that calls itself on every path (P2R-50).
+//! A function or method that calls itself on every path (P2R-50, P2R-135).
 //!
 //! rustc's unconditional_recursion lint, an error under -D warnings, walks a function's
 //! control flow from its start. It stays quiet once some path returns, or comes back
@@ -34,22 +34,22 @@ impl Exits {
     }
 }
 
-/// True when every path through a function body with these statements calls the
-/// function named `name` (PHP function names ignore case). `dropped` holds the spans of
-/// the `default` arm results that P2R-121 leaves out of the output.
-pub(super) fn always_recurses(
-    statements: &[&Statement<'_>],
-    name: &[u8],
-    dropped: &[Span],
-) -> bool {
-    let exits = sequence(statements, &Target { name, dropped });
+/// True when every path through a function or method body with these statements calls
+/// the function or method itself (P2R-50, P2R-135).
+pub(super) fn always_recurses(statements: &[&Statement<'_>], target: &Target<'_>) -> bool {
+    let exits = sequence(statements, target);
     !exits.falls && !exits.ends
 }
 
-/// The function whose calls count, and the left-out `default` arms, which never run.
-struct Target<'t> {
-    name: &'t [u8],
-    dropped: &'t [Span],
+/// What counts as a call of the body itself, and the left-out `default` arms, which
+/// never run (P2R-121).
+pub(super) struct Target<'t> {
+    /// A function's name: a call by that name, in any letter case, counts.
+    pub name: Option<&'t [u8]>,
+    /// A method's calls of itself, found when the body converted: rustc counts a call
+    /// through any object of the class, not only through `self`.
+    pub self_calls: &'t [Span],
+    pub dropped: &'t [Span],
 }
 
 fn sequence(statements: &[&Statement<'_>], target: &Target<'_>) -> Exits {
@@ -198,9 +198,16 @@ struct Calls<'c, 't>(&'c Target<'t>);
 
 impl<'ast, 'arena> Walker<'ast, 'arena, bool> for Calls<'_, '_> {
     fn walk_in_function_call(&self, call: &'ast FunctionCall<'arena>, found: &mut bool) {
-        if let Expression::Identifier(Identifier::Local(local)) = call.function
-            && local.value.eq_ignore_ascii_case(self.0.name)
+        if let (Expression::Identifier(Identifier::Local(local)), Some(name)) =
+            (call.function, self.0.name)
+            && local.value.eq_ignore_ascii_case(name)
         {
+            *found = true;
+        }
+    }
+
+    fn walk_in_method_call(&self, call: &'ast MethodCall<'arena>, found: &mut bool) {
+        if self.0.self_calls.contains(&call.span()) {
             *found = true;
         }
     }

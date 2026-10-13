@@ -78,7 +78,8 @@ impl Converter<'_> {
             }
         }
         let returns = self.return_type(
-            function,
+            function.return_type_hint.as_ref(),
+            &function.name,
             metadata
                 .return_type_metadata
                 .as_ref()
@@ -125,6 +126,10 @@ impl Converter<'_> {
             return None;
         }
         let ty = self.declared_type(parameter, declared)?;
+        if types::nullable_object(&ty) {
+            self.refuse(parameter, types::NULLABLE_OBJECT);
+            return None;
+        }
         if !types::built(&ty) {
             self.refuse(
                 parameter,
@@ -143,23 +148,26 @@ impl Converter<'_> {
         })
     }
 
-    /// `Some(None)` is a `void` function; `None` means a problem was recorded.
+    /// The return type of the function or method `name`. `Some(None)` is `void`; `None`
+    /// means a problem was recorded.
     pub(super) fn return_type(
         &mut self,
-        function: &Function<'_>,
+        hint: Option<&FunctionLikeReturnTypeHint<'_>>,
+        name: &LocalIdentifier<'_>,
         declared: Option<&TUnion>,
     ) -> Option<Option<RustType>> {
-        let Some(hint) = &function.return_type_hint else {
-            self.refuse(
-                &function.name,
-                "a function needs a declared return type (P2R-23)",
-            );
+        let Some(hint) = hint else {
+            self.refuse(name, "a function needs a declared return type (P2R-23)");
             return None;
         };
         if matches!(hint.hint, Hint::Void(_)) {
             return Some(None);
         }
         let ty = self.declared_type(hint, declared)?;
+        if types::nullable_object(&ty) {
+            self.refuse(hint, types::NULLABLE_OBJECT);
+            return None;
+        }
         if !types::built(&ty) {
             self.refuse(
                 hint,
@@ -179,7 +187,7 @@ impl Converter<'_> {
             self.refuse(node, "Mago found no type here (P2R-23)");
             return None;
         };
-        match types::rust_type(union, &self.enum_names) {
+        match types::rust_type(union, &self.type_names) {
             Ok(ty) => Some(ty),
             Err(name) => {
                 self.refuse(node, format!("the type {name} has no Rust type (P2R-22)"));
@@ -229,7 +237,12 @@ impl Converter<'_> {
             );
         }
         let statements: Vec<&Statement<'_>> = function.body.statements.iter().collect();
-        if recursion::always_recurses(&statements, function.name.value, &self.dropped_defaults) {
+        let target = recursion::Target {
+            name: Some(function.name.value),
+            self_calls: &[],
+            dropped: &self.dropped_defaults,
+        };
+        if recursion::always_recurses(&statements, &target) {
             self.refuse(
                 &function.name,
                 "this function calls itself on every path, and rustc rejects it (P2R-50)",

@@ -71,7 +71,7 @@ pub(super) struct SiteTypes {
 struct Sites<'c> {
     artifacts: &'c AnalysisArtifacts,
     functions: &'c HashMap<Vec<u8>, Signature>,
-    enums: &'c types::EnumNames,
+    enums: &'c types::TypeNames,
     /// The declared return type of a function body.
     returns: Option<&'c RustType>,
     /// By PHP name without `$`; `None` for a name with two different list types.
@@ -204,7 +204,7 @@ impl Converter<'_> {
         let mut sites = Sites {
             artifacts: &self.artifacts,
             functions: &self.functions,
-            enums: &self.enum_names,
+            enums: &self.type_names,
             returns,
             found: HashMap::new(),
             inner: HashMap::new(),
@@ -328,7 +328,7 @@ impl Converter<'_> {
             return false;
         };
         types::only_null(&elements)
-            || types::rust_type(&elements, &self.enum_names)
+            || types::rust_type(&elements, &self.type_names)
                 .is_ok_and(|found| found == *element || found == *element.inner())
     }
 
@@ -421,7 +421,7 @@ mod tests {
         members.push(empty.clone());
         let maybe_empty = TUnion::from_vec(members);
         assert_eq!(
-            types::rust_type(&without_empty(&maybe_empty), &types::EnumNames::new()),
+            types::rust_type(&without_empty(&maybe_empty), &types::TypeNames::new()),
             Ok(RustType::Vec(Box::new(RustType::I64)))
         );
         let only = TUnion::from_vec(vec![empty]);

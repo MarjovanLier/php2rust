@@ -16,6 +16,7 @@ use mago_syntax::cst::*;
 
 use super::control::{Loop, empty, indent, statements_of};
 use super::flow::Var;
+use super::lists::unparenthesized;
 use super::{Context, Converter};
 use crate::types::RustType;
 
@@ -111,8 +112,13 @@ impl Converter<'_> {
             self.refuse(list, message);
             return (None, false, String::new());
         };
-        // A Copy value comes out of a borrowed list as a plain value.
-        let by_ref = holder(list).is_some() && element.is_copy();
+        // A Copy value comes out of a borrowed list as a plain value. A list field is
+        // borrowed in place, or copied below when its elements are not Copy (P2R-134).
+        let field = matches!(
+            unparenthesized(list),
+            Expression::Access(Access::Property(_))
+        );
+        let by_ref = (holder(list).is_some() || field) && element.is_copy();
         let expr = if by_ref {
             self.borrowed(expr, &ty)
         } else {

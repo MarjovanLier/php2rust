@@ -68,9 +68,9 @@ pub fn octal_overflow(raw: &[u8]) -> bool {
 /// them (P2R-51).
 pub const ARGS_WIDTH: usize = 60;
 
-/// rustfmt's `chain_width`: a chain of two or more method calls that is wider goes one
-/// call per line, so php2rust refuses it (P2R-51). One call on its own only has to fit the
-/// line.
+/// rustfmt's `chain_width`: a chain of two or more method calls or field reads that is
+/// wider goes one element per line, so php2rust refuses it (P2R-51). One element on its own
+/// only has to fit the line.
 const CHAIN_WIDTH: usize = 60;
 
 /// A Rust expression before layout.
@@ -121,6 +121,10 @@ pub enum RExpr {
         default: Box<RExpr>,
         lazy: bool,
     },
+    /// `object.field`, a property read (P2R-134).
+    Field(Box<RExpr>, String),
+    /// `object.method(arguments)`, a method call (P2R-135).
+    MethodCall(Box<RExpr>, String, Vec<RExpr>),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -206,19 +210,18 @@ fn render(expr: &RExpr, anchor: bool, min_precedence: u8) -> Result<String, TooW
         RExpr::Int(value) => value.to_string(),
         RExpr::Str(text) => quote(text),
         RExpr::Var(name) => name.clone(),
-        RExpr::Call(name, arguments) => {
-            let parts = arguments
-                .iter()
-                .map(|a| render(a, false, 0))
-                .collect::<Result<Vec<_>, _>>()?;
-            let joined = parts.join(", ");
-            // rustfmt keeps a single string literal argument on the line however wide it is.
-            let single_literal = matches!(arguments.as_slice(), [RExpr::Str(_)]);
-            if joined.len() > ARGS_WIDTH && !single_literal {
-                return Err(TooWide);
-            }
-            format!("{name}({joined})")
+        RExpr::Call(name, arguments) => format!("{name}({})", call_arguments(arguments)?),
+        RExpr::Field(object, field) => {
+            chained(expr, format!("{}.{field}", render(object, false, POSTFIX)?))?
         }
+        RExpr::MethodCall(object, method, arguments) => chained(
+            expr,
+            format!(
+                "{}.{method}({})",
+                render(object, false, POSTFIX)?,
+                call_arguments(arguments)?
+            ),
+        )?,
         // `--x` trips rustc's double_negations lint, so the inner minus gets parentheses.
         RExpr::Neg(inner) if matches!(**inner, RExpr::Neg(_)) => {
             format!("-({})", render(inner, anchor, 0)?)
@@ -338,11 +341,29 @@ fn render(expr: &RExpr, anchor: bool, min_precedence: u8) -> Result<String, TooW
     })
 }
 
-/// The method calls at the end of `expr`, counted from the outside in.
+/// The arguments of a call or a method call on one line, refused when rustfmt would put
+/// them one per line (P2R-51).
+fn call_arguments(arguments: &[RExpr]) -> Result<String, TooWide> {
+    let parts = arguments
+        .iter()
+        .map(|a| render(a, false, 0))
+        .collect::<Result<Vec<_>, _>>()?;
+    let joined = parts.join(", ");
+    // rustfmt keeps a single string literal argument on the line however wide it is.
+    let single_literal = matches!(arguments, [RExpr::Str(_)]);
+    if joined.len() > ARGS_WIDTH && !single_literal {
+        return Err(TooWide);
+    }
+    Ok(joined)
+}
+
+/// The elements of the chain at the end of `expr`, counted from the outside in: method
+/// calls and field reads. An index ends the chain, as it does for rustfmt (P2R-134).
 fn calls(expr: &RExpr) -> usize {
     match expr {
         RExpr::Method(inner, _) | RExpr::Len(inner) | RExpr::MapOwned(inner) => 1 + calls(inner),
         RExpr::Unwrap { option, .. } => 1 + calls(option),
+        RExpr::Field(object, _) | RExpr::MethodCall(object, ..) => 1 + calls(object),
         _ => 0,
     }
 }
@@ -410,6 +431,8 @@ pub fn anchored(expr: &RExpr) -> bool {
         RExpr::None => false,
         RExpr::Some(inner) => anchored(inner),
         RExpr::MapOwned(_) | RExpr::Unwrap { .. } | RExpr::Path(_) => true,
+        // A field and a method have declared types.
+        RExpr::Field(..) | RExpr::MethodCall(..) => true,
     }
 }
 
@@ -445,7 +468,7 @@ pub fn literal_value(expr: &RExpr) -> Option<i64> {
         RExpr::List(_) | RExpr::Index(..) => None,
         RExpr::Float(_) | RExpr::ToFloat(_) => None,
         RExpr::None | RExpr::Some(_) | RExpr::MapOwned(_) | RExpr::Unwrap { .. } => None,
-        RExpr::Path(_) => None,
+        RExpr::Path(_) | RExpr::Field(..) | RExpr::MethodCall(..) => None,
     }
 }
 

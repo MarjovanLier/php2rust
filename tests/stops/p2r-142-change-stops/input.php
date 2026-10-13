@@ -74,6 +74,15 @@ function neverRead(): void
     $a->n = 1;
 }
 
+function neverReadInLoop(int $k): void
+{
+    $a = new Node();
+    echo $a->n, "\n";
+    for ($i = 0; $i < $k; $i++) {
+        $a->n = $i;
+    }
+}
+
 /**
  * @param list<Node> $nodes
  */

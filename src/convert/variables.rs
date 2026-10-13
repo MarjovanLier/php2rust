@@ -424,7 +424,15 @@ impl Variables {
     /// named `rust_name`, when that variable owns its object: rustc rejects a field write
     /// that no path reads afterwards (P2R-142).
     pub(super) fn field_write(&mut self, rust_name: &str, read: Span, write: Span) {
-        if self.mode_of(rust_name) == Mode::Owned {
+        if self.mode_of(rust_name) != Mode::Owned {
+            return;
+        }
+        let found = self
+            .entries
+            .iter()
+            .rposition(|e| e.rust_name == rust_name && !closed(e));
+        if let Some(var) = found {
+            self.flow.field(var, read);
             self.field_writes.push((read, write));
         }
     }
@@ -711,6 +719,11 @@ impl Converter<'_> {
             return true;
         };
         let entry = &self.variables.entries[var];
+        // The binding of a null check holds a value of a nullable changing type, which
+        // P2R-141 already refused where the type was declared.
+        if entry.binding.as_ref().is_some_and(|b| b.null_check) && entry.mode == Mode::Shared {
+            return false;
+        }
         match (entry.parameter.is_some() || entry.borrowed, entry.mode) {
             (true, Mode::Mut) => true,
             (true, Mode::Shared) => {
@@ -1547,7 +1560,7 @@ impl Converter<'_> {
             self.refuse(&span, unassigned(&entries[var].php_name));
         }
         for (read, write) in field_writes {
-            if !facts.read_again.iter().any(|&(_, span)| span == read) {
+            if facts.dead_fields.contains(&read) {
                 self.refuse(
                     &write,
                     "the value written to this property is never read, which rustc rejects (P2R-142)",

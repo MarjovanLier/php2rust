@@ -17,6 +17,10 @@
 //! - possible assignment (forward, union at joins): a variable needs `mut` when one of its
 //!   writes can run while it may already hold a value.
 //!
+//! A field write `x.p = v` (P2R-142) needs `x` assigned and is a use after a move, but, as
+//! for rustc, it keeps no earlier value of `x` alive, and one that no path reads `x` after
+//! is dead.
+//!
 //! A block with no successor is an exit of the body.
 //!
 //! Branches and loops (control.rs) use three methods: `block()` adds an empty block,
@@ -52,6 +56,10 @@ enum Event {
     Read(Var, Span),
     /// `None` is a parameter's value on entry.
     Write(Var, Option<Span>),
+    /// `x.p = v` on an object the variable owns (P2R-142). As for rustc, it needs the
+    /// variable assigned and is a use after a move, but it neither reads the variable's
+    /// value nor replaces it.
+    Field(Var, Span),
 }
 
 #[derive(Default)]
@@ -74,9 +82,12 @@ pub(super) struct Facts {
     pub unread: Vec<(Var, Option<Span>)>,
     /// By variable: some write can run while the variable may already hold a value.
     pub reassigned: Vec<bool>,
-    /// Reads after which some path reads the variable again before its next write, so a
-    /// copy of a string or list is needed only at these reads (P2R-26).
+    /// Reads after which some path reads the variable again, or writes a field of its
+    /// object, before its next write, so a copy of a string or list is needed only at these
+    /// reads (P2R-26).
     pub read_again: Vec<(Var, Span)>,
+    /// The field writes after which no path reads the variable (P2R-142).
+    pub dead_fields: Vec<Span>,
     /// By block, then by variable: some path from the start of the block reads the
     /// variable before it writes it.
     pub live: Vec<Set>,
@@ -105,6 +116,18 @@ impl Flow {
         self.blocks[self.current]
             .events
             .push(Event::Write(var, span));
+    }
+
+    /// Turns the read of `var` at `span` into a field write: the read of the root of
+    /// `x.p = v` (P2R-142).
+    pub fn field(&mut self, var: Var, span: Span) {
+        for block in &mut self.blocks {
+            for event in &mut block.events {
+                if matches!(*event, Event::Read(v, s) if v == var && s == span) {
+                    *event = Event::Field(var, span);
+                }
+            }
+        }
     }
 
     /// Adds an empty block with no edges.
@@ -156,36 +179,25 @@ impl Flow {
             }
         }
         // Live at the start of each block: some path from there reads the variable before
-        // it writes it.
-        let mut live: Vec<Set> = vec![vec![false; vars]; self.blocks.len()];
-        changed = true;
-        while changed {
-            changed = false;
-            for (index, block) in self.blocks.iter().enumerate().rev() {
-                let mut set = leaving(block, &live, vars);
-                for event in block.events.iter().rev() {
-                    match *event {
-                        Event::Read(var, _) => set[var] = true,
-                        Event::Write(var, _) => set[var] = false,
-                    }
-                }
-                changed |= set != live[index];
-                live[index] = set;
-            }
-        }
+        // it writes it. `uses` also counts field writes, which need the value not moved.
+        let reads = self.liveness(vars, false);
+        let uses = self.liveness(vars, true);
         let mut facts = Facts {
             unassigned: Vec::new(),
             unread: Vec::new(),
             reassigned: vec![false; vars],
             read_again: Vec::new(),
+            dead_fields: Vec::new(),
             live: Vec::new(),
         };
         for (index, block) in self.blocks.iter().enumerate() {
             let (mut def, mut pos) = arriving(index, &previous, &definite, &possible, vars);
             for event in &block.events {
                 match *event {
-                    Event::Read(var, span) if !def[var] => facts.unassigned.push((var, span)),
-                    Event::Read(..) => {}
+                    Event::Read(var, span) | Event::Field(var, span) if !def[var] => {
+                        facts.unassigned.push((var, span))
+                    }
+                    Event::Read(..) | Event::Field(..) => {}
                     Event::Write(var, _) => {
                         facts.reassigned[var] |= pos[var];
                         def[var] = true;
@@ -193,26 +205,59 @@ impl Flow {
                     }
                 }
             }
-            let mut set = leaving(block, &live, vars);
+            let mut read = leaving(block, &reads, vars);
+            let mut used = leaving(block, &uses, vars);
             for event in block.events.iter().rev() {
                 match *event {
                     Event::Read(var, span) => {
-                        if set[var] {
+                        if used[var] {
                             facts.read_again.push((var, span));
                         }
-                        set[var] = true;
+                        read[var] = true;
+                        used[var] = true;
+                    }
+                    Event::Field(var, span) => {
+                        if !read[var] {
+                            facts.dead_fields.push(span);
+                        }
+                        used[var] = true;
                     }
                     Event::Write(var, span) => {
-                        if !set[var] {
+                        if !read[var] {
                             facts.unread.push((var, span));
                         }
-                        set[var] = false;
+                        read[var] = false;
+                        used[var] = false;
                     }
                 }
             }
         }
-        facts.live = live;
+        facts.live = uses;
         facts
+    }
+
+    /// Live at the start of each block: some path from there reads the variable, or with
+    /// `fields` writes a field of its object, before it writes it.
+    fn liveness(&self, vars: usize, fields: bool) -> Vec<Set> {
+        let mut live: Vec<Set> = vec![vec![false; vars]; self.blocks.len()];
+        let mut changed = true;
+        while changed {
+            changed = false;
+            for (index, block) in self.blocks.iter().enumerate().rev() {
+                let mut set = leaving(block, &live, vars);
+                for event in block.events.iter().rev() {
+                    match *event {
+                        Event::Read(var, _) => set[var] = true,
+                        Event::Field(var, _) if fields => set[var] = true,
+                        Event::Field(..) => {}
+                        Event::Write(var, _) => set[var] = false,
+                    }
+                }
+                changed |= set != live[index];
+                live[index] = set;
+            }
+        }
+        live
     }
 }
 
@@ -255,6 +300,19 @@ mod tests {
 
     fn at(offset: u32) -> Span {
         Span::dummy(offset, offset + 1)
+    }
+
+    #[test]
+    fn a_field_write_is_a_use_but_not_a_read() {
+        let mut flow = Flow::default();
+        flow.write(0, Some(at(1)));
+        flow.read(0, at(2));
+        flow.read(0, at(3));
+        flow.field(0, at(3));
+        let facts = flow.finish(1);
+        assert_eq!(facts.read_again, vec![(0, at(2))]);
+        assert_eq!(facts.dead_fields, vec![at(3)]);
+        assert!(facts.unread.is_empty());
     }
 
     #[test]

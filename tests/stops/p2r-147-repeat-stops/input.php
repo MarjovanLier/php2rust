@@ -70,6 +70,21 @@ final class Acc
     {
         $this->text = $this->text . $this->bumpText();
     }
+
+    public function twice(int $n): int
+    {
+        return $n * 2;
+    }
+
+    public function changeInArgument(): void
+    {
+        $this->qty = $this->twice($this->next());
+    }
+
+    public function changeInIndex(): void
+    {
+        $this->qty = $this->items[$this->next()]->n;
+    }
 }
 
 function bump(Acc $acc, int $by): void

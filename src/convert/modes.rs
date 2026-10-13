@@ -489,6 +489,12 @@ impl<'ast, 'arena> Body<'ast, 'arena, '_, '_> {
     /// `&mut self`) or a read of an int or float property outside string building, which
     /// `format!` would borrow (P2R-147).
     fn value_reads(&self, value: &Expression<'_>, root: &[u8], found: &Found<'_, '_>) -> bool {
+        // A change of `root` inside `span` other than one of the whole `span` itself.
+        let changed_in = |span: Span| {
+            self.events
+                .iter()
+                .any(|(r, at)| r == root && contains(span, *at) && *at != span)
+        };
         let span = value.span();
         let changes = self
             .events
@@ -499,20 +505,32 @@ impl<'ast, 'arena> Body<'ast, 'arena, '_, '_> {
                 .chains
                 .iter()
                 .filter(|c| c.root == root && contains(span, c.expression.span()))
-                .all(|chain| match chain.receiver {
-                    Some(call) => !(chain.steps.contains(&None) && self.changes_receiver(call)),
-                    None => {
-                        !chain.steps.is_empty()
-                            && matches!(
-                                self.type_of(chain.expression),
-                                Some(RustType::I64 | RustType::F64)
-                            )
-                            && !found
-                                .strings
-                                .iter()
-                                .any(|s| contains(*s, chain.expression.span()))
-                    }
+                .all(|chain| {
+                    // rustc borrows a list before its index runs.
+                    !changed_in(chain.expression.span())
+                        && match chain.receiver {
+                            // rustc borrows the receiver before the arguments run.
+                            Some(call) => {
+                                !(chain.steps.contains(&None) && self.changes_receiver(call))
+                                    && !changed_in(call.argument_list.span())
+                            }
+                            None => self.number_read(chain, found),
+                        }
                 })
+    }
+
+    /// True for a read of an int or float property outside a string, which `format!`
+    /// would borrow.
+    fn number_read(&self, chain: &Chain<'_, '_>, found: &Found<'_, '_>) -> bool {
+        !chain.steps.is_empty()
+            && matches!(
+                self.type_of(chain.expression),
+                Some(RustType::I64 | RustType::F64)
+            )
+            && !found
+                .strings
+                .iter()
+                .any(|s| contains(*s, chain.expression.span()))
     }
 
     /// Form 2 of P2R-147: a `&mut self` call on a chain from `root` without a list read,

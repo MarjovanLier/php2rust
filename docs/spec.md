@@ -12,9 +12,10 @@ the final review of the build added the type, constant and subject rules
 at the end of P2R-122 and the call rule of P2R-121. Section 14 (readonly
 classes) was written and built on 13 Oct 2026. Section 15 (classes that
 change their objects) was written and built on 13 Oct 2026; the final
-review of the build added the nullable stop of P2R-141, the `&mut [C]`
-loop, the temporary list stop and the copy rule wording of P2R-146, and
-the list read limit of form 2 of P2R-147.
+review of the build added the nullable stop of P2R-141, the unread field
+write stop of P2R-142, the `&mut [C]` loop, the temporary list stop and
+the copy rule wording of P2R-146, and the borrow limit of form 1 and the
+list read limit of form 2 of P2R-147.
 
 php2rust converts typed PHP source into normal, readable Rust (`Vec`,
 `String`, `i64`), without AI. It reads PHP with the Mago crates, uses Mago's
@@ -859,9 +860,10 @@ decided on 11 Oct 2026.
   1. a top-level `=` on a property, or a top-level `+=`, `-=` or `*=` on an
      int or float property, whose value may read and change the same root;
      when the value changes it, each other mention of the root in the value
-     is the receiver of a method call (without a list read when the call
-     takes `&mut self`) or a read of an int or float property outside a
-     string, because `format!`, a `&` argument and `==` on other values keep
+     is the receiver of a method call whose arguments do not change the
+     root (without a list read when the call takes `&mut self`), or a read
+     of an int or float property outside a string, and no list index in
+     such a mention changes the root, because `format!`, a `&` argument and `==` on other values keep
      a borrow across the change (`$this->qty += $this->next();`,
      `$this->qty = $this->qty * $this->next();`);
   2. a `&mut self` method call on a chain without list reads, whose

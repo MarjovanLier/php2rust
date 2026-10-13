@@ -35,9 +35,15 @@ impl Acc {
         self.name = name.to_string();
     }
 
+    pub fn tag(&mut self) -> String {
+        self.qty += 1;
+        return String::from("t");
+    }
+
     pub fn grow(&mut self) {
         self.qty += self.next();
         self.qty = self.next() * self.qty;
+        self.name = format!("{}{}", self.label(), self.tag());
         bump(self, self.qty);
     }
 }

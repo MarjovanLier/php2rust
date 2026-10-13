@@ -9,7 +9,7 @@ use mago_span::HasSpan;
 use mago_syntax::cst::*;
 
 use super::lists::unparenthesized;
-use super::variables::operation;
+use super::variables::{chain_root, operation};
 use super::{Converter, nulls, numbers};
 use crate::printer::RExpr;
 use crate::types::RustType;
@@ -108,6 +108,9 @@ impl Converter<'_> {
                 }
                 let expr = self.declared_value(value, expr, &value_type, &target_type)?;
                 let stored = self.stored(value, expr, &value_type, statement)?;
+                if let (Some(variable), Some(name)) = (root_variable(chain), chain_root(&target)) {
+                    self.variables.field_write(name, variable.span, statement);
+                }
                 ("=", nulls::wrapped(stored, &value_type, &target_type))
             }
             ".=" => {
@@ -189,6 +192,16 @@ impl Converter<'_> {
             },
             _ => None,
         }
+    }
+}
+
+/// The variable a chain starts from.
+fn root_variable<'a, 'arena>(chain: &'a Expression<'arena>) -> Option<&'a DirectVariable<'arena>> {
+    match unparenthesized(chain) {
+        Expression::Variable(Variable::Direct(variable)) => Some(variable),
+        Expression::Access(Access::Property(access)) => root_variable(access.object),
+        Expression::ArrayAccess(access) => root_variable(access.array),
+        _ => None,
     }
 }
 

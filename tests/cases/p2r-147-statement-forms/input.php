@@ -33,10 +33,17 @@ final class Acc
         $this->name = $name;
     }
 
+    public function tag(): string
+    {
+        $this->qty++;
+        return "t";
+    }
+
     public function grow(): void
     {
         $this->qty += $this->next();
         $this->qty = $this->next() * $this->qty;
+        $this->name = $this->label() . $this->tag();
         bump($this, $this->qty);
     }
 }

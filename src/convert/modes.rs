@@ -480,7 +480,39 @@ impl<'ast, 'arena> Body<'ast, 'arena, '_, '_> {
             .iter()
             .filter(|c| c.root == root && contains(assignment.lhs.span(), c.expression.span()))
             .count();
-        operator && target && in_target == 1
+        operator && target && in_target == 1 && self.value_reads(assignment.rhs, root, found)
+    }
+
+    /// True when the value of a form 1 assignment names `root` only in ways that hold no
+    /// borrow across a change of `root` in the same value: when the value changes `root`,
+    /// each other mention is the receiver of a call (with no list read when the call takes
+    /// `&mut self`) or a read of an int or float property outside string building, which
+    /// `format!` would borrow (P2R-147).
+    fn value_reads(&self, value: &Expression<'_>, root: &[u8], found: &Found<'_, '_>) -> bool {
+        let span = value.span();
+        let changes = self
+            .events
+            .iter()
+            .any(|(r, at)| r == root && contains(span, *at));
+        !changes
+            || found
+                .chains
+                .iter()
+                .filter(|c| c.root == root && contains(span, c.expression.span()))
+                .all(|chain| match chain.receiver {
+                    Some(call) => !(chain.steps.contains(&None) && self.changes_receiver(call)),
+                    None => {
+                        !chain.steps.is_empty()
+                            && matches!(
+                                self.type_of(chain.expression),
+                                Some(RustType::I64 | RustType::F64)
+                            )
+                            && !found
+                                .strings
+                                .iter()
+                                .any(|s| contains(*s, chain.expression.span()))
+                    }
+                })
     }
 
     /// Form 2 of P2R-147: a `&mut self` call on a chain from `root` without a list read,
@@ -683,6 +715,8 @@ struct Found<'ast, 'arena> {
     chains: Vec<Chain<'ast, 'arena>>,
     calls: Vec<(&'ast ArgumentList<'arena>, Vec<Vec<Mode>>)>,
     pending: Vec<CallNode<'ast, 'arena>>,
+    /// The concatenations and interpolated strings, which become `format!`.
+    strings: Vec<Span>,
 }
 
 /// The property names a chain reads in order, `None` for a list read.
@@ -794,6 +828,12 @@ impl<'ast, 'arena> Walker<'ast, 'arena, Found<'ast, 'arena>> for Chains {
         match expression {
             Expression::Call(Call::Method(call)) => found.pending.push(CallNode::Method(call)),
             Expression::Call(Call::Function(call)) => found.pending.push(CallNode::Function(call)),
+            Expression::Binary(binary)
+                if matches!(binary.operator, BinaryOperator::StringConcat(_)) =>
+            {
+                found.strings.push(expression.span());
+            }
+            Expression::CompositeString(_) => found.strings.push(expression.span()),
             _ => {}
         }
         mago_syntax::walker::walk_expression(self, expression, found);

@@ -65,6 +65,11 @@ final class Acc
     {
         $this->text .= $this->text;
     }
+
+    public function joinWhileChanging(): void
+    {
+        $this->text = $this->text . $this->bumpText();
+    }
 }
 
 function bump(Acc $acc, int $by): void

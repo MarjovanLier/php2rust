@@ -68,6 +68,12 @@ function maybe(Node $a, ?int $v): void
     $a->n = $v;
 }
 
+function neverRead(): void
+{
+    $a = new Node();
+    $a->n = 1;
+}
+
 /**
  * @param list<Node> $nodes
  */

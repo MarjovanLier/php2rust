@@ -785,8 +785,10 @@ decided on 11 Oct 2026.
   element of a property (`$x->p[0] = v`, P2R-47); a change used as a value
   (P2R-44); an int appended to a `list<float>` property, or a list with int
   elements assigned to one, because PHP keeps the ints while P2R-25 would
-  make them floats; and an assignment to a foreach value of a changing type,
-  because PHP then leaves the list unchanged.
+  make them floats; an assignment to a foreach value of a changing type,
+  because PHP then leaves the list unchanged; and a `=` write to a property
+  of a local variable or an owned parameter that no path reads afterwards,
+  which rustc rejects as an unused assignment (P2R-35).
 - **P2R-143** A method MUST take `&mut self` when its body changes its
   object: a P2R-142 change on a chain whose root is `$this`; a `&mut self`
   method call on such a chain; such a chain as the argument for a `&mut`
@@ -855,8 +857,13 @@ decided on 11 Oct 2026.
   included, except in these forms, which rustc accepts and which evaluate
   in PHP's order:
   1. a top-level `=` on a property, or a top-level `+=`, `-=` or `*=` on an
-     int or float property, whose value may read and change the same root
-     (`$this->qty += $this->next();`);
+     int or float property, whose value may read and change the same root;
+     when the value changes it, each other mention of the root in the value
+     is the receiver of a method call (without a list read when the call
+     takes `&mut self`) or a read of an int or float property outside a
+     string, because `format!`, a `&` argument and `==` on other values keep
+     a borrow across the change (`$this->qty += $this->next();`,
+     `$this->qty = $this->qty * $this->next();`);
   2. a `&mut self` method call on a chain without list reads, whose
      arguments read the same root only through property reads that give a
      Copy value and through `&self` method calls (`$a->add($a->total())`,
@@ -869,8 +876,9 @@ decided on 11 Oct 2026.
   Every other repeat stops the conversion, among them `bump($a, $a->qty)`,
   `$a->add($a->next())` where `next` changes `$a`,
   `$this->items[] = $this->make()`, `$this->text .= $this->text`,
-  `$a->name . $a->bumpName()`, `$a->copyTo($a)`, `pair($a->part, $a)` and
-  `$a->items[0]->add($a->total())`.
+  `$a->name . $a->bumpName()`, `$a->copyTo($a)`, `pair($a->part, $a)`,
+  `$a->items[0]->add($a->total())` and
+  `$this->name = $this->name . $this->bumpName()`.
 - **P2R-148** A local variable or an owned parameter that is the root of a
   chain that a P2R-142 change, a `&mut self` call, a `&mut` argument or a
   `for ... in &mut` changes MUST be declared `let mut` (P2R-34), or

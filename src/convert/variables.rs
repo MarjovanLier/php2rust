@@ -197,6 +197,9 @@ pub(super) struct Variables {
     /// By copy mark: the read that moves, the statement that holds it, and whether the
     /// value may never be copied (P2R-145).
     copies: Vec<(Span, Span, bool)>,
+    /// The `=` property writes on a local variable or an owned parameter: the read of the
+    /// root and the write, which stops when no path reads the root again (P2R-142).
+    field_writes: Vec<(Span, Span)>,
     /// The Rust blocks, indexed from 0, the body itself.
     scopes: Vec<Scope>,
     /// The Rust block that new lines go into.
@@ -235,6 +238,7 @@ impl Default for Variables {
             entries: Vec::new(),
             flow: Flow::default(),
             copies: Vec::new(),
+            field_writes: Vec::new(),
             scopes: vec![Scope {
                 parent: None,
                 looped: false,
@@ -414,6 +418,15 @@ impl Variables {
     /// Records that a change goes through `var`, so it needs `mut` (P2R-148).
     pub(super) fn set_changed(&mut self, var: Var) {
         self.entries[var].changed = true;
+    }
+
+    /// Records the `=` property write `write` whose root, read at `read`, is the variable
+    /// named `rust_name`, when that variable owns its object: rustc rejects a field write
+    /// that no path reads afterwards (P2R-142).
+    pub(super) fn field_write(&mut self, rust_name: &str, read: Span, write: Span) {
+        if self.mode_of(rust_name) == Mode::Owned {
+            self.field_writes.push((read, write));
+        }
     }
 
     /// Makes the foreach value `var` a reference into the list it iterates, `&mut` when
@@ -1517,6 +1530,7 @@ impl Converter<'_> {
             entries,
             flow,
             copies,
+            field_writes,
             scopes,
             pending,
             read_problems,
@@ -1531,6 +1545,14 @@ impl Converter<'_> {
         }
         for (var, span) in facts.unassigned {
             self.refuse(&span, unassigned(&entries[var].php_name));
+        }
+        for (read, write) in field_writes {
+            if !facts.read_again.iter().any(|&(_, span)| span == read) {
+                self.refuse(
+                    &write,
+                    "the value written to this property is never read, which rustc rejects (P2R-142)",
+                );
+            }
         }
         // A read after the loop that reaches an earlier variable of the same name, through
         // an outer loop or past an empty list, would see the last key or value in PHP.

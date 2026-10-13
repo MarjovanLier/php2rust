@@ -1,0 +1,1 @@
+input.php:22:11: only a variable, a parameter, $this, a foreach value, a chain of property and list reads on one of them, or new can go to a parameter that changes its object (P2R-144)

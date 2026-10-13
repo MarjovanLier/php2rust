@@ -1,0 +1,7 @@
+input.php:51:9: this statement changes an object and names it more than once, which Rust does not allow here (P2R-147)
+input.php:56:9: this statement changes an object and names it more than once, which Rust does not allow here (P2R-147)
+input.php:73:5: this statement changes an object and names it more than once, which Rust does not allow here (P2R-147)
+input.php:78:5: this statement changes an object and names it more than once, which Rust does not allow here (P2R-147)
+input.php:83:12: this statement changes an object and names it more than once, which Rust does not allow here (P2R-147)
+input.php:88:5: this statement changes an object and names it more than once, which Rust does not allow here (P2R-147)
+input.php:93:5: this statement changes an object and names it more than once, which Rust does not allow here (P2R-147)

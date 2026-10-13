@@ -1,0 +1,3 @@
+input.php:5:10: PHP has a built-in function of this name and rejects the file (P2R-31)
+input.php:10:10: PHP has a built-in function of this name and rejects the file (P2R-31)
+input.php:14:6: calls to next are not supported (P2R-48)

@@ -1,0 +1,6 @@
+input.php:22:5: a change through a call result or a new expression is not supported (P2R-142)
+input.php:27:5: this assignment operator is not supported in version 1 (P2R-07)
+input.php:32:5: writing to a list index is not supported in version 1 (P2R-47)
+input.php:37:12: an assignment used as a value is not supported (P2R-44)
+input.php:42:5: an int appended to a list of float keeps its type in PHP, so it is not supported (P2R-142)
+input.php:52:9: an assignment to a foreach value of a class that changes its objects is not supported, because PHP then leaves the list unchanged (P2R-142)

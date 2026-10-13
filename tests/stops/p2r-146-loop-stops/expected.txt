@@ -1,0 +1,5 @@
+input.php:24:34: inside a foreach over a list of objects whose class changes them, the object that holds the list can be used only through its other properties (P2R-146)
+input.php:32:13: inside a foreach over a list of objects whose class changes them, the object that holds the list can be used only through its other properties (P2R-146)
+input.php:40:21: inside a foreach over a list of objects whose class changes them, the object that holds the list can be used only through its other properties (P2R-146)
+input.php:47:13: inside a foreach over a list of objects whose class changes them, the object that holds the list can be used only through its other properties (P2R-146)
+input.php:68:14: a foreach over a list of objects whose class changes them needs the list in a variable, a parameter or a chain of property reads (P2R-146)

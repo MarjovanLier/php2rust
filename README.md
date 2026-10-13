@@ -110,7 +110,8 @@ the others are findings of the Mago analyser. In short:
 - A class that is abstract, extends a class, implements an interface, uses a trait, or
   holds a constant, a static member, a constructor with a body or a method whose name
   starts with `__`. A declared property without a type or a literal default, or that is
-  static, readonly or hooked. A nullable object type (`?Point`), the types `self` and
+  static, readonly or hooked. A nullable object type (`?Point`), a nullable type that
+  holds objects whose class changes them (`?list<Cell>`), the types `self` and
   `static`, a class that holds itself, a method named `clone` or `new`, and a function
   that assigns to its own object parameter.
 - Comparing, printing, cloning or testing an object (`==`, `===`, `echo`, `clone`,
@@ -118,7 +119,13 @@ the others are findings of the Mago analyser. In short:
 - A copy of an object whose class changes its objects: `$b = $a;` followed by a read of
   `$a`, `return $this;`, or a property or list element of such an object used as a value.
   A change through a call result, `??=` on a property, a write to a list element of a
-  property, and an assignment to a `foreach` value of such a class.
+  property, an assignment to a `foreach` value of such a class, and a `foreach` over a
+  list of such objects that a call or a list literal gives. A property write
+  (`$g->n = 1;`) that nothing reads afterwards, which rustc rejects as unused. An int
+  appended to a `list<float>` property, or a list of ints assigned to one, because PHP
+  keeps the ints. For a parameter that changes its object, an argument that is not a
+  variable, a parameter, `$this`, a `foreach` value, a chain of property and list reads
+  on one of them, or `new`.
 - A statement that changes an object and names it again, such as `$a->add($a->next())`
   or `$this->text .= $this->text`, other than the three forms rustc accepts (see P2R-147
   in `docs/spec.md`). Inside a `foreach` over a list of such objects, a use of the object
@@ -205,6 +212,9 @@ php2rust refuses some valid PHP that version 1 converts in other forms:
   the call as a change when any class of the file has a method of that name that changes
   its object. The caller's object parameter then becomes `&mut`, which can stop code
   that would otherwise convert.
+- A `foreach` over a list of objects whose class changes them stops when a call or a
+  list literal gives the list, also where only reading would compile. Put the list in a
+  variable first.
 - The rule of one changed object per statement is stricter than rustc: for example
   `$a->log .= "{$a->hits}"` stops, and so does a call that changes a list element
   when its arguments read the same object, even another property of it

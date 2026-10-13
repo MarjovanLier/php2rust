@@ -140,7 +140,9 @@ requirement IDs.
 - **P2R-31** These MUST stop the conversion: two PHP functions in the file,
   or two PHP names in one function, that give the same Rust name
   (`getTotal()` and `get_total()`); a variable whose Rust name equals the
-  Rust name of a function in the file; a PHP function named `main`.
+  Rust name of a function in the file; a PHP function named `main`; and a
+  function with the name of a function PHP has built in (`next`, `touch`),
+  which PHP rejects when it compiles the file and Mago does not report.
 - **P2R-32** A call MUST use the declared or built-in function name,
   whatever the letter case of the call (PHP function names ignore case).
 - **P2R-33** Statements outside functions, other than enum and class
@@ -294,6 +296,10 @@ requirement IDs.
     `null`. Rust panics.
   - `E::from()` with a value that no case of the enum `E` has: PHP throws a
     `ValueError` (exit code 255 when uncaught), Rust panics (exit code 101).
+  - An `int` property that overflows in `+=`, `-=`, `*=`, `++` or `--`: PHP
+    throws a `TypeError` (exit code 255 when uncaught), because a typed
+    property cannot hold the float; Rust panics in a debug build, as for a
+    variable.
   - Comments and docblocks are not copied (version 1).
 
 ## 8. Tests and CI
@@ -741,75 +747,123 @@ decided on 11 Oct 2026.
   with these differences. Its properties are its promoted constructor
   parameters, then the properties its body declares, in source order. A
   declared property needs a type and a default value that is a literal of
-  that type: an int, float, bool or string literal, `null` for a nullable
-  type, `[]` for a list type, or a case of an enum. `new` stores the default
-  (`count: 0`, `items: Vec::new()`, `note: None`, `side: Side::Left`). A
-  property declared `readonly`, and a promoted parameter with `readonly`, is
+  that type: an int or float literal, with or without unary minus (an int
+  literal for a float property stores the float, `1.0`); a bool literal; a
+  string literal (`String::from("hi")`); `null`, or a literal of the inner
+  type (`Some(5)`), for a nullable type; `[]` for a list type; or a case of
+  an enum. `new` stores the default (`count: 0`, `items: Vec::new()`,
+  `note: None`, `side: Side::Left`). A promoted parameter with `readonly` is
   set only by `new` (Mago reports a write anywhere else, P2R-11). These stop
   the conversion: a declared property without a type or a default, with a
-  default of any other form, with a hook, or `static`; `var`; and the stops
-  of P2R-130 other than "a class that is not readonly".
-- **P2R-141** A changing type is a class that is not readonly, a class with
-  a property of a changing type, and a list of a changing type. A struct of
-  a changing type MUST derive only `Debug`, because its value is never copied
-  (P2R-144); every other struct derives `Clone` and `Debug` as before.
-- **P2R-142** These changes MUST convert, where `$x` is `$this`, a variable or
-  a parameter, or a property read on one of them (`$this->cart->count`):
-  `$x->p = v` to `x.p = v;`; `$x->p += v`, `-=`, `*=` and `.=` to the Rust
-  operator as for a variable (P2R-43, P2R-45); `$x->p++` and `$x->p--` to
-  `x.p += 1;` and `x.p -= 1;`; and `$x->p[] = v` to `x.p.push(v);`. The value
-  converts as for an assignment to a variable of the property's type
-  (P2R-25, P2R-26, P2R-102). These stop the conversion: a change through any
-  other object (a list element, a call result), `??=`, a write to a list
-  element of a property (`$x->p[0] = v`, P2R-47), and a change used as a
-  value (P2R-44).
+  default of any other form (a list with elements included), with a hook,
+  `static`, or `readonly` (PHP rejects a default on a readonly property and
+  Mago does not report it); `var`; and the stops of P2R-130 other than "a
+  class that is not readonly".
+- **P2R-141** A changing type is a class with a property that can change (a
+  class that is not readonly with a property that is not `readonly`), a
+  class with a property of a changing type, and a list of a changing type.
+  A struct of a changing type MUST derive only `Debug`, because its value is
+  never copied (P2R-145); every other struct derives `Clone` and `Debug` as
+  before.
+- **P2R-142** A chain is a root (`$this`, a variable, a parameter or a
+  foreach value) followed by property reads and list reads with an int
+  index (`$this->carts[0]->count`). These changes MUST convert, where `$x` is
+  a chain: `$x->p = v` to `x.p = v;`; `$x->p += v`, `-=`, `*=` and `.=` to
+  the Rust operator as for a variable (P2R-43, P2R-45); `$x->p++` and
+  `$x->p--` as P2R-43 does for a variable (`x.p += 1;`, `x.p += 1.0;` for a
+  float); and `$x->p[] = v` to `x.p.push(v);`. The value converts as for an
+  assignment to a variable of the property's type (P2R-25, P2R-26,
+  P2R-102), and the chain follows the 60-column chain rule of P2R-134, the
+  target and `.push(v)` included. These stop the conversion: a change
+  through a call result or a `new` expression; `??=`; a write to a list
+  element of a property (`$x->p[0] = v`, P2R-47); a change used as a value
+  (P2R-44); an int appended to a `list<float>` property, or a list with int
+  elements assigned to one, because PHP keeps the ints while P2R-25 would
+  make them floats; and an assignment to a foreach value of a changing type,
+  because PHP then leaves the list unchanged.
 - **P2R-143** A method MUST take `&mut self` when its body changes its
-  object: a P2R-142 change through `$this`; a call of a `&mut self` method
-  on `$this` or on a property chain of `$this`; `$this` or such a chain as
-  the argument for a `&mut` parameter (P2R-144); or a foreach that changes
-  the elements of a list property (P2R-146). Any other method takes `&self`.
-  The tool decides this for the methods and functions of the file together,
-  repeating until nothing changes, because one body's form depends on the
-  bodies it calls.
-- **P2R-144** A parameter of a changing type MUST take one of three forms,
-  decided from its body the same way: `c: C`, owned, when the body moves it
-  (P2R-145), and `mut c: C` when the body also changes it; `c: &mut C` when
-  the body changes it (P2R-142, P2R-143) without moving it; and `c: &C`
-  otherwise. `new` takes a property of a changing type by value
-  (`item: Item`, `items: Vec<Item>`) and stores it as it is. An argument for
-  an owned parameter MUST move (P2R-145). An argument for a `&mut C`
-  parameter is `&mut v` for a variable `v`, `self` for `$this` in a
-  `&mut self` method, the parameter itself for a `&mut C` parameter, and
-  `&mut x.p` for a property chain on one of these; any other argument
-  stops the conversion.
+  object: a P2R-142 change on a chain whose root is `$this`; a `&mut self`
+  method call on such a chain; such a chain as the argument for a `&mut`
+  parameter (P2R-144); or a foreach by `&mut` over a list on such a chain
+  (P2R-146). A parameter of a changing type MUST be owned when its body
+  moves it (P2R-145), with `mut` when the body also changes it; `&mut` when
+  the body changes it without moving it; and `&` otherwise. A changing list
+  parameter is `&[C]`, `&mut [C]` or `Vec<C>`; a change to the objects in a
+  list parameter is not a change of the list (P2R-24 does not stop it). The
+  tool decides these forms for every method and function of the file
+  together: (1) every method starts at `&self` and every changing parameter
+  at `&`; (2) each pass sets the flags "changes its object", "changes this
+  parameter" and "moves this parameter" from the bodies and the forms of the
+  previous pass, and a flag only ever turns on; (3) the passes stop when no
+  flag changes. This is the least fixed point: two methods that call each
+  other and change nothing stay `&self`. P2R-144 to P2R-147 then apply with
+  the final forms.
+- **P2R-144** `new` takes a property of a changing type by value
+  (`item: Item`, `items: Vec<Item>`) and stores it as it is; a list literal
+  argument for it is `vec![..]` or `Vec::new()`. An argument for an owned
+  parameter MUST move (P2R-145). An argument for a `&mut` parameter is
+  `&mut v` for a local variable or an owned parameter `v`; `self` for
+  `$this` in a `&mut self` method; the parameter itself for a `&mut`
+  parameter; the value itself for the value of a foreach by `&mut`;
+  `&mut x.p` and `&mut x.p[i]` for a chain on one of these; and
+  `&mut C::new(..)` for a `new` expression. Any other argument for a `&mut`
+  parameter stops the conversion. An owned parameter passes to a `&`
+  parameter as a local variable does (`&c`). A `&mut self` method call
+  converts on a chain whose root is `$this` in a `&mut self` method, a local
+  variable, an owned parameter, a `&mut` parameter or the value of a foreach
+  by `&mut`, and on a `new` expression or a call result.
 - **P2R-145** A value of a changing type MUST NOT be copied. Where P2R-26
   and P2R-132 copy a value with `.clone()`, a value of a changing type moves
-  instead, and the conversion stops where it cannot move: a local variable
-  moves when no path reads it again (P2R-26); `$this`, a `&C` or `&mut C`
-  parameter, a property read, a list element and a foreach value never move.
-  So `$b = $a;` converts only when `$a` is not read again, and
-  `return $this;`, `return $this->item;`, `$x = $list[0];` and
-  `$cart->put($a);` followed by a read of `$a` stop.
+  instead, and the conversion stops where it cannot move. A local variable
+  or an owned parameter moves when no path reads it again (P2R-26) and the
+  statement that moves it names it nowhere else (`$a->parts[] = $a;` and
+  `keep($a, $a)` stop); `$this`, a `&` or `&mut` parameter, a property read,
+  a list element and a foreach value never move. So `$b = $a;` converts only
+  when `$a` is not read again, and `return $this;`, `return $this->item;`,
+  `$x = $list[0];` and `$cart->put($a);` followed by a read of `$a` stop.
 - **P2R-146** A foreach over a list of a changing type MUST iterate by
-  reference: `for item in &mut xs {` when its body changes the value
-  (P2R-142, P2R-143, P2R-144), otherwise `for item in &xs {`; the value is a
-  reference and never moves (P2R-145). The body MUST NOT read or change the
-  list it iterates. For a list property, the object that holds it may appear
-  in the body only as a read or a change of another of its properties; a
-  method call on that object, that object or the iterated property in an
-  argument, and a read of the iterated property stop the conversion,
-  because rustc lets one field be borrowed while another changes but not the
-  whole object.
-- **P2R-147** In one call, an object that the call changes (the receiver of
-  a `&mut self` method, an argument for a `&mut` parameter) MUST NOT also be
-  passed by reference in another argument, also not through a property
-  (`$a->absorb($a->name)` stops): rustc rejects the two borrows. A value of
-  a Copy type read from it converts (`$a->add($a->total())`).
-- **P2R-148** A variable that a P2R-142 change, a `&mut self` call, a
-  `&mut v` argument or a `for ... in &mut v` changes MUST be declared
-  `let mut` (P2R-34). A property write MUST be one statement on one line
-  (P2R-51), and a declared property's default MUST follow the store layout
-  of P2R-137 as `name: default`.
+  reference: for a list in a variable, an owned parameter or on a chain,
+  `for x in &mut xs {` when the body changes the value (P2R-142 to
+  P2R-144), otherwise `for x in &xs {`; for a `&[C]` or `&mut [C]`
+  parameter, `for x in xs {` and `for x in xs.iter_mut() {`; with a key,
+  `for (k, x) in (0_i64..).zip(&mut xs) {` and the same with the other
+  forms. The value is a reference: it never moves (P2R-145) and is never
+  assigned (P2R-142). In the body, the root of the iterated chain may appear
+  only as a read or a change of a chain that is neither the iterated chain,
+  nor a part of it, nor an extension of it. A method call on that root or on
+  a part of the iterated chain, that root or such a part as an argument, and
+  a read or change of the iterated chain stop the conversion, because rustc
+  lets one field be borrowed while another is used but not the whole object;
+  in a foreach by `&`, a `&self` method call on the root converts. A
+  foreach over a list property of a Copy type (section 14 borrows it,
+  `for &h in &self.history {`) MUST iterate a copy,
+  `for h in self.history.clone() {`, when the body changes the object that
+  holds the list: PHP iterates a copy of the array too.
+- **P2R-147** In one statement, the root of a chain that the statement
+  changes (by a P2R-142 change, a `&mut self` call, a `&mut` argument or a
+  move) MUST appear only once, the receiver, the arguments and the target
+  included, except in these forms, which rustc accepts and which evaluate
+  in PHP's order:
+  1. a top-level `=` on a property, or a top-level `+=`, `-=` or `*=` on an
+     int or float property, whose value may read and change the same root
+     (`$this->qty += $this->next();`);
+  2. a `&mut self` method call whose arguments read the same root only
+     through property reads that give a Copy value and through `&self`
+     method calls (`$a->add($a->total())`, `$a->setName($a->label())`);
+  3. `$this`, a `&mut` parameter or the value of a foreach by `&mut` passed
+     as it is to a `&mut` parameter, with later arguments that read the same
+     root as in form 2 (`bump($this, $this->qty)`).
+
+  Every other repeat stops the conversion, among them `bump($a, $a->qty)`,
+  `$a->add($a->next())` where `next` changes `$a`,
+  `$this->items[] = $this->make()`, `$this->text .= $this->text`,
+  `$a->name . $a->bumpName()`, `$a->copyTo($a)` and `pair($a->part, $a)`.
+- **P2R-148** A local variable or an owned parameter that is the root of a
+  chain that a P2R-142 change, a `&mut self` call, a `&mut` argument or a
+  `for ... in &mut` changes MUST be declared `let mut` (P2R-34), or
+  `mut c: C`; a foreach value never is. A property write MUST be one
+  statement on one line (P2R-51), and a declared property's default MUST
+  follow the store layout of P2R-137 as `name: default`.
 
 ## Spec checklist
 

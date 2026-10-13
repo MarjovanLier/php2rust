@@ -4,7 +4,7 @@
 use std::collections::HashSet;
 
 use heck::ToSnakeCase;
-use mago_span::HasSpan;
+use mago_span::{HasSpan, Span};
 use mago_syntax::cst::*;
 
 use super::enums::class_key;
@@ -109,6 +109,99 @@ impl Converter<'_> {
             self.check_containment(program, index);
         }
         self.mark_changing();
+        self.refuse_nullable_changing(program);
+    }
+
+    /// Refuses each declared parameter, return and property type that is nullable and
+    /// holds a changing type, once the changing types are known (P2R-141).
+    fn refuse_nullable_changing(&mut self, program: &Program<'_>) {
+        let mut found: Vec<Span> = Vec::new();
+        for statement in program.statements.iter() {
+            match statement {
+                Statement::Function(function) => {
+                    let key = function.name.value.to_ascii_lowercase();
+                    if let Some(signature) = self.functions.get(&key) {
+                        self.nullable_in(
+                            &function.parameter_list,
+                            function.return_type_hint.as_ref(),
+                            signature,
+                            &mut found,
+                        );
+                    }
+                }
+                Statement::Class(declaration) => {
+                    let Some(index) = self.class_index(declaration) else {
+                        continue;
+                    };
+                    for member in declaration.members.iter() {
+                        match member {
+                            ClassLikeMember::Method(method) => {
+                                if is_constructor(method) {
+                                    for parameter in method.parameter_list.parameters.iter() {
+                                        let name = &parameter.variable.name[1..];
+                                        let ty = self
+                                            .properties(index)
+                                            .find(|f| f.php_name == name)
+                                            .map(|f| &f.ty);
+                                        if ty.is_some_and(|ty| self.nullable_changing(ty)) {
+                                            found.push(parameter.span());
+                                        }
+                                    }
+                                } else if let Some(at) = self.method_index(index, method.name.value)
+                                {
+                                    let signature = &self.classes[index].methods[at].signature;
+                                    self.nullable_in(
+                                        &method.parameter_list,
+                                        method.return_type_hint.as_ref(),
+                                        signature,
+                                        &mut found,
+                                    );
+                                }
+                            }
+                            ClassLikeMember::Property(Property::Plain(plain)) => {
+                                for item in plain.items.iter() {
+                                    let variable = item.variable();
+                                    let name = &variable.name[1..];
+                                    let ty = self
+                                        .properties(index)
+                                        .find(|f| f.php_name == name)
+                                        .map(|f| &f.ty);
+                                    if ty.is_some_and(|ty| self.nullable_changing(ty)) {
+                                        found.push(variable.span());
+                                    }
+                                }
+                            }
+                            _ => {}
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+        for span in found {
+            self.refuse(&span, NULLABLE_CHANGING);
+        }
+    }
+
+    /// Adds to `found` each parameter and the return type of `signature` that is nullable
+    /// and holds a changing type.
+    fn nullable_in(
+        &self,
+        parameters: &FunctionLikeParameterList<'_>,
+        returns: Option<&FunctionLikeReturnTypeHint<'_>>,
+        signature: &Signature,
+        found: &mut Vec<Span>,
+    ) {
+        for (parameter, converted) in parameters.parameters.iter().zip(&signature.parameters) {
+            if self.nullable_changing(&converted.ty) {
+                found.push(parameter.span());
+            }
+        }
+        if let (Some(hint), Some(ty)) = (returns, &signature.returns)
+            && self.nullable_changing(ty)
+        {
+            found.push(hint.span());
+        }
     }
 
     /// Finds the changing types: a class holding one is one too, so this repeats until no
@@ -142,6 +235,17 @@ impl Converter<'_> {
                 .class_named(name)
                 .is_some_and(|index| self.classes[index].changing),
             RustType::Vec(inner) | RustType::Option(inner) => self.is_changing(inner),
+            _ => false,
+        }
+    }
+
+    /// True for a nullable type that holds a changing type (`?list<Cell>`), also as a list
+    /// element: none of the `Option` forms of P2R-101 to P2R-105 moves without a copy
+    /// (P2R-141).
+    pub(super) fn nullable_changing(&self, ty: &RustType) -> bool {
+        match ty {
+            RustType::Option(inner) => self.is_changing(inner),
+            RustType::Vec(element) => self.nullable_changing(element),
             _ => false,
         }
     }
@@ -375,7 +479,6 @@ impl Converter<'_> {
         if is_readonly(declaration) {
             return;
         }
-        let codebase = self.codebase;
         for member in declaration.members.iter() {
             let ClassLikeMember::Property(property) = member else {
                 continue;
@@ -410,61 +513,68 @@ impl Converter<'_> {
                 continue;
             }
             for item in plain.items.iter() {
-                let PropertyItem::Concrete(item) = item else {
-                    self.refuse(item, NEEDS_DEFAULT);
-                    continue;
-                };
-                if plain.hint.is_none() {
-                    self.refuse(item, NEEDS_DEFAULT);
-                    continue;
+                match item {
+                    PropertyItem::Concrete(item) if plain.hint.is_some() => {
+                        self.declared_property(declaration, index, item);
+                    }
+                    _ => self.refuse(item, NEEDS_DEFAULT),
                 }
-                let php_name = &item.variable.name[1..];
-                let Some(rust_name) = self.rust_name(php_name, &item.variable) else {
-                    continue;
-                };
-                if self.properties(index).any(|f| f.rust_name == rust_name) {
-                    self.refuse(
-                        &item.variable,
-                        format!(
-                            "{rust_name} is already the Rust name of another property (P2R-131)"
-                        ),
-                    );
-                    continue;
-                }
-                let declared = codebase
-                    .get_property(declaration.name.value, item.variable.name)
-                    .and_then(|p| p.type_metadata.as_ref())
-                    .map(|t| &t.type_union);
-                let Some(ty) = self.declared_type(&item.variable, declared) else {
-                    continue;
-                };
-                if types::nullable_object(&ty) {
-                    self.refuse(&item.variable, types::NULLABLE_OBJECT);
-                    continue;
-                }
-                if !types::built(&ty) {
-                    self.refuse(
-                        &item.variable,
-                        "only int, float, bool, string, list, nullable, enum and object properties are built so far (P2R-20)",
-                    );
-                    continue;
-                }
-                let Some(default) = self.default_value(item.value, &ty) else {
-                    continue;
-                };
-                let signature = ParameterSignature {
-                    php_name: php_name.to_vec(),
-                    rust_name,
-                    snake: std::str::from_utf8(php_name)
-                        .unwrap_or_default()
-                        .to_snake_case(),
-                    ty,
-                    mode: Mode::Shared,
-                };
-                self.classes[index].declared.push((signature, default));
-                self.classes[index].writable = true;
             }
         }
+    }
+
+    /// One declared property with a type and a default, added to the class at `index`
+    /// when it converts (P2R-140).
+    fn declared_property(
+        &mut self,
+        declaration: &Class<'_>,
+        index: usize,
+        item: &PropertyConcreteItem<'_>,
+    ) {
+        let php_name = &item.variable.name[1..];
+        let Some(rust_name) = self.rust_name(php_name, &item.variable) else {
+            return;
+        };
+        if self.properties(index).any(|f| f.rust_name == rust_name) {
+            self.refuse(
+                &item.variable,
+                format!("{rust_name} is already the Rust name of another property (P2R-131)"),
+            );
+            return;
+        }
+        let codebase = self.codebase;
+        let declared = codebase
+            .get_property(declaration.name.value, item.variable.name)
+            .and_then(|p| p.type_metadata.as_ref())
+            .map(|t| &t.type_union);
+        let Some(ty) = self.declared_type(&item.variable, declared) else {
+            return;
+        };
+        if types::nullable_object(&ty) {
+            self.refuse(&item.variable, types::NULLABLE_OBJECT);
+            return;
+        }
+        if !types::built(&ty) {
+            self.refuse(
+                &item.variable,
+                "only int, float, bool, string, list, nullable, enum and object properties are built so far (P2R-20)",
+            );
+            return;
+        }
+        let Some(default) = self.default_value(item.value, &ty) else {
+            return;
+        };
+        let signature = ParameterSignature {
+            php_name: php_name.to_vec(),
+            rust_name,
+            snake: std::str::from_utf8(php_name)
+                .unwrap_or_default()
+                .to_snake_case(),
+            ty,
+            mode: Mode::Shared,
+        };
+        self.classes[index].declared.push((signature, default));
+        self.classes[index].writable = true;
     }
 
     /// The Rust text of a declared property's default: a literal of the property's type,
@@ -977,6 +1087,10 @@ impl Converter<'_> {
         }
     }
 }
+
+/// The problem of a nullable type that holds a changing type (P2R-141).
+pub(super) const NULLABLE_CHANGING: &str =
+    "a nullable type that holds objects whose class changes them is not supported (P2R-141)";
 
 /// The problem of a declared property without a type or a default (P2R-140).
 const NEEDS_DEFAULT: &str = "a declared property needs a type and a default value (P2R-140)";

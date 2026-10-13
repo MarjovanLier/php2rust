@@ -228,16 +228,7 @@ impl<'ast, 'arena> Body<'ast, 'arena, '_, '_> {
     fn root(&self, chain: &Expression<'_>, depth: usize) -> Option<Root> {
         match unparenthesized(chain) {
             Expression::Variable(Variable::Direct(variable)) => {
-                let name = variable.name;
-                Some(if name == b"$this" {
-                    Root::This
-                } else if let Some(at) = self.open[..depth].iter().rposition(|o| o.value == name) {
-                    Root::Value(at)
-                } else if let Some(at) = self.parameters.iter().position(|p| p.0 == name[1..]) {
-                    Root::Parameter(at)
-                } else {
-                    Root::Local
-                })
+                Some(self.root_named(variable.name, depth))
             }
             Expression::Access(Access::Property(access)) => self.root(access.object, depth),
             Expression::ArrayAccess(access) => self.root(access.array, depth),
@@ -327,27 +318,31 @@ impl<'ast, 'arena> Body<'ast, 'arena, '_, '_> {
     /// The type of the value `expression` gives, from the chain's root and the
     /// declarations it reads.
     fn type_of(&self, expression: &Expression<'_>) -> Option<RustType> {
+        self.type_at(expression, self.open.len())
+    }
+
+    /// `type_of`, seen from inside the first `depth` open loops. A loop's list is outside
+    /// the loop, so it is typed from the loops around it: `foreach ($x->items as $x)`
+    /// reads the outer `$x`.
+    fn type_at(&self, expression: &Expression<'_>, depth: usize) -> Option<RustType> {
         let converter = self.converter;
         match unparenthesized(expression) {
             Expression::Variable(Variable::Direct(variable)) => {
-                let name = variable.name;
-                if name == b"$this" {
-                    let class = self.class?;
-                    return Some(RustType::Class(converter.classes[class].rust_name.clone()));
-                }
-                if let Some(open) = self.open.iter().rev().find(|o| o.value == name) {
-                    return match self.type_of(open.list)? {
+                match self.root_named(variable.name, depth) {
+                    Root::This => {
+                        let class = &converter.classes[self.class?];
+                        Some(RustType::Class(class.rust_name.clone()))
+                    }
+                    Root::Value(at) => match self.type_at(self.open[at].list, at)? {
                         RustType::Vec(element) => Some(*element),
                         _ => None,
-                    };
+                    },
+                    Root::Parameter(at) => Some(self.parameters[at].1.clone()),
+                    Root::Local => self.locals.get(variable.name).cloned(),
                 }
-                if let Some(parameter) = self.parameters.iter().find(|p| p.0 == name[1..]) {
-                    return Some(parameter.1.clone());
-                }
-                self.locals.get(name).cloned()
             }
             Expression::Access(Access::Property(access)) => {
-                let RustType::Class(class) = self.type_of(access.object)? else {
+                let RustType::Class(class) = self.type_at(access.object, depth)? else {
                     return None;
                 };
                 let ClassLikeMemberSelector::Identifier(name) = &access.property else {
@@ -355,7 +350,7 @@ impl<'ast, 'arena> Body<'ast, 'arena, '_, '_> {
                 };
                 converter.property_type(&class, name.value)
             }
-            Expression::ArrayAccess(access) => match self.type_of(access.array)? {
+            Expression::ArrayAccess(access) => match self.type_at(access.array, depth)? {
                 RustType::Vec(element) => Some(*element),
                 _ => None,
             },
@@ -363,7 +358,7 @@ impl<'ast, 'arena> Body<'ast, 'arena, '_, '_> {
                 let ClassLikeMemberSelector::Identifier(name) = &call.method else {
                     return None;
                 };
-                let (class, at) = *self.methods(call.object, name.value).first()?;
+                let (class, at) = *self.methods_at(call.object, name.value, depth).first()?;
                 converter.classes[class].methods[at]
                     .signature
                     .returns
@@ -388,8 +383,18 @@ impl<'ast, 'arena> Body<'ast, 'arena, '_, '_> {
     /// The methods a call of `name` on `object` may run: the method of its class, or every
     /// method of that name when the class is not known.
     fn methods(&self, object: &Expression<'_>, name: &[u8]) -> Vec<(usize, usize)> {
+        self.methods_at(object, name, self.open.len())
+    }
+
+    /// `methods`, seen from inside the first `depth` open loops.
+    fn methods_at(
+        &self,
+        object: &Expression<'_>,
+        name: &[u8],
+        depth: usize,
+    ) -> Vec<(usize, usize)> {
         let converter = self.converter;
-        if let Some(RustType::Class(class)) = self.type_of(object)
+        if let Some(RustType::Class(class)) = self.type_at(object, depth)
             && let Some(class) = converter.class_named(&class)
         {
             return converter
@@ -478,14 +483,18 @@ impl<'ast, 'arena> Body<'ast, 'arena, '_, '_> {
         operator && target && in_target == 1
     }
 
-    /// Form 2 of P2R-147: a `&mut self` call on a chain from `root`, whose arguments read
-    /// `root` only through Copy property reads and `&self` calls.
+    /// Form 2 of P2R-147: a `&mut self` call on a chain from `root` without a list read,
+    /// whose arguments read `root` only through Copy property reads and `&self` calls. A
+    /// list read in the receiver goes through `IndexMut`, which rustc borrows at once.
     fn lent_once(&self, root: &[u8], found: &Found<'_, '_>) -> bool {
         found.chains.iter().any(|receiver| {
             let Some(call) = receiver.receiver else {
                 return false;
             };
-            if receiver.root != root || !self.changes_receiver(call) {
+            if receiver.root != root
+                || receiver.steps.contains(&None)
+                || !self.changes_receiver(call)
+            {
                 return false;
             }
             let arguments = call.argument_list.span();
@@ -501,11 +510,11 @@ impl<'ast, 'arena> Body<'ast, 'arena, '_, '_> {
     /// passed as it is to a `&mut` parameter, with later arguments that read `root` as in
     /// form 2.
     fn passed_once(&self, root: &[u8], found: &Found<'_, '_>) -> bool {
-        let reference = match self.root_named(root) {
-            Some(Root::This) => true,
-            Some(Root::Parameter(at)) => self.parameters[at].2 == Mode::Mut,
-            Some(Root::Value(at)) => self.loops.by_mut.contains(&self.open[at].span),
-            _ => false,
+        let reference = match self.root_named(root, self.open.len()) {
+            Root::This => true,
+            Root::Parameter(at) => self.parameters[at].2 == Mode::Mut,
+            Root::Value(at) => self.loops.by_mut.contains(&self.open[at].span),
+            Root::Local => false,
         };
         if !reference {
             return false;
@@ -567,17 +576,18 @@ impl<'ast, 'arena> Body<'ast, 'arena, '_, '_> {
             .any(|&(class, at)| classes[class].methods[at].self_mode == Mode::Mut)
     }
 
-    /// The root that the variable with the PHP name `name` is here.
-    fn root_named(&self, name: &[u8]) -> Option<Root> {
-        Some(if name == b"$this" {
+    /// The root that the variable with the PHP name `name` is, seen from inside the first
+    /// `depth` open loops.
+    fn root_named(&self, name: &[u8], depth: usize) -> Root {
+        if name == b"$this" {
             Root::This
-        } else if let Some(at) = self.open.iter().rposition(|o| o.value == name) {
+        } else if let Some(at) = self.open[..depth].iter().rposition(|o| o.value == name) {
             Root::Value(at)
         } else if let Some(at) = self.parameters.iter().position(|p| p.0 == name[1..]) {
             Root::Parameter(at)
         } else {
             Root::Local
-        })
+        }
     }
 
     /// The forms of the parameters a call may pass its arguments to, by position.
@@ -909,22 +919,10 @@ impl<'ast, 'arena, 'x, 'c> Walker<'ast, 'arena, Body<'ast, 'arena, 'x, 'c>> for 
         call: &'ast MethodCall<'arena>,
         body: &mut Body<'ast, 'arena, 'x, 'c>,
     ) {
-        let ClassLikeMemberSelector::Identifier(name) = &call.method else {
-            return;
-        };
-        let methods = body.methods(call.object, name.value);
-        let classes = &body.converter.classes;
-        if methods
-            .iter()
-            .any(|&(class, at)| classes[class].methods[at].self_mode == Mode::Mut)
-        {
+        if body.changes_receiver(call) {
             body.change_chain(call.object);
         }
-        let modes = positions(
-            methods
-                .iter()
-                .map(|&(class, at)| classes[class].methods[at].signature.parameters.as_slice()),
-        );
+        let modes = body.call_modes(CallNode::Method(call));
         body.arguments(&call.argument_list, &modes);
     }
 
@@ -933,14 +931,7 @@ impl<'ast, 'arena, 'x, 'c> Walker<'ast, 'arena, Body<'ast, 'arena, 'x, 'c>> for 
         call: &'ast FunctionCall<'arena>,
         body: &mut Body<'ast, 'arena, 'x, 'c>,
     ) {
-        let Expression::Identifier(Identifier::Local(name)) = call.function else {
-            return;
-        };
-        let functions = &body.converter.functions;
-        let Some(signature) = functions.get(&name.value.to_ascii_lowercase()) else {
-            return;
-        };
-        let modes = positions(std::iter::once(signature.parameters.as_slice()));
+        let modes = body.call_modes(CallNode::Function(call));
         body.arguments(&call.argument_list, &modes);
     }
 

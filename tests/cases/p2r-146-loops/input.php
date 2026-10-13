@@ -62,6 +62,19 @@ function clear(array $seats): void
     }
 }
 
+/**
+ * @param list<Seat> $seats
+ */
+function mark(array $seats): int
+{
+    $n = 0;
+    foreach ($seats as $seat) {
+        $n += $seat->taken;
+    }
+    $seats[0]->taken = 9;
+    return $n;
+}
+
 $hall = new Hall();
 $hall->seats[] = new Seat();
 $hall->seats[] = new Seat();
@@ -70,6 +83,8 @@ $hall->book();
 $hall->replay();
 echo $hall->booked, " ", $hall->count(), "\n";
 clear($hall->seats);
+echo mark($hall->seats), "\n";
+echo $hall->seats[0]->taken, "\n";
 $list = [new Seat(), new Seat()];
 foreach ($list as $seat) {
     $seat->taken = 3;

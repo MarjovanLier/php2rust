@@ -89,27 +89,12 @@ impl Converter<'_> {
         }
         let statement = expression.span();
         if append {
-            let RustType::Vec(element) = &target_type else {
-                self.refuse(expression, "only a list can be appended to (P2R-47)");
-                return None;
-            };
-            let value = value?;
-            if nulls::null_for_plain(&value_type, element) {
-                self.refuse(expression, nulls::NULL_ELEMENT);
-                return None;
-            }
-            // P2R-25 would make the int a float, where PHP keeps it.
-            if value_type == RustType::I64 && **element == RustType::F64 {
-                self.refuse(
-                    expression,
-                    "an int appended to a list of float keeps its type in PHP, so it is not supported (P2R-142)",
-                );
-                return None;
-            }
-            let stored = self.stored(value, expr, &value_type, statement)?;
-            let pushed = nulls::wrapped(stored, &value_type, element);
-            let push = RExpr::MethodCall(Box::new(target), "push".to_owned(), vec![pushed]);
-            return Some(format!("{};", self.render(expression, &push, false)?));
+            return self.appended(
+                expression,
+                value?,
+                (expr, value_type),
+                (target, target_type),
+            );
         }
         let (operator, expr) = match operator {
             "=" => {
@@ -149,6 +134,36 @@ impl Converter<'_> {
         let target = self.render(expression, &target, false)?;
         let value = self.render(expression, &expr, false)?;
         Some(format!("{target} {operator} {value};"))
+    }
+
+    /// `$x->p[] = v` as `x.p.push(v);`, with the converted value and target.
+    fn appended(
+        &mut self,
+        expression: &Expression<'_>,
+        value: &Expression<'_>,
+        (expr, value_type): (RExpr, RustType),
+        (target, target_type): (RExpr, RustType),
+    ) -> Option<String> {
+        let RustType::Vec(element) = &target_type else {
+            self.refuse(expression, "only a list can be appended to (P2R-47)");
+            return None;
+        };
+        if nulls::null_for_plain(&value_type, element) {
+            self.refuse(expression, nulls::NULL_ELEMENT);
+            return None;
+        }
+        // P2R-25 would make the int a float, where PHP keeps it.
+        if value_type == RustType::I64 && **element == RustType::F64 {
+            self.refuse(
+                expression,
+                "an int appended to a list of float keeps its type in PHP, so it is not supported (P2R-142)",
+            );
+            return None;
+        }
+        let stored = self.stored(value, expr, &value_type, expression.span())?;
+        let pushed = nulls::wrapped(stored, &value_type, element);
+        let push = RExpr::MethodCall(Box::new(target), "push".to_owned(), vec![pushed]);
+        Some(format!("{};", self.render(expression, &push, false)?))
     }
 
     /// The Rust type of a chain, from the types of its root and of the properties and

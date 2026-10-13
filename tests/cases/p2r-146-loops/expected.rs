@@ -65,6 +65,15 @@ pub fn clear(seats: &mut [Seat]) {
     }
 }
 
+pub fn mark(seats: &mut [Seat]) -> i64 {
+    let mut n: i64 = 0;
+    for seat in seats.iter() {
+        n += seat.taken;
+    }
+    seats[0].taken = 9;
+    return n;
+}
+
 fn main() {
     let mut hall = Hall::new();
     hall.seats.push(Seat::new());
@@ -77,6 +86,10 @@ fn main() {
     print!("{}", hall.count());
     print!("\n");
     clear(&mut hall.seats);
+    print!("{}", mark(&mut hall.seats));
+    print!("\n");
+    print!("{}", hall.seats[0].taken);
+    print!("\n");
     let mut list = vec![Seat::new(), Seat::new()];
     for seat in &mut list {
         seat.taken = 3;

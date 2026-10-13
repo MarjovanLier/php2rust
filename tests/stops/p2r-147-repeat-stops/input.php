@@ -5,6 +5,11 @@ declare(strict_types=1);
 final class Part
 {
     public int $n = 0;
+
+    public function grow(int $by): void
+    {
+        $this->n += $by;
+    }
 }
 
 final class Acc
@@ -39,6 +44,11 @@ final class Acc
     {
         $this->text .= "x";
         return $this->text;
+    }
+
+    public function size(): int
+    {
+        return count($this->items);
     }
 
     public function copyTo(Acc $other): void
@@ -91,4 +101,9 @@ function toItself(Acc $a): void
 function partFirst(Acc $a): void
 {
     pair($a->part, $a);
+}
+
+function indexReceiver(Acc $a): void
+{
+    $a->items[0]->grow($a->size());
 }

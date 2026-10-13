@@ -48,6 +48,44 @@ final class Hall
             $seat->taken = 1;
         }
     }
+
+    public function size(): int
+    {
+        return count($this->seats);
+    }
+
+    public function sharedCallWhileChanging(): void
+    {
+        foreach ($this->seats as $seat) {
+            $seat->taken = $this->size();
+        }
+    }
+}
+
+final class Block
+{
+    /** @var list<Seat> */
+    public array $seats = [];
+}
+
+final class Venue
+{
+    public function __construct(public Block $block)
+    {
+    }
+
+    public function partOfChain(): void
+    {
+        foreach ($this->block->seats as $seat) {
+            $seat->taken = count($this->block->seats) + 1;
+            useBlock($this->block);
+        }
+    }
+}
+
+function useBlock(Block $block): void
+{
+    echo count($block->seats), "\n";
 }
 
 function useHall(Hall $hall): void
@@ -67,5 +105,19 @@ function fromCall(): void
 {
     foreach (makeSeats() as $seat) {
         $seat->taken = 1;
+    }
+}
+
+final class Row
+{
+    /** @var list<Row> */
+    public array $rows = [];
+    public int $n = 0;
+}
+
+function sameName(Row $x): void
+{
+    foreach ($x->rows as $x) {
+        $x->n = 1;
     }
 }

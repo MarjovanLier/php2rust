@@ -42,6 +42,32 @@ function intIntoFloats(Node $a): void
     $a->fs[] = 1;
 }
 
+function concatInt(Node $a): void
+{
+    $a->n .= "x";
+}
+
+function appendInt(Node $a): void
+{
+    $a->n[] = 1;
+}
+
+function indirect(Node $a): void
+{
+    $name = 'a';
+    ${$name}->n = 1;
+}
+
+function floatList(Node $a): void
+{
+    $a->fs = [1, 2];
+}
+
+function maybe(Node $a, ?int $v): void
+{
+    $a->n = $v;
+}
+
 /**
  * @param list<Node> $nodes
  */

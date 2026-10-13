@@ -48,7 +48,7 @@ use mago_syntax::walker::Walker;
 
 use super::control::Loop;
 use super::flow::{Flow, Var};
-use super::{Converter, Mode, ParameterSignature, lists, nulls, numbers, strings};
+use super::{Converter, Mode, ParameterSignature, classes, lists, nulls, numbers, strings};
 use crate::printer::{self, BinOp, RExpr};
 use crate::types::{self, RustType};
 
@@ -1120,6 +1120,10 @@ impl Converter<'_> {
             _ => Ok(ty),
         });
         match checked.and_then(built_yet) {
+            Ok(ty) if self.nullable_changing(&ty) => {
+                self.fail(var, node, classes::NULLABLE_CHANGING.to_owned());
+                None
+            }
             Ok(ty) => {
                 self.variables.entries[var].ty = Some(ty);
                 Some((var, declared.is_some()))
@@ -1181,6 +1185,10 @@ impl Converter<'_> {
             );
             return None;
         };
+        if self.nullable_changing(&ty) {
+            self.fail(var, null, classes::NULLABLE_CHANGING.to_owned());
+            return None;
+        }
         self.variables.entries[var].ty = Some(ty);
         Some((var, declared.is_some()))
     }

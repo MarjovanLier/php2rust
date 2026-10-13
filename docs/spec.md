@@ -11,7 +11,10 @@ of P2R-115. Section 13 (`match`) was written and built on 12 Oct 2026;
 the final review of the build added the type, constant and subject rules
 at the end of P2R-122 and the call rule of P2R-121. Section 14 (readonly
 classes) was written and built on 13 Oct 2026. Section 15 (classes that
-change their objects) was written and built on 13 Oct 2026.
+change their objects) was written and built on 13 Oct 2026; the final
+review of the build added the nullable stop of P2R-141, the `&mut [C]`
+loop, the temporary list stop and the copy rule wording of P2R-146, and
+the list read limit of form 2 of P2R-147.
 
 php2rust converts typed PHP source into normal, readable Rust (`Vec`,
 `String`, `i64`), without AI. It reads PHP with the Mago crates, uses Mago's
@@ -764,7 +767,10 @@ decided on 11 Oct 2026.
   class with a property of a changing type, and a list of a changing type.
   A struct of a changing type MUST derive only `Debug`, because its value is
   never copied (P2R-145); every other struct derives `Clone` and `Debug` as
-  before.
+  before. A nullable type that holds a changing type (`?list<Cell>`, also as
+  a list element) stops the conversion wherever it is declared or written,
+  because the `Option` forms of P2R-101 to P2R-105 copy or borrow it in ways
+  this section does not define.
 - **P2R-142** A chain is a root (`$this`, a variable, a parameter or a
   foreach value) followed by property reads and list reads with an int
   index (`$this->carts[0]->count`). These changes MUST convert, where `$x` is
@@ -824,10 +830,13 @@ decided on 11 Oct 2026.
 - **P2R-146** A foreach over a list of a changing type MUST iterate by
   reference: for a list in a variable, an owned parameter or on a chain,
   `for x in &mut xs {` when the body changes the value (P2R-142 to
-  P2R-144), otherwise `for x in &xs {`; for a `&[C]` or `&mut [C]`
-  parameter, `for x in xs {` and `for x in xs.iter_mut() {`; with a key,
+  P2R-144), otherwise `for x in &xs {`; for a `&[C]` parameter,
+  `for x in xs {`; for a `&mut [C]` parameter, `for x in xs.iter_mut() {`
+  when the body changes the value and otherwise `for x in xs.iter() {`,
+  because iterating the `&mut [C]` itself would move it; with a key,
   `for (k, x) in (0_i64..).zip(&mut xs) {` and the same with the other
-  forms. The value is a reference: it never moves (P2R-145) and is never
+  forms. A list of a changing type in no variable, parameter or chain (a
+  call result or a list literal) stops the conversion. The value is a reference: it never moves (P2R-145) and is never
   assigned (P2R-142). In the body, the root of the iterated chain may appear
   only as a read or a change of a chain that is neither the iterated chain,
   nor a part of it, nor an extension of it. A method call on that root or on
@@ -837,8 +846,9 @@ decided on 11 Oct 2026.
   in a foreach by `&`, a `&self` method call on the root converts. A
   foreach over a list property of a Copy type (section 14 borrows it,
   `for &h in &self.history {`) MUST iterate a copy,
-  `for h in self.history.clone() {`, when the body changes the object that
-  holds the list: PHP iterates a copy of the array too.
+  `for h in self.history.clone() {`, when the body changes the root of the
+  list's chain (`$this` for `$this->a->log`): PHP iterates a copy of the
+  array too.
 - **P2R-147** In one statement, the root of a chain that the statement
   changes (by a P2R-142 change, a `&mut self` call, a `&mut` argument or a
   move) MUST appear only once, the receiver, the arguments and the target
@@ -847,9 +857,11 @@ decided on 11 Oct 2026.
   1. a top-level `=` on a property, or a top-level `+=`, `-=` or `*=` on an
      int or float property, whose value may read and change the same root
      (`$this->qty += $this->next();`);
-  2. a `&mut self` method call whose arguments read the same root only
-     through property reads that give a Copy value and through `&self`
-     method calls (`$a->add($a->total())`, `$a->setName($a->label())`);
+  2. a `&mut self` method call on a chain without list reads, whose
+     arguments read the same root only through property reads that give a
+     Copy value and through `&self` method calls (`$a->add($a->total())`,
+     `$a->setName($a->label())`); a list read in the receiver goes through
+     `IndexMut`, which rustc borrows before the arguments run;
   3. `$this`, a `&mut` parameter or the value of a foreach by `&mut` passed
      as it is to a `&mut` parameter, with later arguments that read the same
      root as in form 2 (`bump($this, $this->qty)`).
@@ -857,7 +869,8 @@ decided on 11 Oct 2026.
   Every other repeat stops the conversion, among them `bump($a, $a->qty)`,
   `$a->add($a->next())` where `next` changes `$a`,
   `$this->items[] = $this->make()`, `$this->text .= $this->text`,
-  `$a->name . $a->bumpName()`, `$a->copyTo($a)` and `pair($a->part, $a)`.
+  `$a->name . $a->bumpName()`, `$a->copyTo($a)`, `pair($a->part, $a)` and
+  `$a->items[0]->add($a->total())`.
 - **P2R-148** A local variable or an owned parameter that is the root of a
   chain that a P2R-142 change, a `&mut self` call, a `&mut` argument or a
   `for ... in &mut` changes MUST be declared `let mut` (P2R-34), or

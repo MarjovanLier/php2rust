@@ -156,8 +156,9 @@ impl Converter<'_> {
     }
 
     /// The Rust text of a list of a changing type that a foreach iterates by reference:
-    /// `&xs` or `&mut xs` for a list in a variable, an owned parameter or on a chain, and
-    /// `xs` or `xs.iter_mut()` for a `&[C]` or `&mut [C]` parameter (P2R-146).
+    /// `&xs` or `&mut xs` for a list in a variable, an owned parameter or on a chain, `xs`
+    /// for a `&[C]` parameter, and `xs.iter()` or `xs.iter_mut()` for a `&mut [C]`
+    /// parameter (P2R-146).
     fn lent_list(&mut self, list: &Expression<'_>, expr: RExpr, by_mut: bool) -> Option<String> {
         let Some(root) = variables::chain_root(&expr).map(str::to_owned) else {
             self.refuse(
@@ -171,6 +172,10 @@ impl Converter<'_> {
         }
         let slice = matches!(expr, RExpr::Var(_)) && self.variables.is_borrowed(&root);
         let iter = match (slice, by_mut) {
+            // A `&mut [C]` is not Copy, so iterating it as it is would move it.
+            (true, false) if self.variables.mode_of(&root) == Mode::Mut => {
+                RExpr::MethodCall(Box::new(expr), "iter".to_owned(), Vec::new())
+            }
             (true, false) => expr,
             (true, true) => RExpr::MethodCall(Box::new(expr), "iter_mut".to_owned(), Vec::new()),
             (false, false) => RExpr::Ref(Box::new(expr)),

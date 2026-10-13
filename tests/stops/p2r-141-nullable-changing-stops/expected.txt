@@ -1,0 +1,4 @@
+input.php:13:19: a nullable type that holds objects whose class changes them is not supported (P2R-141)
+input.php:19:15: a nullable type that holds objects whose class changes them is not supported (P2R-141)
+input.php:30:16: a nullable type that holds objects whose class changes them is not supported (P2R-141)
+input.php:40:10: a nullable type that holds objects whose class changes them is not supported (P2R-141)

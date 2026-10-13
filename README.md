@@ -206,7 +206,9 @@ php2rust refuses some valid PHP that version 1 converts in other forms:
   its object. The caller's object parameter then becomes `&mut`, which can stop code
   that would otherwise convert.
 - The rule of one changed object per statement is stricter than rustc: for example
-  `$a->log .= "{$a->hits}"` stops. Read the value into a variable first.
+  `$a->log .= "{$a->hits}"` stops, and so does a call that changes a list element
+  when its arguments read the same object, even another property of it
+  (`$this->items[0]->add($this->qty)`). Read the value into a variable first.
 
 ## Known differences from PHP
 

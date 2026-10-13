@@ -5,6 +5,8 @@ declare(strict_types=1);
 final class Box
 {
     public int $n = 0;
+    /** @var list<Box> */
+    public array $parts = [];
 }
 
 final class Holder
@@ -62,4 +64,10 @@ function twice(): void
 {
     $a = new Box();
     keep($a, $a);
+}
+
+function intoItself(): void
+{
+    $a = new Box();
+    $a->parts[] = $a;
 }

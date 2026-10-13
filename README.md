@@ -57,6 +57,12 @@ converts:
   `InReview`). Cases, `===` and `==` comparisons, `?Suit`, lists of enums, `->name`,
   `->value`, `Suit::from()`, `Suit::tryFrom()` (an `Option`) and `Suit::cases()`
   convert. The Rust enum holds only the helper methods the file uses.
+- readonly classes declared at the top level whose constructor only promotes typed
+  properties (`public function __construct(public int $x) {}`): a `#[derive(Clone,
+  Debug)]` struct with a `new` function and `&self` methods. `new C(...)`, property reads
+  (`$p->x`), method calls (`$p->m()`, also as a statement), `$this`, objects as
+  parameters (`&C`) and return values, and lists of objects convert. An object is copied
+  on assignment, as a string is, so no PHP code can tell that Rust holds two copies.
 - functions declared at the top level, as `pub fn` that can be called before their
   declaration. Every parameter and return type must be declared. A `string` parameter
   becomes `&str` and a `list<T>` parameter `&[T]`. A call may use any letter case, as
@@ -89,9 +95,17 @@ Anything not listed above stops the conversion. php2rust then prints every probl
 its line and column, and writes nothing. Its own messages end with the requirement ID;
 the others are findings of the Mago analyser. In short:
 
-- PHP that version 1 does not convert, for example classes, closures, `namespace`,
+- PHP that version 1 does not convert, for example closures, interfaces, `namespace`,
   `use`, casts, `print`, `printf`, `exit`, heredoc, constants other than `true` and
   `false`, and built-in functions other than the four above.
+- A class that is not readonly, or that extends a class, implements an interface, uses a
+  trait, or holds a constant, a static member, a property outside the constructor, a
+  constructor with a body or a method whose name starts with `__`. A nullable object
+  type (`?Point`), the types `self` and `static`, a class that holds itself, a method
+  named `clone` or `new`, and a function that assigns to its own object parameter.
+- Comparing, printing, cloning or testing an object (`==`, `===`, `echo`, `clone`,
+  `instanceof`, `if ($object)`), `?->`, a property write, and `??` on a property or a
+  method call.
 - A `match` anywhere other than a `return` or an assignment, on a value that may be
   null, with a condition that is not a literal or an enum case, with two `default`
   arms or two conditions of the same value, or without `default` where its arms leave a
@@ -160,6 +174,11 @@ php2rust refuses some valid PHP that version 1 converts in other forms:
   `1` and `-1` stops for the same two reasons. Handle the narrowed case inside the
   `match` instead of before it.
 - A `match` arm that rustfmt would split over several lines stops.
+- A nullable property read after a check against null is still an `Option`, so
+  `if ($this->name !== null) { return $this->name . '!'; }` stops. Read the property into
+  a variable first.
+- A `new` call with several string or list arguments is often wider than rustfmt's 60
+  columns for call arguments, so it stops. Put the arguments in variables first.
 - A `match` that starts a new variable stops when its arms are all `[]` or all `null`,
   or when its list arms differ in whether their elements may be null (`[null, 1]` and
   `[5]`), because no arm gives the variable its type. Assign the variable first.

@@ -753,7 +753,8 @@ decided on 11 Oct 2026.
   declared property needs a type and a default value that is a literal of
   that type: an int or float literal, with or without unary minus (an int
   literal for a float property stores the float, `1.0`); a bool literal; a
-  string literal (`String::from("hi")`); `null`, or a literal of the inner
+  single- or double-quoted string literal (`String::from("hi")`; heredoc
+  and nowdoc stop, as everywhere in version 1); `null`, or a literal of the inner
   type (`Some(5)`), for a nullable type; `[]` for a list type; or a case of
   an enum. `new` stores the default (`count: 0`, `items: Vec::new()`,
   `note: None`, `side: Side::Left`). A promoted parameter with `readonly` is
@@ -787,9 +788,11 @@ decided on 11 Oct 2026.
   (P2R-44); an int appended to a `list<float>` property, or a list with int
   elements assigned to one, because PHP keeps the ints while P2R-25 would
   make them floats; an assignment to a foreach value of a changing type,
-  because PHP then leaves the list unchanged; and a `=` write to a property
-  of a local variable or an owned parameter that no path reads afterwards,
-  which rustc rejects as an unused assignment (P2R-35).
+  because PHP then leaves the list unchanged; and a `=` write through
+  property reads only (`$g->a->n = 1`, not `$g->kids[0]->n = 1`, whose list
+  read rustc counts as a use) to a local variable or an owned parameter that
+  no path reads afterwards, which rustc rejects as an unused assignment
+  (P2R-35).
 - **P2R-143** A method MUST take `&mut self` when its body changes its
   object: a P2R-142 change on a chain whose root is `$this`; a `&mut self`
   method call on such a chain; such a chain as the argument for a `&mut`

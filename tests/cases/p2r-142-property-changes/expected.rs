@@ -68,4 +68,5 @@ fn main() {
     print!(" ");
     print!("{}", report.pages[0].hits);
     print!("\n");
+    report.pages[0].hits = 2;
 }

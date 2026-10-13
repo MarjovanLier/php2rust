@@ -45,3 +45,4 @@ $report->pages[] = new Stats();
 $report->pages[0]->hits = 1;
 echo $report->total->hits, " ", $report->total->log, " ", count($report->total->seen), "\n";
 echo count($report->total->maybe), " ", $report->pages[0]->hits, "\n";
+$report->pages[0]->hits = 2;

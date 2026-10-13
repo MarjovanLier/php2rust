@@ -108,7 +108,11 @@ impl Converter<'_> {
                 }
                 let expr = self.declared_value(value, expr, &value_type, &target_type)?;
                 let stored = self.stored(value, expr, &value_type, statement)?;
-                if let (Some(variable), Some(name)) = (root_variable(chain), chain_root(&target)) {
+                // A list read in the chain goes through `IndexMut`, which rustc counts as a
+                // use of the root, so only a chain of property reads can be a dead write.
+                if let (Some(variable), Some(name), false) =
+                    (root_variable(chain), chain_root(&target), reads_list(chain))
+                {
                     self.variables.field_write(name, variable.span, statement);
                 }
                 ("=", nulls::wrapped(stored, &value_type, &target_type))
@@ -202,6 +206,15 @@ fn root_variable<'a, 'arena>(chain: &'a Expression<'arena>) -> Option<&'a Direct
         Expression::Access(Access::Property(access)) => root_variable(access.object),
         Expression::ArrayAccess(access) => root_variable(access.array),
         _ => None,
+    }
+}
+
+/// True when a chain reads a list element.
+fn reads_list(chain: &Expression<'_>) -> bool {
+    match unparenthesized(chain) {
+        Expression::Access(Access::Property(access)) => reads_list(access.object),
+        Expression::ArrayAccess(_) => true,
+        _ => false,
     }
 }
 

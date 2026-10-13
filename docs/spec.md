@@ -11,7 +11,7 @@ of P2R-115. Section 13 (`match`) was written and built on 12 Oct 2026;
 the final review of the build added the type, constant and subject rules
 at the end of P2R-122 and the call rule of P2R-121. Section 14 (readonly
 classes) was written and built on 13 Oct 2026. Section 15 (classes that
-change their objects) is a draft of 13 Oct 2026.
+change their objects) was written and built on 13 Oct 2026.
 
 php2rust converts typed PHP source into normal, readable Rust (`Vec`,
 `String`, `i64`), without AI. It reads PHP with the Mago crates, uses Mago's

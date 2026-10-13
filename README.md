@@ -63,6 +63,15 @@ converts:
   (`$p->x`), method calls (`$p->m()`, also as a statement), `$this`, objects as
   parameters (`&C`) and return values, and lists of objects convert. An object is copied
   on assignment, as a string is, so no PHP code can tell that Rust holds two copies.
+- classes that are not readonly, which may also declare properties in their body with a
+  type and a literal default (`public int $count = 0;`). Their properties can change:
+  `$o->p = v`, `+=`, `-=`, `*=`, `.=`, `++`, `--` and `$o->p[] = v`, also through a
+  chain (`$this->items[0]->qty++`). The struct of such a class, and of a class that
+  holds one, derives only `Debug`, because its objects are never copied: each moves, or
+  the conversion stops. A method that changes its object takes `&mut self`, and an object
+  parameter becomes `&C`, `&mut C` or `C` (when the function keeps it), decided for the
+  whole file. A `foreach` over a list of such objects borrows the list
+  (`for x in &mut xs`).
 - functions declared at the top level, as `pub fn` that can be called before their
   declaration. Every parameter and return type must be declared. A `string` parameter
   becomes `&str` and a `list<T>` parameter `&[T]`. A call may use any letter case, as
@@ -98,14 +107,22 @@ the others are findings of the Mago analyser. In short:
 - PHP that version 1 does not convert, for example closures, interfaces, `namespace`,
   `use`, casts, `print`, `printf`, `exit`, heredoc, constants other than `true` and
   `false`, and built-in functions other than the four above.
-- A class that is not readonly, or that extends a class, implements an interface, uses a
-  trait, or holds a constant, a static member, a property outside the constructor, a
-  constructor with a body or a method whose name starts with `__`. A nullable object
-  type (`?Point`), the types `self` and `static`, a class that holds itself, a method
-  named `clone` or `new`, and a function that assigns to its own object parameter.
+- A class that is abstract, extends a class, implements an interface, uses a trait, or
+  holds a constant, a static member, a constructor with a body or a method whose name
+  starts with `__`. A declared property without a type or a literal default, or that is
+  static, readonly or hooked. A nullable object type (`?Point`), the types `self` and
+  `static`, a class that holds itself, a method named `clone` or `new`, and a function
+  that assigns to its own object parameter.
 - Comparing, printing, cloning or testing an object (`==`, `===`, `echo`, `clone`,
-  `instanceof`, `if ($object)`), `?->`, a property write, and `??` on a property or a
-  method call.
+  `instanceof`, `if ($object)`), `?->`, and `??` on a property or a method call.
+- A copy of an object whose class changes its objects: `$b = $a;` followed by a read of
+  `$a`, `return $this;`, or a property or list element of such an object used as a value.
+  A change through a call result, `??=` on a property, a write to a list element of a
+  property, and an assignment to a `foreach` value of such a class.
+- A statement that changes an object and names it again, such as `$a->add($a->next())`
+  or `$this->text .= $this->text`, other than the three forms rustc accepts (see P2R-147
+  in `docs/spec.md`). Inside a `foreach` over a list of such objects, a use of the object
+  that holds the list other than through its other properties.
 - A `match` anywhere other than a `return` or an assignment, on a value that may be
   null, with a condition that is not a literal or an enum case, with two `default`
   arms or two conditions of the same value, or without `default` where its arms leave a
@@ -184,6 +201,12 @@ php2rust refuses some valid PHP that version 1 converts in other forms:
 - A `match` that starts a new variable stops when its arms are all `[]` or all `null`,
   or when its list arms differ in whether their elements may be null (`[null, 1]` and
   `[5]`), because no arm gives the variable its type. Assign the variable first.
+- When php2rust cannot work out the class of an object a method is called on, it treats
+  the call as a change when any class of the file has a method of that name that changes
+  its object. The caller's object parameter then becomes `&mut`, which can stop code
+  that would otherwise convert.
+- The rule of one changed object per statement is stricter than rustc: for example
+  `$a->log .= "{$a->hits}"` stops. Read the value into a variable first.
 
 ## Known differences from PHP
 
@@ -199,6 +222,9 @@ php2rust refuses some valid PHP that version 1 converts in other forms:
   panics.
 - `Suit::from()` with a value that no case has: PHP throws a `ValueError` (exit code 255
   when uncaught), Rust panics (exit code 101).
+- An `int` property that overflows in `+=`, `-=`, `*=`, `++` or `--`: PHP throws a
+  `TypeError` (exit code 255 when uncaught), because a typed property cannot hold the
+  float; Rust panics in a debug build, as for a variable.
 - Comments and docblocks are not copied (version 1).
 
 ## Development

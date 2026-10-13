@@ -38,4 +38,14 @@ readonly class Node
     {
         return self::make() + $this->missing();
     }
+
+    public function shadow(int $this): int
+    {
+        return 1;
+    }
+}
+
+function plain(int $this): int
+{
+    return 1;
 }

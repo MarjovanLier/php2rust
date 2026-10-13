@@ -156,7 +156,9 @@ requirement IDs.
   read converts only when every control-flow path to it assigns the
   variable, with all conditions treated as unknown; otherwise the conversion
   stops. A variable whose assignments give different Rust types stops the
-  conversion.
+  conversion. A read that Mago gives no type, as for a variable read again in
+  one expression after a property read (`$xs[$i]->n + $xs[$i]->n`), has the
+  variable's type.
 - **P2R-35** An unused parameter and an unused `foreach` key or value MUST get
   a leading `_` (`_key`). A value that is assigned and never read before the
   next assignment or the end of the function stops the conversion. A
@@ -701,10 +703,12 @@ Sections 3 to 9 apply to nullable values unless this section says otherwise.
   parameter, a list element, a new object), stops the conversion, as a
   function that calls itself does (P2R-50): rustc matches the method, not
   the object. These stop the conversion: a static method; `self::`,
-  `static::` and `parent::`; the types `self` and `static` (a later slice);
-  `$this` outside a method and a write to `$this`; a by-reference parameter;
-  and a call to a method the class does not declare (Mago reports it,
-  P2R-11).
+  `static::` and `parent::`; the native types `self`, `static` and `parent`
+  (a later slice; a docblock type that names `self`, such as `list<self>`,
+  is the class to Mago and converts); `$this` outside a method, a write to
+  `$this` and a parameter named `$this`, which PHP rejects and Mago does not
+  report; a by-reference parameter; and a call to a method the class does
+  not declare (Mago reports it, P2R-11).
 - **P2R-136** These MUST stop the conversion: `===`, `!==`, `==`, `!=`, `<`,
   `>`, `<=`, `>=` and `<=>` with an object operand, because Rust has no
   object identity and PHP compares properties loosely; `echo` and string

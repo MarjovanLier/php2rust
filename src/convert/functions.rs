@@ -116,6 +116,14 @@ impl Converter<'_> {
             self.refuse(parameter, "a parameter needs a declared type (P2R-23)");
             return None;
         }
+        // Mago does not report it, but PHP rejects the file.
+        if parameter.variable.name == b"$this" {
+            self.refuse(
+                &parameter.variable,
+                "a parameter cannot be named $this, which PHP rejects (P2R-135)",
+            );
+            return None;
+        }
         let php_name = &parameter.variable.name[1..];
         let rust_name = self.rust_name(php_name, &parameter.variable)?;
         if taken.contains(&rust_name) || earlier.iter().any(|p| p.rust_name == rust_name) {

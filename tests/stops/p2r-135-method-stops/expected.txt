@@ -4,3 +4,5 @@ input.php:21:21: this method calls itself on every path, and rustc rejects it (P
 input.php:27:21: this method calls itself on every path, and rustc rejects it (P2R-50)
 input.php:34:9: $this cannot be assigned (P2R-135)
 input.php:39:16: Could not infer a precise return type for function `Node::calls`. Saw type `mixed`. (mixed-return-statement)
+input.php:42:32: a parameter cannot be named $this, which PHP rejects (P2R-135)
+input.php:48:20: a parameter cannot be named $this, which PHP rejects (P2R-135)

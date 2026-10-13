@@ -273,10 +273,15 @@ impl Converter<'_> {
         ) {
             self.record_refused(binary.lhs);
             self.record_refused(binary.rhs);
-            self.refuse(
-                binary,
-                "?? converts on a variable, parameter or call only; PHP checks anything else with isset (P2R-105)",
-            );
+            let message = if matches!(
+                left_node,
+                Expression::Access(Access::Property(_)) | Expression::Call(Call::Method(_))
+            ) {
+                "?? on a property read or a method call is not supported yet (P2R-134)"
+            } else {
+                "?? converts on a variable, parameter or call only; PHP checks anything else with isset (P2R-105)"
+            };
+            self.refuse(binary, message);
             return None;
         }
         // Both sides convert first, so problems on both sides are reported.

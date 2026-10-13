@@ -232,10 +232,10 @@ impl<'ast, 'arena> Walker<'ast, 'arena, bool> for Calls<'_, '_> {
 
     fn walk_binary(&self, binary: &'ast Binary<'arena>, found: &mut bool) {
         self.walk_expression(binary.lhs, found);
-        // The right operand of `&&` and `||` runs on some paths only.
+        // The right operand of `&&`, `||` and `??` runs on some paths only.
         if !matches!(
             binary.operator,
-            BinaryOperator::And(_) | BinaryOperator::Or(_)
+            BinaryOperator::And(_) | BinaryOperator::Or(_) | BinaryOperator::NullCoalesce(_)
         ) {
             self.walk_expression(binary.rhs, found);
         }

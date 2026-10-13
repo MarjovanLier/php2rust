@@ -25,11 +25,16 @@ readonly class Counter
     {
         return $this->down(1) + $this->down(2);
     }
+
+    public function orStart(?int $n): int
+    {
+        return $n ?? $this->orStart($this->start);
+    }
 }
 
 $c = new Counter(10);
 $c->report();
-echo $c->down(3), ' ', $c->twice(), "\n";
+echo $c->down(3), ' ', $c->twice(), ' ', $c->orStart(null), "\n";
 for ($i = 0; $i < 2; $c->report()) {
     $i++;
 }

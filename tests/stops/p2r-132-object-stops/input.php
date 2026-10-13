@@ -27,3 +27,9 @@ function optional(?Node $n): int
 {
     return 1;
 }
+
+function build(): int
+{
+    $m = new Maybe(null);
+    return count([$m]);
+}

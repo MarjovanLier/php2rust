@@ -179,6 +179,8 @@ php2rust refuses some valid PHP that version 1 converts in other forms:
   a variable first.
 - A `new` call with several string or list arguments is often wider than rustfmt's 60
   columns for call arguments, so it stops. Put the arguments in variables first.
+- `$s ?? $this->name`, a nullable string parameter with a string property as the
+  default, is wider than rustfmt's 60 columns for a method chain, so it stops.
 - A `match` that starts a new variable stops when its arms are all `[]` or all `null`,
   or when its list arms differ in whether their elements may be null (`[null, 1]` and
   `[5]`), because no arm gives the variable its type. Assign the variable first.

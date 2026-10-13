@@ -26,6 +26,9 @@ pub(super) struct ClassInfo {
     /// The promoted constructor parameters, which are the properties and the parameters
     /// of `new`, in source order (P2R-133).
     fields: Vec<ParameterSignature>,
+    /// False when a constructor parameter was refused, so `new` cannot check its
+    /// arguments against `fields`.
+    complete: bool,
     methods: Vec<MethodInfo>,
 }
 
@@ -65,6 +68,7 @@ impl Converter<'_> {
                 key,
                 rust_name,
                 fields: Vec::new(),
+                complete: true,
                 methods: Vec::new(),
             });
         }
@@ -284,6 +288,7 @@ impl Converter<'_> {
                 ty,
             });
         }
+        self.classes[index].complete = fields.len() == constructor.parameter_list.parameters.len();
         self.classes[index].fields = fields;
     }
 
@@ -586,6 +591,11 @@ impl Converter<'_> {
             );
             return None;
         };
+        // The refused constructor parameter is the problem reported for the class.
+        if !self.classes[index].complete {
+            self.record_refused(node);
+            return None;
+        }
         let name = self.classes[index].rust_name.clone();
         let parameters = self.classes[index].fields.clone();
         let arguments = match &instantiation.argument_list {

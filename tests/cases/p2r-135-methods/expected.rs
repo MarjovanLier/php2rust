@@ -26,6 +26,10 @@ impl Counter {
     pub fn twice(&self) -> i64 {
         return self.down(1) + self.down(2);
     }
+
+    pub fn or_start(&self, n: Option<i64>) -> i64 {
+        return n.unwrap_or_else(|| self.or_start(Some(self.start)));
+    }
 }
 
 fn main() {
@@ -34,6 +38,8 @@ fn main() {
     print!("{}", c.down(3));
     print!(" ");
     print!("{}", c.twice());
+    print!(" ");
+    print!("{}", c.or_start(None));
     print!("\n");
     let mut i: i64 = 0;
     while i < 2 {

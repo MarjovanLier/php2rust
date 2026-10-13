@@ -685,6 +685,14 @@ impl Converter<'_> {
             self.refuse(expression, message);
             return None;
         };
+        // PHP rejects a write to `$this` in a method or a function when it compiles the file.
+        if variable.name == b"$this" {
+            if let Some(value) = value {
+                self.expression(value);
+            }
+            self.refuse(expression, "$this cannot be assigned (P2R-135)");
+            return None;
+        }
         // `[]` has no element type of its own: it has the variable's list type, which
         // `write` finds now or a later read or write gives (P2R-21).
         if operator == Some("=") && value.is_some_and(lists::is_empty_literal) {
@@ -1320,9 +1328,10 @@ impl Converter<'_> {
             return Ok(known.clone());
         }
         // Mago records no type for a variable read again after a property read, as in
-        // `$e->name . $e->name` or `$xs[0]->name . $xs[0]->name`, nor for `$this` as the
-        // object of a property read; every write keeps the one type (P2R-113, P2R-134).
-        if holds_enum(known) && self.artifacts.get_expression_type(node).is_none() {
+        // `$e->name . $e->name` or `$xs[$i]->n + $xs[$i]->n` (the `$i` too), nor for `$this`
+        // as the object of a property read; every write keeps the one type (P2R-34,
+        // P2R-134).
+        if self.artifacts.get_expression_type(node).is_none() {
             return Ok(known.clone());
         }
         // A read or write of an `Option` variable has its type, also where Mago knows that
@@ -1879,15 +1888,6 @@ fn same_type(php_name: &[u8], known: &RustType, found: RustType) -> Result<RustT
         known.owned(),
         found.owned()
     ))
-}
-
-/// True for an enum or a class, and for a list of them at any depth.
-fn holds_enum(ty: &RustType) -> bool {
-    match ty {
-        RustType::Enum(_) | RustType::Class(_) => true,
-        RustType::Vec(element) => holds_enum(element),
-        _ => false,
-    }
 }
 
 /// Only the types of `types::built` are written so far; the other types follow in later

@@ -45,6 +45,18 @@ pub fn greet(name: &str, coach: Option<&str>) -> String {
     return format!("{}{}", name, coach.unwrap_or("-"));
 }
 
+pub fn longest(teams: &[Team]) -> i64 {
+    let mut best: i64 = 0;
+    let mut i: i64 = 0;
+    while i < teams.len() as i64 {
+        if teams[i as usize].length() > best && teams[i as usize].name.len() as i64 > 0 {
+            best = teams[i as usize].name.len() as i64 + teams[i as usize].name.len() as i64;
+        }
+        i += 1;
+    }
+    return best;
+}
+
 fn main() {
     let scores: Vec<i64> = vec![3, 9, 4];
     let members = vec![String::from("ann"), String::from("bo")];
@@ -61,6 +73,8 @@ fn main() {
     print!("{}", teams[0].members[1]);
     print!(" ");
     print!("{}", teams[0].name);
+    print!(" ");
+    print!("{}", longest(&teams));
     print!("\n");
     let name = team.name.clone();
     print!("{}", name);

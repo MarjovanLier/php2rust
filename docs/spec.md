@@ -10,7 +10,8 @@ case, name and call stops of P2R-110, P2R-111 and P2R-114 and the layouts
 of P2R-115. Section 13 (`match`) was written and built on 12 Oct 2026;
 the final review of the build added the type, constant and subject rules
 at the end of P2R-122 and the call rule of P2R-121. Section 14 (readonly
-classes) was written and built on 13 Oct 2026.
+classes) was written and built on 13 Oct 2026. Section 15 (classes that
+change their objects) is a draft of 13 Oct 2026.
 
 php2rust converts typed PHP source into normal, readable Rust (`Vec`,
 `String`, `i64`), without AI. It reads PHP with the Mago crates, uses Mago's
@@ -51,7 +52,7 @@ requirement IDs.
   leave a partial output file (review concern, not checked mechanically).
 - **P2R-06** The same input MUST always give the same stdout bytes, the same
   output file bytes and the same stderr bytes.
-- **P2R-07** Only the constructs that sections 3 to 5 and 11 to 14 list as
+- **P2R-07** Only the constructs that sections 3 to 5 and 11 to 15 list as
   converting may convert. Any other construct MUST stop the conversion,
   which means it is reported as a problem under P2R-03. Examples that stop
   in version 1:
@@ -311,7 +312,7 @@ requirement IDs.
   stderr MUST be empty. A case without `fn main()` gets the checks of P2R-70
   and P2R-71 only. Review concern, not checked mechanically: each case's
   stdout depends on every construct the case covers, and every construct of
-  sections 3 to 5 and 11 to 14 appears in at least one case with
+  sections 3 to 5 and 11 to 15 appears in at least one case with
   `fn main()`.
 - **P2R-73** Each stop folder `tests/stops/<id>-<slug>/` holds `input.php`
   and `expected.txt`. Run from inside the folder, once as
@@ -361,7 +362,8 @@ Each milestone gets its own requirements in this file when its work starts.
   comments into the output. It is built one slice at a time, each slice in
   its own section from section 11 on, in this order: nullable types
   (section 11), enums (section 12), `match` (section 13), readonly classes
-  (section 14), classes that change their own properties, interfaces, maps,
+  (section 14), classes that change their own properties (section 15),
+  interfaces, maps,
   closures, exceptions, then built-in functions, constants, heredoc and
   comments. Decided on 11 Oct 2026:
   objects become plain structs, and code that changes one object through two
@@ -627,8 +629,8 @@ Sections 3 to 9 apply to nullable values unless this section says otherwise.
     or variadic, which PHP rejects or makes fail and Mago does not report;
   - a method whose PHP name starts with `__`, other than the constructor,
     and an attribute on the class or a member (P2R-07);
-  - a class that is not `readonly` (a later slice), and a class declared
-    inside a function or another statement;
+  - a class that is not `readonly` (section 15 converts it), and a class
+    declared inside a function or another statement;
   - a property whose type does not convert (P2R-20, P2R-22), a nullable
     class type (`?C`, a later slice), a property that holds its own class
     directly or through other classes other than through a list, because
@@ -725,6 +727,89 @@ Sections 3 to 9 apply to nullable values unless this section says otherwise.
   copy of P2R-133 (`name: name.to_string()`). A class without properties
   gives `pub struct C {}` and `C {}`. The methods follow `new`, each after
   one blank line.
+
+## 15. Classes that change their objects (milestone 2, slice 5)
+
+PHP passes an object as a handle, so two variables can name one object and
+a change through one shows through the other. A Rust struct is a value. The
+rules below keep exactly one Rust value per PHP object, so the difference
+never shows; code that needs two names for one changing object stops, as
+decided on 11 Oct 2026.
+
+- **P2R-140** A class declared at the top level without `readonly`, with or
+  without `final`, MUST convert as section 14 converts a readonly class,
+  with these differences. Its properties are its promoted constructor
+  parameters, then the properties its body declares, in source order. A
+  declared property needs a type and a default value that is a literal of
+  that type: an int, float, bool or string literal, `null` for a nullable
+  type, `[]` for a list type, or a case of an enum. `new` stores the default
+  (`count: 0`, `items: Vec::new()`, `note: None`, `side: Side::Left`). A
+  property declared `readonly`, and a promoted parameter with `readonly`, is
+  set only by `new` (Mago reports a write anywhere else, P2R-11). These stop
+  the conversion: a declared property without a type or a default, with a
+  default of any other form, with a hook, or `static`; `var`; and the stops
+  of P2R-130 other than "a class that is not readonly".
+- **P2R-141** A changing type is a class that is not readonly, a class with
+  a property of a changing type, and a list of a changing type. A struct of
+  a changing type MUST derive only `Debug`, because its value is never copied
+  (P2R-144); every other struct derives `Clone` and `Debug` as before.
+- **P2R-142** These changes MUST convert, where `$x` is `$this`, a variable or
+  a parameter, or a property read on one of them (`$this->cart->count`):
+  `$x->p = v` to `x.p = v;`; `$x->p += v`, `-=`, `*=` and `.=` to the Rust
+  operator as for a variable (P2R-43, P2R-45); `$x->p++` and `$x->p--` to
+  `x.p += 1;` and `x.p -= 1;`; and `$x->p[] = v` to `x.p.push(v);`. The value
+  converts as for an assignment to a variable of the property's type
+  (P2R-25, P2R-26, P2R-102). These stop the conversion: a change through any
+  other object (a list element, a call result), `??=`, a write to a list
+  element of a property (`$x->p[0] = v`, P2R-47), and a change used as a
+  value (P2R-44).
+- **P2R-143** A method MUST take `&mut self` when its body changes its
+  object: a P2R-142 change through `$this`; a call of a `&mut self` method
+  on `$this` or on a property chain of `$this`; `$this` or such a chain as
+  the argument for a `&mut` parameter (P2R-144); or a foreach that changes
+  the elements of a list property (P2R-146). Any other method takes `&self`.
+  The tool decides this for the methods and functions of the file together,
+  repeating until nothing changes, because one body's form depends on the
+  bodies it calls.
+- **P2R-144** A parameter of a changing type MUST take one of three forms,
+  decided from its body the same way: `c: C`, owned, when the body moves it
+  (P2R-145), and `mut c: C` when the body also changes it; `c: &mut C` when
+  the body changes it (P2R-142, P2R-143) without moving it; and `c: &C`
+  otherwise. `new` takes a property of a changing type by value
+  (`item: Item`, `items: Vec<Item>`) and stores it as it is. An argument for
+  an owned parameter MUST move (P2R-145). An argument for a `&mut C`
+  parameter is `&mut v` for a variable `v`, `self` for `$this` in a
+  `&mut self` method, the parameter itself for a `&mut C` parameter, and
+  `&mut x.p` for a property chain on one of these; any other argument
+  stops the conversion.
+- **P2R-145** A value of a changing type MUST NOT be copied. Where P2R-26
+  and P2R-132 copy a value with `.clone()`, a value of a changing type moves
+  instead, and the conversion stops where it cannot move: a local variable
+  moves when no path reads it again (P2R-26); `$this`, a `&C` or `&mut C`
+  parameter, a property read, a list element and a foreach value never move.
+  So `$b = $a;` converts only when `$a` is not read again, and
+  `return $this;`, `return $this->item;`, `$x = $list[0];` and
+  `$cart->put($a);` followed by a read of `$a` stop.
+- **P2R-146** A foreach over a list of a changing type MUST iterate by
+  reference: `for item in &mut xs {` when its body changes the value
+  (P2R-142, P2R-143, P2R-144), otherwise `for item in &xs {`; the value is a
+  reference and never moves (P2R-145). The body MUST NOT read or change the
+  list it iterates. For a list property, the object that holds it may appear
+  in the body only as a read or a change of another of its properties; a
+  method call on that object, that object or the iterated property in an
+  argument, and a read of the iterated property stop the conversion,
+  because rustc lets one field be borrowed while another changes but not the
+  whole object.
+- **P2R-147** In one call, an object that the call changes (the receiver of
+  a `&mut self` method, an argument for a `&mut` parameter) MUST NOT also be
+  passed by reference in another argument, also not through a property
+  (`$a->absorb($a->name)` stops): rustc rejects the two borrows. A value of
+  a Copy type read from it converts (`$a->add($a->total())`).
+- **P2R-148** A variable that a P2R-142 change, a `&mut self` call, a
+  `&mut v` argument or a `for ... in &mut v` changes MUST be declared
+  `let mut` (P2R-34). A property write MUST be one statement on one line
+  (P2R-51), and a declared property's default MUST follow the store layout
+  of P2R-137 as `name: default`.
 
 ## Spec checklist
 

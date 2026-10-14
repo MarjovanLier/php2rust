@@ -152,7 +152,9 @@ requirement IDs.
   declaration stops the conversion.
 - **P2R-24** A `string` parameter MUST become `&str` and a `list<T>`
   parameter MUST become `&[T]`. A function that assigns to or changes its own
-  string or list parameter works on a copy, as PHP passes one (P2R-181).
+  string or list parameter works on a copy, as PHP passes one (P2R-181). A
+  foreach key or value that takes the name of a string or list parameter
+  that no assignment, `.=` or append changes stops the conversion.
 - **P2R-25** An `int` value passed to a `float` parameter (declared or
   built-in) or returned from a function declared `float` MUST convert to
   `f64`: a literal as a float literal (`4` to `4.0`), any other value with
@@ -1428,9 +1430,11 @@ converts those forms.
   whole `?:` is never used, because Mago types it as one arm where it
   decides the condition. When only int literals type the `if`, its first
   arm gets `_i64`, and a first write names the type (`let x: i64 = ..`,
-  P2R-49). String arms are lent as `&str` (a literal, a parameter or another
-  lent string as it is, a `String` variable, property read or list element
-  as `v.as_str()`), so the `if` lends a `&str` as `??` does
+  P2R-49). String arms are lent as `&str` (a literal, a constant, a
+  parameter, an enum's `name` or `value`, or `??` on a variable or parameter
+  as it is; a `String` variable, or a property read or list element on a
+  variable, parameter or `$this`, as `v.as_str()`), so the `if` lends a
+  `&str` as `??` does
   (P2R-105); where a `String` is needed (P2R-26) it is copied once:
   `(if c { "a" } else { "b" }).to_string()`. Each arm is its own path for
   the reads and writes of variables (P2R-34), as an arm of a `match` is
@@ -1443,8 +1447,9 @@ converts those forms.
   arm or a condition that is itself a `?:`, with or without parentheses,
   because Mago reads an unparenthesized nested `?:` from the left where PHP
   rejects it; an arm that assigns, `++` or `--`; a string arm of any other
-  form, such as a call or a joined string, because Rust drops that string
-  at the end of the arm; an `if` of lists or objects, or of strings, lists
+  form, such as a call, a joined string, `??` on a call, or a property read
+  or list element on a call or `new`, because Rust drops that string at the
+  end of the arm; an `if` of lists or objects, or of strings, lists
   or objects that may be null; and a value that may be null where the type
   is not nullable (P2R-106). A check against null does
   not narrow inside an arm (P2R-104), so `$x !== null ? $x + 1 : 0` stops.
@@ -1475,8 +1480,10 @@ converts those forms.
   `php_lcfirst(s)`, which change the first byte when it is an ASCII letter.
 - **P2R-184** `str_repeat($s, $n)` with a `string` and an int argument MUST
   convert to `s.repeat(n)` for a literal count from 0 up, which stays a
-  plain literal (an exception to P2R-49), and to `s.repeat(n as usize)` for
-  any other count. Mago reports a count that may be negative (P2R-11), so a
+  plain literal (an exception to P2R-49), to `s.repeat(xs.len())` for a
+  count that is a call of `count()` or `strlen()`, whose length is a `usize`
+  already, and to `s.repeat(n as usize)` for any other count. Mago reports a
+  count that may be negative (P2R-11), so a
   plain `int` count stops and a count from `count()` or `strlen()`
   converts; a negative literal count stops too. A count that is negative
   at run time anyway is a P2R-60 difference: PHP throws a `ValueError`, Rust
@@ -1488,11 +1495,11 @@ converts those forms.
   between every character. An array argument and a fourth argument stop
   the conversion.
 - **P2R-186** `implode($glue, $list)` with a `string` and a `list<string>`
-  argument MUST convert to `list.join(glue)`, of type `String`, where the
-  list is a variable, parameter, property read, call or list literal of
-  string literals. A glue that is not a literal, variable, parameter,
-  property read or constant stops the conversion, because Rust evaluates
-  the list first. `explode($separator, $s)` with two `string` arguments
+  argument MUST convert to `list.join(glue)`, of type `String`. Rust
+  evaluates the list first, so the glue must be a value whose reading has no
+  effect: a literal, a constant, a variable, a parameter, or a chain of
+  property reads on a variable, a parameter or `$this`; any other glue
+  stops the conversion. `explode($separator, $s)` with two `string` arguments
   MUST convert to `php_explode(separator, s)`, a helper that gives a
   `Vec<String>` as PHP gives the list, and panics on an empty separator
   where PHP throws a `ValueError` (a P2R-60 difference). These stop the

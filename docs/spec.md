@@ -61,7 +61,9 @@ P2R-204, the struct literal `use` rule of P2R-174 and the literal read
 stop of P2R-203; the build added `??` on a shape element (P2R-203). The
 final review of the build added the `?:` arm stop of P2R-202, the list
 read stop of P2R-203, the narrowed shape rule of P2R-200 and the lent
-string arm of P2R-205.
+string arm of P2R-205. Section 22 (exceptions as `Result`) was written on
+14 Oct 2026; it changes P2R-07, P2R-33, P2R-60, P2R-72, P2R-104,
+P2R-105, P2R-120, P2R-160, P2R-171, P2R-172, P2R-174 and P2R-175.
 
 php2rust converts typed PHP source into normal, readable Rust (`Vec`,
 `String`, `i64`), without AI. It reads PHP with the Mago crates, uses Mago's
@@ -104,7 +106,7 @@ requirement IDs.
 - **P2R-06** With the same rustfmt (P2R-190), the same input MUST always give
   the same stdout bytes, the same output file bytes and the same stderr
   bytes.
-- **P2R-07** Only the constructs that sections 3 to 5, 11 to 19 and 21
+- **P2R-07** Only the constructs that sections 3 to 5, 11 to 19, 21 and 22
   list as converting may convert. Any other construct MUST stop the conversion,
   which means it is reported as a problem under P2R-03. Examples that stop
   in version 1 (section 16 converts `namespace`, `use` and class
@@ -212,7 +214,8 @@ requirement IDs.
   than the P2R-12 `declare`, enum declarations and class declarations MUST
   convert to a library file with no `main`. After the P2R-52 line the output
   holds the structs of array shapes (P2R-200), then the enums, classes and
-  functions in source order, then the helpers of P2R-160, then `fn main()`.
+  functions in source order, then the exception struct of P2R-210, then the
+  helpers of P2R-160, then `fn main()`.
   A function declared inside another statement stops the conversion.
 - **P2R-34** Variables MUST keep PHP's function-wide scope. A variable's Rust
   type is the widened type of every assignment to it and every read of it; a
@@ -366,6 +369,8 @@ requirement IDs.
     empty string when the string is empty.
   - `explode()` with an empty separator that is not a literal: PHP throws a
     `ValueError`, Rust panics (exit code 101).
+  - The errors above that Rust turns into panics are not exceptions of
+    P2R-210, so a `catch (Throwable $e)` (P2R-214) does not catch them.
   - Comments and docblocks are not copied (version 1).
 
 ## 8. Tests and CI
@@ -383,10 +388,11 @@ requirement IDs.
   shared extension, which `-n` skips) and
   the Rust program built with `rustc --edition 2024` (debug) MUST print the
   same stdout. Both MUST exit 0, the stdout MUST NOT be empty, and PHP's
-  stderr MUST be empty. A case without `fn main()` gets the checks of P2R-70
+  stderr MUST be empty, except for an uncaught exception (P2R-216). A case
+  without `fn main()` gets the checks of P2R-70
   and P2R-71 only. Review concern, not checked mechanically: each case's
   stdout depends on every construct the case covers, and every construct of
-  sections 3 to 5, 11 to 17, 19 and 21 appears in at least one case with
+  sections 3 to 5, 11 to 17, 19, 21 and 22 appears in at least one case with
   `fn main()`.
 - **P2R-73** Each stop folder `tests/stops/<id>-<slug>/` holds `input.php`
   and `expected.txt`. Run from inside the folder, once as
@@ -458,7 +464,8 @@ Each milestone gets its own requirements in this file when its work starts.
 - **Order after section 19**, set on 14 Oct 2026 under Marjo's direction of
   that day to take the recommended option without asking: layout by
   rustfmt (section 20); array shapes as structs and nullable object types
-  (section 21); exceptions as `Result`; interfaces and inheritance, with `ArrayAccess` as
+  (section 21); exceptions as `Result` (section 22); interfaces and
+  inheritance, with `ArrayAccess` as
   Rust's `Index`; maps and `preg_*`; closures; then the
   `StringManipulation` library, which `SouthAfricanIDValidator` calls.
   Three points are open:
@@ -535,7 +542,7 @@ Sections 3 to 9 apply to nullable values unless this section says otherwise.
     operands). The operands after it and the body read the binding.
   - `if ($v === null)` (or `null === $v`), where `$v` is a variable or
     parameter, with no `elseif` or `else` and a body that always leaves by
-    `return`, `break` or `continue`, becomes
+    `return`, `break`, `continue` or `throw` (P2R-212), becomes
     `let Some(v) = ... else { ... };`. The statements after it in the same
     block read the binding.
 
@@ -556,7 +563,8 @@ Sections 3 to 9 apply to nullable values unless this section says otherwise.
   be evaluated only when `$a` is null, as in PHP, and P2R-26 applies to
   `$a`. These stop the conversion: `??` whose left side has a Rust type that
   is not `Option` or is a list element (PHP checks it with `isset`), any
-  other type of `$b` (`$r ?? []` included), and `??=`.
+  other type of `$b` (`$r ?? []` included) other than a `throw`
+  (P2R-215), and `??=`.
 - **P2R-106** A value of Rust type `Option<T>` MUST stop the conversion in
   these places, where PHP gives `null` a meaning Rust does not copy or Rust
   needs a `T`: an operand of `.`, `.=`, interpolation or `echo` (PHP prints
@@ -655,8 +663,8 @@ Sections 3 to 9 apply to nullable values unless this section says otherwise.
   `String` or `&str`, or an enum of the file with at least one case, and
   every arm condition is a literal of the subject's type (an int literal
   with or without unary minus, `true`, `false`, or a string literal,
-  converted by P2R-49) or a case of the subject's enum. These stop the
-  conversion:
+  converted by P2R-49) or a case of the subject's enum. An arm result that
+  is a `throw` converts by P2R-215. These stop the conversion:
   - a `match` anywhere else: an argument, an operand, `echo`, an append, a
     compound assignment, a `for` init or step, an arm result, a statement on
     its own;
@@ -1178,7 +1186,8 @@ small helper function that copies PHP's rules.
   helper the output calls, and no other (a call left out with a `default`
   arm, P2R-121, does not count): `ctype_digit`, `php_int`, `php_offset`
   and `php_substr`, in that order, after the enums, classes and functions
-  and before `fn main()`, one blank line before each.
+  and the exception struct of P2R-210 and before `fn main()`, one blank
+  line before each.
   Each helper takes its string as `&str`, and its string argument is lent
   as a string argument is (P2R-24, P2R-134): `php_substr(&s, ..)` for a
   `String` variable, `php_int(&self.text)` for a field, `ctype_digit(s)`
@@ -1318,7 +1327,7 @@ Rust module. One input file still converts as sections 1 to 17 say.
   span rule of P2R-03 compares problems of one file only. Mago analyses
   every input file together, so a class, enum or function of one file is
   known in every other file. For a directory input, "the file" in sections
-  1 to 17, 19 and 21 means every input file together (P2R-31, P2R-43, P2R-48,
+  1 to 17, 19, 21 and 22 means every input file together (P2R-31, P2R-43, P2R-48,
   P2R-111, P2R-115, P2R-120, P2R-131, P2R-151, P2R-153, P2R-156, P2R-160,
   P2R-163, P2R-168, P2R-169 and others), except in P2R-12, P2R-13, P2R-110
   and P2R-150, which apply to each file alone (a `use` in one file may name
@@ -1343,7 +1352,8 @@ Rust module. One input file still converts as sections 1 to 17 say.
   leaves out `r#` (`enum.rs`). Each module file holds the P2R-52 line,
   then the `pub mod` lines of its child modules, then its `use` lines
   (P2R-174), then its items: in `lib.rs` first the structs of the array
-  shapes the crate uses (P2R-200), then the enums, classes and functions of
+  shapes the crate uses (P2R-200) and then the exception struct
+  (P2R-210), then the enums, classes and functions of
   every
   input file of that namespace, files in path order and items in source
   order, then the helpers (P2R-160) that its items call. One blank line
@@ -1390,16 +1400,17 @@ Rust module. One input file still converts as sections 1 to 17 say.
   case, method, field or constant whose Rust name equals an item's is not
   a use of it, and a name of the module's own items needs no line. A module
   other than the crate root whose Rust lines name the struct of an array
-  shape (P2R-200), as a type or as a struct literal (`S { .. }`), MUST hold
-  `use crate::<Name>;` for it. rustfmt sorts the `use` lines (P2R-190).
+  shape (P2R-200), as a type or as a struct literal (`S { .. }`), or the
+  exception struct of P2R-210, MUST hold `use crate::<Name>;` for it. rustfmt sorts the `use` lines (P2R-190).
 - **P2R-175** A directory input converts to a library: a statement outside
   functions other than the P2R-12 `declare`, the P2R-150 `namespace` and
   `use` statements, and enum and class declarations stops the conversion,
   because a library has no `fn main()` (this replaces the `fn main()` rule
   and the output order of P2R-33 for a directory input). The decisions that
-  P2R-115, P2R-141, P2R-143 and P2R-146 make for the whole file, which
-  helpers an enum holds, which classes change their objects and the form
-  of each object parameter, MUST be made for the whole crate.
+  P2R-115, P2R-141, P2R-143, P2R-146 and P2R-211 make for the whole file,
+  which helpers an enum holds, which classes change their objects, the
+  form of each object parameter and which functions throw, MUST be made
+  for the whole crate.
 - **P2R-176** A case folder MAY hold a directory `input/` in place of
   `input.php` and a directory `expected/` in place of `expected.rs`; the
   crate written from `input/` MUST hold the same set of files as
@@ -1735,6 +1746,109 @@ string}`), and keeps an object that may be missing in a nullable property
   `(if let Some(d) = d.as_ref() { Some(C::from_array(d)) } else { None })`
   followed by `.as_ref()`. A string arm that reads the binding is lent as
   the binding's `&str` (P2R-180).
+
+## 22. Exceptions as Result (milestone 2, slice 12)
+
+Application code throws PHP's built-in exceptions and catches them around
+calls; the 11 Oct decision makes a `throw` an `Err` of a Rust `Result`.
+Exception classes that the input declares need inheritance and are a later
+slice.
+
+- **P2R-210** The output MUST hold one struct for the exceptions when a
+  `throw` or `catch` converts, and no struct otherwise:
+  `#[derive(Clone, Debug)] pub struct PhpException { pub class: &'static
+  str, pub message: String, pub code: i64 }`, with `pub fn new(class:
+  &'static str, message: &str, code: i64) -> PhpException`, which stores a
+  copy of the message (P2R-133); `pub fn is_a(&self, class: &str) -> bool`,
+  true when the exception's class is that class or extends it in PHP's
+  class tree; and `pub fn uncaught(self) -> !`, which writes
+  `PHP Fatal error:  Uncaught <class>: <message>` to stderr and exits with
+  code 255, as PHP does. The classes are PHP's `Exception`,
+  `ErrorException`, `JsonException`, `LogicException` with
+  `BadFunctionCallException`, `BadMethodCallException`, `DomainException`,
+  `InvalidArgumentException`, `LengthException` and `OutOfRangeException`,
+  and `RuntimeException` with `OutOfBoundsException`, `OverflowException`,
+  `RangeException`, `UnderflowException` and `UnexpectedValueException`,
+  each under its PHP parent. A class name is resolved as PHP resolves it
+  (P2R-151), so an unimported `RuntimeException` inside a namespace, which
+  names a class of that namespace, stops. The struct comes after the
+  enums, classes and functions and before the helpers (P2R-33, P2R-160),
+  or for a directory input in `lib.rs` (P2R-172). An enum, class or
+  function whose Rust name is `PhpException` stops the conversion
+  (P2R-173).
+- **P2R-211** A function, method, static method or enum method MUST throw
+  when its body holds a `throw`, or a call of a function or method that
+  throws, outside the body of a `try` with a catch-all clause (P2R-214); a
+  `throw` or call in a `catch` body is outside its `try`. The tool decides
+  this for the whole input as a least fixed point, as it decides the forms
+  of P2R-143. A function that throws returns `Result<T, PhpException>`, or
+  `Result<(), PhpException>` for `void`: `return $v;` gives `return
+  Ok(v);`, `return;` gives `return Ok(());`, and a `void` body whose end a
+  path reaches ends with `Ok(())`. P2R-25, P2R-26 and P2R-102 apply inside
+  `Ok(..)`.
+- **P2R-212** `throw new C(...)`, where `C` is a class of P2R-210, MUST
+  convert to `return Err(PhpException::new("C", message, code));` in a
+  function that throws, where `message` is the first argument, a `string`
+  lent as for a `&str` parameter (`""` when left out), and `code` the
+  second, an `int` (`0` when left out); named arguments `message:` and
+  `code:` convert by P2R-169. In `fn main()` it converts to
+  `PhpException::new(..).uncaught();`, and inside a `try` body to
+  `break 'attempt Some(PhpException::new(..));` (P2R-214). `throw $e;`,
+  where `$e` is the variable of the `catch` it stands in, converts the same
+  way with `e`. For P2R-34, P2R-50 and P2R-104 a `throw` leaves its block as
+  `return` does. These stop the conversion: a third argument (`previous`),
+  `new` of any other class, a `throw` of any other expression, and an
+  exception object used in any other way.
+- **P2R-213** A call of a function or method that throws MUST convert with
+  `?` after it (`f(x)?`) in a function that throws, to
+  `f(x).unwrap_or_else(|e| e.uncaught())` in `fn main()` outside a `try`
+  body, and inside a `try` body to `match f(x) { Ok(v) => v, Err(e) =>
+  break 'attempt Some(e) }`, or `if let Err(e) = f(x) { break 'attempt
+  Some(e); }` for a call statement of a `void` function. A call that throws
+  inside a closure that the output writes stops the conversion: the lazy
+  default of `??` (P2R-105) and the message of `?? throw` (P2R-215).
+- **P2R-214** `try { body } catch (C $e) { handler } ...` MUST convert to
+  `if let Some(e) = 'attempt: { body; None } { handlers }`: each `throw` and
+  each call that throws in the body leaves the block with
+  `break 'attempt Some(..)`, and `None` ends the body only when a path
+  reaches its end. The handlers are one `if e.is_a("C") { .. } else if ..`
+  chain in source order, a union `catch (A | B $e)` testing
+  `e.is_a("A") || e.is_a("B")`; a clause for `Exception` or `Throwable` is a
+  catch-all and ends the chain as `else { .. }` (or is the whole body of
+  the `if let` when it comes first). Without a catch-all the chain ends
+  with `else { return Err(e); }` in a function that throws, so it throws
+  (P2R-211), or `else { e.uncaught(); }` in `fn main()`. A catch-all that
+  never reads `$e`, and `catch (C)` without a variable, bind `_` where
+  nothing else reads `e`. The variable of a `catch` is a new variable that
+  holds only inside its handler, as a `foreach` value does (P2R-41):
+  `$e->getMessage()` gives `e.message`, lent as a `String` field
+  (P2R-134), and `$e->getCode()` gives `e.code`. For P2R-34 and P2R-35 each
+  `throw` and each call that throws in the body is a path to the handlers,
+  and the handlers join the path after the body. These stop the
+  conversion: `finally`; a `try` inside a `try`; a `try` whose body holds
+  no `throw` and no call that throws; a `break` or `continue` in the body
+  that leaves it, which Rust rejects inside a labelled block; a class in a
+  `catch` that is not in P2R-210 (`Error`, `TypeError` and the input's own
+  classes included); and a read of `$e` after its handler, or any other use
+  of `$e` than `getMessage()`, `getCode()` and `throw $e`.
+- **P2R-215** A `throw` expression MUST convert in two more places: as the
+  arm result of a `match` (P2R-120), where it gives the arm
+  `_ => return Err(PhpException::new(..)),` (or the forms of P2R-212 in
+  `fn main()` and a `try` body), and as the right side of `$a ?? throw new
+  C(..)` on an `$a` that P2R-105 accepts, where it gives
+  `a.ok_or_else(|| PhpException::new(..))?` in a function that throws. Mago
+  types a `throw` as `never`, so neither the arm type rules of P2R-122 nor
+  the type rule of P2R-105 applies to it. `?? throw` in `fn main()` or a
+  `try` body, and a `throw` expression anywhere else (an operand, an
+  argument, a `?:` arm), stop the conversion.
+- **P2R-216** A case folder whose PHP run exits with code 255 and writes
+  `Uncaught ` to stderr, as PHP does for an uncaught exception, MUST give a
+  Rust run that exits with code 255 and the same stdout, and stdout written
+  before the exception MUST reach the output (P2R-72 is amended for such a
+  case; PHP may write its fatal message twice under `-n`, so stderr is not
+  compared). The README lists, under P2R-60, that a `catch (Throwable $e)`
+  does not catch the errors that P2R-60 lists as panics (division by zero,
+  `ValueError` of `explode()` and `str_repeat()`, `E::from()`).
 
 ## Spec checklist
 

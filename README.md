@@ -21,7 +21,7 @@ cargo install --locked --path .
 
 php2rust needs `rustfmt` on `PATH`: it lays out its output with
 `rustfmt --edition 2024` and an empty configuration, so a `rustfmt.toml` near the output
-does not change it. rustup's default profile installs rustfmt; with the minimal profile,
+or in your own rustfmt configuration does not change it. rustup's default profile installs rustfmt; with the minimal profile,
 run `rustup component add rustfmt`.
 
 ## Use
@@ -43,7 +43,7 @@ exist yet; `rustc --edition 2024 --crate-type lib crate/lib.rs` builds the crate
 |---|---|
 | 0 | Converted. |
 | 1 | The file holds PHP that php2rust does not convert yet. Each problem is printed as `path:line:column: message`. Nothing is written. |
-| 2 | The arguments are wrong, the file cannot be read, is not UTF-8 or is not valid PHP, rustfmt cannot be run or fails on the output, or the output cannot be written. For a directory: no `-o`, an `-o` directory that exists or sits inside the input, or no `.php` file. Nothing is written. |
+| 2 | The arguments are wrong, the file cannot be read, is not UTF-8 or is not valid PHP, rustfmt cannot be run, fails on the output or changes its own layout when run again, or the output cannot be written. For a directory: no `-o`, an `-o` directory that exists or sits inside the input, or no `.php` file. Nothing is written. |
 
 The output compiles with no warnings under `rustc --edition 2024 -D warnings`, and
 `rustfmt --edition 2024 --check` with the default configuration leaves it unchanged. Its

@@ -11,6 +11,13 @@ use mago_syntax::cst::*;
 use super::Converter;
 use crate::names;
 
+/// Rust's primitive types. A module of one of these names would take over paths the output
+/// writes, such as `usize::from` and `f64::INFINITY` (P2R-172).
+const PRIMITIVES: &[&str] = &[
+    "bool", "char", "str", "f32", "f64", "i8", "i16", "i32", "i64", "i128", "isize", "u8", "u16",
+    "u32", "u64", "u128", "usize",
+];
+
 impl Converter<'_> {
     /// The module of each input file, with `module_paths` filled: one module for each
     /// namespace that declares an enum, class or function, and for each namespace between
@@ -99,6 +106,13 @@ impl Converter<'_> {
                                 ),
                             )
                         }
+                        Some(module) if PRIMITIVES.contains(&module.as_str()) => {
+                            named = false;
+                            self.refuse_namespace(
+                                *name,
+                                format!("a module named {module} is not supported, because it would take over the paths of Rust's type {module} (P2R-172)"),
+                            )
+                        }
                         Some(module)
                             if module == "r#mod"
                                 || (depth == 0 && matches!(module.as_str(), "lib" | "main")) =>
@@ -118,14 +132,23 @@ impl Converter<'_> {
                     unit_paths.push(Vec::new());
                     continue;
                 }
-                let source = segments[below..].join(&b'\\').to_ascii_lowercase();
-                match sources.get(&path) {
-                    Some(earlier) if *earlier != source => self.refuse_namespace(
-                        *name,
-                        "another namespace gives the same module path (P2R-172)".to_owned(),
-                    ),
-                    _ => {
-                        sources.insert(path.clone(), source);
+                // Each module between the root and this one counts too: `App\FooBar\Deep`
+                // and `App\Foo_Bar` would share the module `foo_bar`.
+                for depth in 1..=path.len() {
+                    let source = segments[below..below + depth]
+                        .join(&b'\\')
+                        .to_ascii_lowercase();
+                    match sources.get(&path[..depth]) {
+                        Some(earlier) if *earlier != source => {
+                            self.refuse_namespace(
+                                *name,
+                                "another namespace gives the same module path (P2R-172)".to_owned(),
+                            );
+                            break;
+                        }
+                        _ => {
+                            sources.insert(path[..depth].to_vec(), source);
+                        }
                     }
                 }
             }
@@ -312,8 +335,26 @@ pub(super) fn used_items<'a>(
     // The brace depth of an enum body; its identifiers are the cases.
     let mut enum_body: Option<usize> = None;
     let mut depth = 0;
+    // The bracket depth inside an attribute (`#[derive(Debug)]`), whose names are macros.
+    let mut attribute: Option<usize> = None;
+    let mut brackets = 0;
     for (at, token) in tokens.iter().enumerate() {
         match *token {
+            "[" => {
+                brackets += 1;
+                if attribute.is_none() && at >= 1 && tokens[at - 1] == "#" {
+                    attribute = Some(brackets);
+                }
+                continue;
+            }
+            "]" => {
+                if attribute == Some(brackets) {
+                    attribute = None;
+                }
+                brackets -= 1;
+                continue;
+            }
+            _ if attribute.is_some() => continue,
             "{" => {
                 depth += 1;
                 if enum_body.is_none() && at >= 2 && tokens[at - 2] == "enum" {
@@ -338,7 +379,8 @@ pub(super) fn used_items<'a>(
         };
         let before = at.checked_sub(1).map(|i| tokens[i]);
         let after = tokens.get(at + 1).copied();
-        let bound = matches!(before, Some("." | "::" | "fn" | "let" | "mut" | "const"))
+        // `mut` is not here: in `&mut Counter` the name is a type.
+        let bound = matches!(before, Some("." | "::" | "fn" | "let" | "const"))
             || matches!(after, Some("!" | ":"));
         let shape = match kind {
             ItemKind::Type => true,
@@ -369,14 +411,25 @@ fn tokens(text: &str) -> Vec<&str> {
                 }
                 at += 1;
             }
-            // A char or byte literal: `'x'`, `'\t'`, `'\x0B'`. Rust output has no
-            // lifetimes.
+            // A char or byte literal (`'x'`, `'\t'`, `'\x0B'`), or a lifetime
+            // (`&'static str`), which is a quote and a name without a closing quote.
             b'\'' => {
+                let width = text[at + 1..].chars().next().map_or(1, char::len_utf8);
+                let literal =
+                    bytes.get(at + 1) == Some(&b'\\') || bytes.get(at + 1 + width) == Some(&b'\'');
                 at += 1;
-                while at < bytes.len() && bytes[at] != b'\'' {
-                    at += if bytes[at] == b'\\' { 2 } else { 1 };
+                if literal {
+                    while at < bytes.len() && bytes[at] != b'\'' {
+                        at += if bytes[at] == b'\\' { 2 } else { 1 };
+                    }
+                    at += 1;
+                } else {
+                    while at < bytes.len()
+                        && (bytes[at].is_ascii_alphanumeric() || bytes[at] == b'_')
+                    {
+                        at += 1;
+                    }
                 }
-                at += 1;
             }
             b'r' if bytes.get(at + 1) == Some(&b'#') => {
                 at += 2;

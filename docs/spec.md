@@ -568,7 +568,8 @@ Sections 3 to 9 apply to nullable values unless this section says otherwise.
   letter case of the use (`suit::Hearts` gives `Suit::Hearts`), as P2R-32
   does for functions. These stop the conversion: a name that breaks those
   rules; two enums, or two cases of one enum, with the same Rust name; an
-  enum named `Option`, `String`, `Vec` or `ToOwned`, which the output uses;
+  enum named `Option`, `String`, `Vec`, `ToOwned`, `None` or `Some`, which
+  the output uses;
   and an enum with a name PHP reserves, a keyword or a type name (`list`,
   `readonly`, `match`, `bool`, `self` and the others; `enum` is allowed), or
   the name of a class, interface, enum or trait PHP has built in
@@ -1336,8 +1337,12 @@ Rust module. One input file still converts as sections 1 to 17 say.
   (P2R-30), or is `self`, `super`, `crate` or `Self`, which a raw
   identifier cannot carry; a module named `mod`, and a module directly
   below the crate root named `lib` or `main`, which rustc rejects or warns
-  about beside `lib.rs`; two namespaces of different names whose module
-  paths are equal (`Acme\FooBar` and `Acme\Foo_Bar`); and two input files
+  about beside `lib.rs`; a module named like a Rust primitive type (`bool`,
+  `char`, `str`, `f32`, `f64`, the `i` and `u` integer types, `isize` and
+  `usize`), which would take over paths the output writes, such as
+  `usize::from`; two namespaces of different names whose module
+  paths are equal (`Acme\FooBar` and `Acme\Foo_Bar`, also as a module
+  between the root and another: `Acme\FooBar\Deep`); and two input files
   whose namespaces hold, under equal leading segments, a segment that is
   equal ignoring letter case but not byte for byte (`Acme\Shop` and
   `ACME\Shop\Sub`, or `App\FooBar` and `App\Foobar`, which PHP reads as one

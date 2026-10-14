@@ -10,8 +10,10 @@ use crate::names;
 use crate::printer::{self, RExpr};
 use crate::types::RustType;
 
-/// Type names the output itself uses, which an enum must not take (P2R-111).
-const TAKEN: &[&str] = &["Option", "String", "Vec", "ToOwned"];
+/// Type names the output itself uses, which an enum must not take (P2R-111). `None` and
+/// `Some` too: a `use` line of a type of that name would sit unused beside the `Option`
+/// values the output writes (P2R-174).
+const TAKEN: &[&str] = &["Option", "String", "Vec", "ToOwned", "None", "Some"];
 
 /// Names PHP reserves, its keywords and type names, which no enum may take; each one fails
 /// `php -l` as an enum name on PHP 8.5, while Mago's parser accepts them (P2R-111). `enum`

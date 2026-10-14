@@ -73,6 +73,9 @@ fn convert_directory(input: &Path, output: Option<&Path>) -> ExitCode {
             input.display()
         ));
     };
+    // `out/` and `out/.` name the directory `out`, so its temporary sits beside it.
+    let output: PathBuf = output.components().collect();
+    let output = output.as_path();
     if let Err(reason) = check_crate_output(input, output) {
         return invalid(reason);
     }
@@ -136,7 +139,7 @@ fn php_files(root: &Path, dir: &Path, found: &mut Vec<PathBuf>) -> std::io::Resu
         let path = dir.join(entry.file_name());
         if kind.is_dir() {
             php_files(root, &path, found)?;
-        } else if kind.is_file() && path.extension().is_some_and(|e| e == "php") {
+        } else if kind.is_file() && entry.file_name().as_encoded_bytes().ends_with(b".php") {
             found.push(path);
         }
     }
@@ -154,11 +157,17 @@ fn check_crate_output(input: &Path, output: &Path) -> Result<(), String> {
         Some(parent) if !parent.as_os_str().is_empty() => parent,
         _ => Path::new("."),
     };
+    // A regular file as the parent fails here too, before any conversion.
     let (Ok(parent), Ok(input)) = (fs::canonicalize(parent), fs::canonicalize(input)) else {
         return Err(format!(
             "{shown}: the output's parent directory does not exist"
         ));
     };
+    if !parent.is_dir() {
+        return Err(format!(
+            "{shown}: the output's parent directory does not exist"
+        ));
+    }
     if parent.starts_with(&input) {
         return Err(format!(
             "{shown}: the output directory is inside the input directory"

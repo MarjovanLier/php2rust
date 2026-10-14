@@ -48,6 +48,18 @@ function shout(string $s, bool $loud): string
     return $s;
 }
 
+/** @param ?list<int> $xs */
+function filled(?array $xs, bool $c): int
+{
+    if ($c) {
+        $xs = [7, 8];
+    }
+    if ($xs === null) {
+        return 0;
+    }
+    return count($xs);
+}
+
 /** @param list<string> $xs */
 function last(array $xs, string $x): string
 {
@@ -65,5 +77,6 @@ echo (new Slug())->make('  Hello World ', 'v2'), ' ', (new Slug())->make('A B', 
 echo (new Slug())->orNone(null), ' ', (new Slug())->orNone('x'), "\n";
 echo Slug::twice('ab', 'c'), "\n";
 echo last(['p', 'q'], 'z'), ' ', last([], 'y'), "\n";
+echo filled(null, false), ' ', filled(null, true), ' ', filled([1], false), "\n";
 $list = [1, 2];
 echo count(withZero($list)), ' ', count($list), "\n";

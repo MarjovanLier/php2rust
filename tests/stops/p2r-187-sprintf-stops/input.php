@@ -12,4 +12,6 @@ function run(string $s, int $n, float $f): void
     echo sprintf('%d', $s), "\n";
     echo sprintf('%s', $f), "\n";
     echo sprintf($s, $n), "\n";
+    echo sprintf("%s $s", $s), "\n";
+    echo sprintf('%s', $n > 1), "\n";
 }

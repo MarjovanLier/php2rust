@@ -49,6 +49,17 @@ pub fn shout(s: &str, loud: bool) -> String {
     return s;
 }
 
+pub fn filled(xs: Option<&[i64]>, c: bool) -> i64 {
+    let mut xs = xs.map(ToOwned::to_owned);
+    if c {
+        xs = Some(vec![7, 8]);
+    }
+    let Some(xs) = xs.as_deref() else {
+        return 0;
+    };
+    return xs.len() as i64;
+}
+
 pub fn last(xs: &[String], x: &str) -> String {
     let mut x = x.to_string();
     x += "?";
@@ -93,6 +104,12 @@ fn main() {
     print!("{}", last(&[String::from("p"), String::from("q")], "z"));
     print!(" ");
     print!("{}", last(&[], "y"));
+    print!("\n");
+    print!("{}", filled(None, false));
+    print!(" ");
+    print!("{}", filled(None, true));
+    print!(" ");
+    print!("{}", filled(Some(&[1]), false));
     print!("\n");
     let list: Vec<i64> = vec![1, 2];
     print!("{}", with_zero(&list).len() as i64);

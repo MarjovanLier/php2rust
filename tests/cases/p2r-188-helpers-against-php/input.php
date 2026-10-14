@@ -17,6 +17,11 @@ function replaced(string $search, string $replace, string $subject): string
     return '[' . str_replace($search, $replace, $subject) . ']';
 }
 
+function middle(string $s): string
+{
+    return '[' . substr(trim($s), 1, 2) . ']';
+}
+
 function pieces(string $separator, string $s): string
 {
     $parts = explode($separator, $s);
@@ -32,3 +37,4 @@ echo replaced('aa', 'b', 'aaaa'), replaced('x', 'y', ''), replaced('é', 'e', 'c
 echo replaced('a', '', 'banana'), replaced('ab', 'ba', 'abab'), replaced('', '', ''), "\n";
 echo pieces(',', 'a,b,,c'), pieces(',', ''), pieces(',', ','), pieces('ab', 'xabyabz'), "\n";
 echo pieces(',', 'abc'), pieces('é', 'aéb'), pieces('aa', 'aaa'), pieces(' ', ' x '), "\n";
+echo middle(' abcd '), middle(''), middle('a'), "\n";

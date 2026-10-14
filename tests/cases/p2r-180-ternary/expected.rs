@@ -6,6 +6,15 @@ pub enum Size {
     Large,
 }
 
+impl Size {
+    pub fn name(self) -> &'static str {
+        match self {
+            Size::Small => "Small",
+            Size::Large => "Large",
+        }
+    }
+}
+
 #[derive(Debug)]
 pub struct Person {
     pub n: String,
@@ -47,6 +56,19 @@ pub fn size(n: i64) -> Size {
 
 pub fn length(s: &str) -> i64 {
     return s.len() as i64;
+}
+
+pub fn either(c: bool, p: Option<&str>) -> String {
+    return (if c { p.unwrap_or("none") } else { "off" }).to_string();
+}
+
+pub fn sized(c: bool, s: Size) -> String {
+    return (if c { s.name() } else { "-" }).to_string();
+}
+
+pub fn wide(n: i64) -> i64 {
+    let sign: i64 = if n >= 0 { 123456789012 } else { -123456789012 };
+    return if n >= 0 { 12345678901 } else { sign };
 }
 
 pub fn run(mut n: i64, s: &str) {
@@ -120,6 +142,20 @@ fn main() {
     print!("{}", Person::new("Bo", true).label());
     print!(" ");
     print!("{}", Person::new("Cy", false).label());
+    print!("\n");
+    print!("{}", either(true, None));
+    print!(" ");
+    print!("{}", either(true, Some("p")));
+    print!(" ");
+    print!("{}", either(false, Some("p")));
+    print!("\n");
+    print!("{}", sized(true, Size::Large));
+    print!(" ");
+    print!("{}", sized(false, Size::Small));
+    print!("\n");
+    print!("{}", wide(1));
+    print!(" ");
+    print!("{}", wide(-1));
     print!("\n");
     run(7, "abc");
     run(-2, "xyz");

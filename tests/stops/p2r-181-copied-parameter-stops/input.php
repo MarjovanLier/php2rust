@@ -30,6 +30,30 @@ function names(array $xs, string $x): int
     return 0;
 }
 
+function wide(?string $customerBillingAddressOverride, bool $c): ?string
+{
+    if ($c) {
+        $customerBillingAddressOverride = null;
+    }
+    return $customerBillingAddressOverride;
+}
+
+final class Text
+{
+    public static function shout(string $customerBillingAddressOverrideText): string
+    {
+        $customerBillingAddressOverrideText .= '!';
+        return $customerBillingAddressOverrideText;
+    }
+}
+
+/** @param list<Counter> $cs */
+function grow(array $cs): int
+{
+    $cs[] = new Counter();
+    return count($cs);
+}
+
 function bump(Counter $c): void
 {
     $c->add();

@@ -11,6 +11,9 @@ fn main() {
     print!("|");
     print!("{}", "".repeat(4));
     print!("\n");
+    print!("{}", "y".repeat(0));
+    print!("|");
+    print!("\n");
     print!("{}", bars(&[1, 2, 3], "yz"));
     print!("|");
     print!("{}", bars(&[], ""));

@@ -9,4 +9,5 @@ function bars(array $xs, string $s): string
 }
 
 echo str_repeat('ab', 3), '|', str_repeat('x', 0), '|', str_repeat('', 4), "\n";
+echo str_repeat('y', -0), '|', "\n";
 echo bars([1, 2, 3], 'yz'), '|', bars([], ''), "\n";

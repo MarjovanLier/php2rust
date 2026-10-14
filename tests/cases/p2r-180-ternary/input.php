@@ -48,6 +48,22 @@ function length(string $s): int
     return strlen($s);
 }
 
+function either(bool $c, ?string $p): string
+{
+    return $c ? ($p ?? 'none') : 'off';
+}
+
+function sized(bool $c, Size $s): string
+{
+    return $c ? $s->name : '-';
+}
+
+function wide(int $n): int
+{
+    $sign = $n >= 0 ? 123456789012 : -123456789012;
+    return $n >= 0 ? 12345678901 : $sign;
+}
+
 function run(int $n, string $s): void
 {
     $on = $n > 2;
@@ -87,5 +103,8 @@ function run(int $n, string $s): void
 echo label(true), ' ', pick(false, 'a', 'b'), ' ', maybe(false) ?? -1, "\n";
 echo half(true) > 0.9 ? 'one' : 'half', ' ', size(11) === Size::Large ? 'L' : 'S', "\n";
 echo (new Person('Bo', true))->label(), ' ', (new Person('Cy', false))->label(), "\n";
+echo either(true, null), ' ', either(true, 'p'), ' ', either(false, 'p'), "\n";
+echo sized(true, Size::Large), ' ', sized(false, Size::Small), "\n";
+echo wide(1), ' ', wide(-1), "\n";
 run(7, 'abc');
 run(-2, 'xyz');

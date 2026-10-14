@@ -12,9 +12,33 @@ pub fn replaced(search: &str, replace: &str, subject: &str) -> String {
     return format!("[{}]", php_replace(search, replace, subject));
 }
 
+pub fn middle(s: &str) -> String {
+    return format!("[{}]", php_substr(&php_trim(s), 1, Some(2)));
+}
+
 pub fn pieces(separator: &str, s: &str) -> String {
     let parts = php_explode(separator, s);
     return format!("{}[{}]", parts.len() as i64, parts.join("|"));
+}
+
+fn php_substr(text: &str, start: i64, length: Option<i64>) -> String {
+    let size = text.len() as i64;
+    if start > size {
+        return String::new();
+    }
+    let start = if start < 0 {
+        (size + start).max(0)
+    } else {
+        start
+    };
+    let rest = size - start;
+    let length = match length {
+        Some(length) if length < 0 => (rest + length).max(0),
+        Some(length) => length.min(rest),
+        None => rest,
+    };
+    let (from, to) = (start as usize, (start + length) as usize);
+    String::from_utf8_lossy(&text.as_bytes()[from..to]).into_owned()
 }
 
 fn php_trim(text: &str) -> String {
@@ -109,5 +133,9 @@ fn main() {
     print!("{}", pieces("é", "aéb"));
     print!("{}", pieces("aa", "aaa"));
     print!("{}", pieces(" ", " x "));
+    print!("\n");
+    print!("{}", middle(" abcd "));
+    print!("{}", middle(""));
+    print!("{}", middle("a"));
     print!("\n");
 }

@@ -1,0 +1,7 @@
+input.php:5:10: this name is the Rust name of a helper the output may hold, which it would hide (P2R-31)
+input.php:10:22: this name is the Rust name of a helper the output may hold, which it would hide (P2R-31)
+input.php:10:41: this name is the Rust name of a helper the output may hold, which it would hide (P2R-31)
+input.php:17:5: this name is the Rust name of a helper the output may hold, which it would hide (P2R-31)
+input.php:18:5: this name is the Rust name of a helper the output may hold, which it would hide (P2R-31)
+input.php:19:5: this name is the Rust name of a helper the output may hold, which it would hide (P2R-31)
+input.php:20:5: this name is the Rust name of a helper the output may hold, which it would hide (P2R-31)

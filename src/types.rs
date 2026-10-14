@@ -234,8 +234,18 @@ fn is_shape(keyed: &TKeyedArray) -> bool {
 /// byte order, which is the order of the fields and of the parts of the name.
 fn shape_type(keyed: &TKeyedArray, enums: &TypeNames) -> Result<RustType, String> {
     let items = keyed.known_items.as_deref().into_iter().flatten();
+    // The name depends on the keys alone, so a shape that Mago narrows finds the struct of
+    // the declared shape before its fields map.
+    let mut rust_name: String = items
+        .clone()
+        .filter_map(|(key, _)| match key {
+            ArrayKey::String(key) => Some(key.as_str_lossy().to_upper_camel_case()),
+            _ => None,
+        })
+        .collect();
+    rust_name.push_str("Shape");
+    let known = enums.shapes.borrow().get(&rust_name).cloned();
     let mut fields: Vec<ShapeField> = Vec::new();
-    let mut rust_name = String::new();
     for (key, (optional, value)) in items {
         let ArrayKey::String(key) = key else {
             return Err("an array shape converts only with string keys (P2R-200)".to_owned());
@@ -254,7 +264,15 @@ fn shape_type(keyed: &TKeyedArray, enums: &TypeNames) -> Result<RustType, String
                 "two keys of this array shape give the field name {name} (P2R-200)"
             ));
         }
-        let ty = rust_type(value, enums)?;
+        // On the null side of a check, Mago types a `?T` field as `null` (P2R-104).
+        let declared = known
+            .iter()
+            .flatten()
+            .find(|field| field.key == key.as_bytes() && matches!(field.ty, RustType::Option(_)));
+        let ty = match declared {
+            Some(field) if only_null(value) => field.ty.clone(),
+            _ => rust_type(value, enums)?,
+        };
         if ty.holds_class() {
             return Err(
                 "an array shape that holds an object is not supported yet (P2R-200)".into(),
@@ -267,14 +285,12 @@ fn shape_type(keyed: &TKeyedArray, enums: &TypeNames) -> Result<RustType, String
                     .into(),
             );
         }
-        rust_name.push_str(&text.to_upper_camel_case());
         fields.push(ShapeField {
             key: key.as_bytes().to_vec(),
             name,
             ty,
         });
     }
-    rust_name.push_str("Shape");
     if enums
         .values()
         .any(|ty| matches!(ty, RustType::Enum(n) | RustType::Class(n) if *n == rust_name))

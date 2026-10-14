@@ -58,7 +58,10 @@ spec reviewers added the self-holding and empty-enum stops of P2R-130 and
 P2R-200, the int-for-float stop and the lent literal argument of P2R-202,
 the `null` comparison exception of P2R-136 and P2R-201, the owned `??` of
 P2R-204, the struct literal `use` rule of P2R-174 and the literal read
-stop of P2R-203; the build added `??` on a shape element (P2R-203).
+stop of P2R-203; the build added `??` on a shape element (P2R-203). The
+final review of the build added the `?:` arm stop of P2R-202, the list
+read stop of P2R-203, the narrowed shape rule of P2R-200 and the lent
+string arm of P2R-205.
 
 php2rust converts typed PHP source into normal, readable Rust (`Vec`,
 `String`, `i64`), without AI. It reads PHP with the Mago crates, uses Mago's
@@ -1604,9 +1607,9 @@ string}`), and keeps an object that may be missing in a nullable property
   shapes of one Rust name with different keys or different field types
   (`array{a_b: int}` and `array{a: int, b: int}` both give `ABShape`), at
   the places of the shape the tool meets second, other than a shape whose
-  fields are those of the first with a `?T` field typed `T`, which Mago
-  gives a shape after a check of that field against null and which maps to
-  the struct of the first (P2R-104); and a shape whose Rust
+  fields are those of the first with a `?T` field typed `T` or `null`,
+  which Mago gives a shape after a check of that field against null and
+  which maps to the struct of the first (P2R-104); and a shape whose Rust
   name is the Rust name of an enum or class of the input (P2R-131,
   P2R-173).
 - **P2R-201** A value of a shape type MUST behave as a value of a readonly

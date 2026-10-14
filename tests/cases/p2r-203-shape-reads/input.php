@@ -42,6 +42,29 @@ function aged(array $data): string
 }
 
 /**
+ * @param array{name: ?string, age: ?int, when: ?array{day: string}} $data
+ */
+function unaged(array $data): string
+{
+    if ($data['age'] === null) {
+        return $data['name'] ?? 'nobody';
+    }
+    return 'aged';
+}
+
+/**
+ * @param array{name: ?string, age: ?int, when: ?array{day: string}} $data
+ */
+function otherwise(array $data): string
+{
+    if ($data['age'] !== null) {
+        return 'aged';
+    } else {
+        return $data['name'] ?? 'nobody';
+    }
+}
+
+/**
  * @param array{inner: array{n: int}, list: list<int>} $data
  */
 function nested(array $data): int
@@ -57,3 +80,5 @@ echo day(['name' => null, 'age' => null, 'when' => null]), "\n";
 echo nested(['inner' => ['n' => 5], 'list' => [1, 2, 3]]), "\n";
 echo aged(['name' => 'Cy', 'age' => 3, 'when' => null]), ' ';
 echo aged(['name' => 'Di', 'age' => null, 'when' => null]), "\n";
+echo unaged(['name' => 'Ed', 'age' => null, 'when' => null]), ' ';
+echo otherwise(['name' => null, 'age' => null, 'when' => null]), "\n";

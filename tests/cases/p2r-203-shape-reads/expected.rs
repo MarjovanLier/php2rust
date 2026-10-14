@@ -59,6 +59,21 @@ pub fn aged(data: &AgeNameWhenShape) -> String {
     return String::from("ageless");
 }
 
+pub fn unaged(data: &AgeNameWhenShape) -> String {
+    if data.age.is_none() {
+        return data.name.as_deref().unwrap_or("nobody").to_string();
+    }
+    return String::from("aged");
+}
+
+pub fn otherwise(data: &AgeNameWhenShape) -> String {
+    if data.age.is_some() {
+        return String::from("aged");
+    } else {
+        return data.name.as_deref().unwrap_or("nobody").to_string();
+    }
+}
+
 pub fn nested(data: &InnerListShape) -> i64 {
     return data.inner.n + data.list.len() as i64;
 }
@@ -125,6 +140,24 @@ fn main() {
         "{}",
         aged(&AgeNameWhenShape {
             name: Some(String::from("Di")),
+            age: None,
+            when: None
+        })
+    );
+    print!("\n");
+    print!(
+        "{}",
+        unaged(&AgeNameWhenShape {
+            name: Some(String::from("Ed")),
+            age: None,
+            when: None
+        })
+    );
+    print!(" ");
+    print!(
+        "{}",
+        otherwise(&AgeNameWhenShape {
+            name: None,
             age: None,
             when: None
         })

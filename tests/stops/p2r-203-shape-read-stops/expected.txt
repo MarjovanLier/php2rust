@@ -1,0 +1,2 @@
+input.php:11:15: an array shape is read only with a string literal key (P2R-203)
+input.php:19:12: a value that may be null cannot be read by index (P2R-106)

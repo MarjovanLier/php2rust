@@ -59,14 +59,22 @@ converts:
 - the types `int` (`i64`), `float` (`f64`), `bool`, `string` (`String`) and `list<T>`
   (`Vec<T>`), and `void` as a return type. Narrower types such as literal values,
   integer ranges, `non-empty-string` and `non-empty-list<int>` widen to these. A
-  docblock may refine `array` to `list<T>`.
+  docblock may refine `array` to `list<T>` or to an array shape.
+- array shapes with string keys (`array{year: string, month: string, day: string}`):
+  a `#[derive(Clone, Debug)]` struct named from its keys in byte order
+  (`DayMonthYearShape`, fields `day`, `month`, `year`). A literal
+  `['year' => $y, ...]` becomes a struct literal with its fields in the order written,
+  and `$s['year']` becomes `s.year`; `$s['note'] ?? ''` works on a nullable field.
+  A shape is passed as `&S` and copied on assignment, as an object is.
 - nullable types: `?T` and `T|null` become `Option<T>`, also as list elements
   (`list<?int>`); a nullable `string` or list parameter becomes `Option<&str>` or
   `Option<&[T]>`. `null` becomes `None` and a value goes into an `Option` as `Some(..)`.
   `=== null` and `!== null` become `is_none()` and `is_some()`, and `$a ?? $b` becomes
   `unwrap_or` (or `unwrap_or_else` when `$b` could have an effect). Inside
-  `if ($v !== null)`, and after an `if ($v === null)` whose body always leaves, `$v` is
-  a plain value (`if let` and `let ... else`).
+  `if ($v !== null)`, after an `if ($v === null)` whose body always leaves, and in the
+  matching arm of `$v !== null ? .. : ..`, `$v` is a plain value (`if let` and
+  `let ... else`). A nullable object or shape (`?Point`) becomes `Option<Point>`, and
+  `Option<&Point>` as a parameter.
 - one `namespace Acme\Shop;` right after the `declare`, and `use` imports of classes,
   functions and constants, with or without `as`, grouped or not. They give no Rust: names
   resolve as PHP resolves them, and calls such as `\strlen()` and `namespace\helper()`
@@ -120,8 +128,8 @@ converts:
   Several conditions in one arm become `a | b`, and `default` becomes `_`, or is left
   out when the other arms already cover every enum case or both `true` and `false`.
 - `$c ? $a : $b` with a bool condition: `if c { a } else { b }`, of int, float, bool,
-  string or enum arms, or of `?int`, `?float`, `?bool` or a nullable enum where the
-  place it stands in has such a type. String arms are lent, and the result is copied
+  string, enum, object or shape arms, or of `?int`, `?float`, `?bool`, a nullable enum,
+  object or shape where the place it stands in has such a type. String arms are lent, and the result is copied
   once where a `String` is needed: `(if c { "a" } else { "b" }).to_string()`.
 - `+`, `-`, `*`, unary minus, `+=`, `-=`, `*=`, `++` and `--` on two ints or two floats,
   `%` on ints, `===` and `!==` on two ints, floats, bools or strings, `==` and `!=` on
@@ -170,17 +178,22 @@ the others are findings of the Mago analyser. In short:
   one of them, `explode()` with a limit or an empty separator, and any
   `sprintf()` format other than text, `%s`, `%d` and `%%`, or with an argument count
   that does not match.
-- A `?:` without its middle part (`$a ?: $b`), inside another `?:`, of lists or objects,
-  of a nullable string, or with a string arm that is a call, a joined string, or a
+- A `?:` without its middle part (`$a ?: $b`), inside another `?:`, of lists, of a
+  nullable string or list, or with a string arm that is a call, a joined string, or a
   property read or list element on a call or `new`.
+- For array shapes: an optional key (`key?:`), an int key, a shape open to other keys
+  (`...`), a key with no Rust name, a shape that holds an object, two shapes that give
+  one struct name, comparing, printing or changing a shape, `isset` of an element, a
+  key that is not a string literal, a literal with a repeated key, a spread or an
+  element without a key, and a list of nullable objects (`list<?Point>`).
 - A namespace with braces, a second namespace, or one after other code. Imports that PHP
   rejects (two imports with one name, an import named like a class or function of the
   file, `as self`) or warns about (`use Foo;` outside a namespace).
 - A class that is abstract, extends a class, implements an interface, uses a trait, or
   holds a static property, a constructor with a body or a method whose name starts with
   `__`. A declared property without a type or a literal default, or that is static,
-  readonly or hooked. A nullable object type (`?Point`), a nullable type that holds
-  objects whose class changes them (`?list<Cell>`), the type `parent` and `parent::`,
+  readonly or hooked. A nullable type that holds objects whose class changes them
+  (`?Cell`, `?list<Cell>`), the type `parent` and `parent::`,
   a class that holds itself, a method named `clone` or `new`, a `final private` method,
   two methods whose names differ only in letter case, and a function that assigns to
   its own object parameter.
@@ -215,8 +228,8 @@ the others are findings of the Mago analyser. In short:
   after other code outside functions: PHP declares an enum only when execution reaches
   it.
 - A type with no single Rust type: `mixed`, `null` on its own, `array` without a list
-  element type, or a union of different types other than `T|null`. A missing parameter or
-  return type.
+  element type or a shape, or a union of different types other than `T|null`. A missing
+  parameter or return type.
 - A value that may be null where PHP gives null a meaning Rust does not copy, or where a
   plain value is needed: in `echo`, string building, arithmetic, a shift, a cast, a
   condition, `foreach`, a list read, a string offset, a built-in function, or for a

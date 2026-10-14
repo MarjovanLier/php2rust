@@ -52,8 +52,8 @@ was written on 14 Oct 2026; it changes P2R-04, P2R-06, P2R-51, P2R-82,
 P2R-83 and P2R-176, and P2R-191 lists the requirements whose layout rules
 it removes. Section 21 (array shapes and nullable objects) was written on
 14 Oct 2026; it changes P2R-20, P2R-22, P2R-23, P2R-33, P2R-75, P2R-104,
-P2R-106, P2R-130, P2R-132, P2R-133, P2R-134, P2R-172, P2R-173, P2R-174
-and P2R-180.
+P2R-105, P2R-106, P2R-130, P2R-132, P2R-133, P2R-134, P2R-172, P2R-173,
+P2R-174 and P2R-180.
 
 php2rust converts typed PHP source into normal, readable Rust (`Vec`,
 `String`, `i64`), without AI. It reads PHP with the Mago crates, uses Mago's
@@ -542,8 +542,8 @@ Sections 3 to 9 apply to nullable values unless this section says otherwise.
   stops the conversion: the step also runs at each `continue`, where the
   binding can shadow the variable or not exist yet.
 - **P2R-105** `$a ?? $b` MUST convert when `$a` is a variable, parameter,
-  function call, static method call (P2R-153) or `E::tryFrom()` call
-  (P2R-114) of Rust type `Option<T>` and
+  function call, static method call (P2R-153), `E::tryFrom()` call
+  (P2R-114) or array shape element (P2R-203) of Rust type `Option<T>` and
   `$b` has the type `T`. `$b` MUST
   be evaluated only when `$a` is null, as in PHP, and P2R-26 applies to
   `$a`. These stop the conversion: `??` whose left side has a Rust type that
@@ -1584,8 +1584,8 @@ string}`), and keeps an object that may be missing in a nullable property
   integer key, a key that names a class constant, an empty key, an optional
   key or a general type; a key whose snake_case name has no Rust form
   (P2R-30); two keys of one shape that give one field name; a value type
-  that does not convert (P2R-22); a value type that is or holds a changing
-  type (P2R-141), because the struct derives `Clone`; two shapes of one
+  that does not convert (P2R-22); a value type that is or holds a class (a
+  later slice); two shapes of one
   Rust name with different keys or different field types (`array{a_b: int}`
   and `array{a: int, b: int}` both give `ABShape`); and a shape whose Rust
   name is the Rust name of an enum or class of the input (P2R-131,
@@ -1603,8 +1603,9 @@ string}`), and keeps an object that may be missing in a nullable property
   condition, as the operand of a cast, as the list of a `foreach` and as
   the argument of a built-in function (`count`, `array_keys`); a change to a
   shape: an assignment, a compound assignment, `++` or `--` on an element,
-  an append and `unset`; and `isset` and `empty` of an element (an element
-  on the left of `??` stops by P2R-105).
+  an append and `unset`; `isset` and `empty` of an element; and an
+  assignment to a function's own shape parameter, as P2R-132 stops one for
+  a class.
 - **P2R-202** An array literal whose elements all have a key that is a
   string literal (single-quoted, or double-quoted without interpolation)
   MUST convert to a struct literal when its type is a shape (P2R-200):
@@ -1620,9 +1621,10 @@ string}`), and keeps an object that may be missing in a nullable property
   gives `n` a nullable type. Each value converts as a value assigned to a
   variable of its field's type: P2R-25 (`1` for a `float` field gives
   `1.0`), P2R-26 and P2R-132 (`.to_string()`, `.clone()` or a move), and
-  P2R-102 (`Some(..)` and `None`). A field whose value is a variable or
-  parameter with the field's Rust name, used as it is, takes the shorthand
-  (`DayMonthYearShape { year, month, day }`). These stop the conversion: a
+  P2R-102 (`Some(..)` and `None`). Every field is written `field: value`,
+  also where the value is a variable of the field's name, because whether
+  that variable moves or is copied is known only at the end of the body
+  (P2R-26). These stop the conversion: a
   key that appears twice, which PHP keeps once and rustc rejects; a literal
   whose keys are not the keys of the shape it flows into; an element without
   a key, with a key of another form (a variable, a constant, an int), a
@@ -1633,9 +1635,14 @@ string}`), and keeps an object that may be missing in a nullable property
   reads as its value, a `String`, `Vec<T>`, class or shape field is read in
   place where Rust takes a reference and copied with `.clone()` where
   P2R-26 copies, and a nullable field lends as P2R-134 and P2R-204 say.
-  Reads nest (`$s['a']['b']` gives `s.a.b`). These stop the conversion: a
-  key that is not a string literal, a key the shape does not have (Mago
-  reports it, P2R-11), and a read on a shape that may be null (P2R-106).
+  Reads nest (`$s['a']['b']` gives `s.a.b`). `$s['k'] ?? $d` on a field of
+  type `Option<T>` MUST convert by P2R-105 as for a variable, because a
+  shape always holds its keys, so PHP's isset of the element is a check
+  against null: `data.name.as_deref().unwrap_or("unknown")`, and a field
+  that is not Copy is copied first (`data.when.clone().unwrap_or(..)`).
+  These stop the conversion: a key that is not a string literal, a key the
+  shape does not have (Mago reports it, P2R-11), and a read on a shape that
+  may be null (P2R-106), also on the left of `??`.
 - **P2R-204** A nullable class type (`?C`, `C|null`) and a nullable shape
   type MUST map to `Option<S>` as P2R-100 maps other types, where `S` is the
   struct; such a type is a nullable struct type below. A parameter of a
@@ -1658,8 +1665,10 @@ string}`), and keeps an object that may be missing in a nullable property
   parameter has: `let Some(o) = o.as_ref()` for an owned variable and
   `let Some(o) = o` for a parameter. These stop the conversion: a nullable
   type that holds a changing type (P2R-141); a list of a nullable struct
-  type (`list<?C>`); `?->` (P2R-134); and a property read, a method call or
-  a shape element read on a value that may be null (P2R-106).
+  type (`list<?C>`); `?->` (P2R-134); a property read, a method call or a
+  shape element read on a value that may be null (P2R-106); and an
+  assignment to a function's own parameter of a nullable struct type
+  (P2R-132).
 - **P2R-205** `$v !== null ? $a : $b` and `null !== $v ? $a : $b`, where
   `$v` is a variable or parameter of Rust type `Option<T>`, MUST convert to
   `if let Some(v) = .. { a } else { b }` with the pattern of P2R-104 when

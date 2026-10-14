@@ -178,6 +178,10 @@ impl Converter<'_> {
                 self.refuse(value, "echo of an object is not supported (P2R-136)");
                 None
             }
+            _ if matches!(ty, RustType::Shape(_)) => {
+                self.refuse(value, "echo of an array shape is not supported (P2R-201)");
+                None
+            }
             _ if matches!(ty, RustType::Option(_)) => {
                 self.refuse(
                     value,

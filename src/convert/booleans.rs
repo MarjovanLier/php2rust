@@ -101,6 +101,10 @@ pub(super) fn refusal(
     if matches!(left, RustType::Class(_)) || matches!(right, RustType::Class(_)) {
         return Some("an object cannot be compared (P2R-136)");
     }
+    // PHP's === on arrays also compares the order of the keys, which a struct loses.
+    if matches!(left, RustType::Shape(_)) || matches!(right, RustType::Shape(_)) {
+        return Some("an array shape cannot be compared (P2R-201)");
+    }
     if left != right {
         return Some(if numbers(left) && numbers(right) {
             "a comparison that mixes int and float is not supported (P2R-44)"
@@ -133,6 +137,7 @@ pub(super) fn refusal(
         }
         RustType::Enum(_) => None,
         RustType::Class(_) => Some("an object cannot be compared (P2R-136)"),
+        RustType::Shape(_) => Some("an array shape cannot be compared (P2R-201)"),
     }
 }
 

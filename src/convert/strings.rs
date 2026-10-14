@@ -527,10 +527,8 @@ impl Converter<'_> {
             {
                 RExpr::Method(Box::new(RExpr::Var(name)), "to_vec")
             }
-            // `self` and an object parameter are references (P2R-132).
-            RExpr::Var(name)
-                if matches!(ty, RustType::Class(_)) && self.variables.is_borrowed(&name) =>
-            {
+            // `self` and an object or shape parameter are references (P2R-132, P2R-201).
+            RExpr::Var(name) if ty.is_struct() && self.variables.is_borrowed(&name) => {
                 RExpr::Method(Box::new(RExpr::Var(name)), "clone")
             }
             // Rust cannot move a field out of an object it borrows (P2R-134).
@@ -554,20 +552,25 @@ impl Converter<'_> {
     }
 
     /// A value where Rust takes a `&str`, a `&[T]` or a `&C`: a call argument or the right
-    /// side of `.=`. An owned `Option<String>` or `Option<Vec<T>>` lends `Option<&str>` or
-    /// `Option<&[T]>` (P2R-101, P2R-132).
+    /// side of `.=`. An owned `Option<String>`, `Option<Vec<T>>` or `Option<C>` lends
+    /// `Option<&str>`, `Option<&[T]>` or `Option<&C>` (P2R-101, P2R-132, P2R-204).
     pub(super) fn borrowed(&self, expr: RExpr, ty: &RustType) -> RExpr {
         if matches!(ty, RustType::Option(_)) {
             return match expr {
                 _ if ty.is_copy() => expr,
                 RExpr::None => expr,
                 RExpr::Var(ref name) if self.variables.is_borrowed(name) => expr,
-                other => RExpr::Method(Box::new(other), "as_deref"),
+                other => RExpr::Method(Box::new(other), ty.inner().lending()),
             };
         }
-        if matches!(ty, RustType::String | RustType::Vec(_) | RustType::Class(_))
-            && !self.is_reference(&expr)
-        {
+        // An object or shape is a reference only as `self`, a parameter or a binding; an
+        // object `if` is owned (P2R-205).
+        let reference = if ty.is_struct() {
+            matches!(&expr, RExpr::Var(name) if self.variables.is_borrowed(name))
+        } else {
+            self.is_reference(&expr)
+        };
+        if (matches!(ty, RustType::String | RustType::Vec(_)) || ty.is_struct()) && !reference {
             RExpr::Ref(Box::new(expr))
         } else {
             expr

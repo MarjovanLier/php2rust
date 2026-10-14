@@ -1,0 +1,4 @@
+input.php:10:12: a key appears twice in this array literal (P2R-202)
+input.php:19:12: an array literal with keys converts only as an array shape, with a string literal key on every element (P2R-202)
+input.php:27:12: an array literal with keys converts only as an array shape, with a string literal key on every element (P2R-202)
+input.php:36:12: an array literal with keys converts only as an array shape, with a string literal key on every element (P2R-202)

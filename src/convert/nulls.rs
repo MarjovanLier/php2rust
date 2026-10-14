@@ -213,14 +213,14 @@ impl Converter<'_> {
     }
 
     /// `let Some(v) = v`, the pattern that binds the inner value of `outer` (P2R-104). An
-    /// owned `Option<String>` or `Option<Vec<T>>` lends its value, so a later read of the
-    /// variable still has it.
+    /// owned `Option<String>`, `Option<Vec<T>>` or `Option<C>` lends its value, so a later
+    /// read of the variable still has it (P2R-204).
     pub(super) fn pattern(&self, outer: Var, inner: &RustType) -> String {
         let name = self.variables.name_of(outer);
         if inner.is_copy() || self.variables.is_borrowed(name) {
             format!("let Some({name}) = {name}")
         } else {
-            format!("let Some({name}) = {name}.as_deref()")
+            format!("let Some({name}) = {name}.{}()", inner.lending())
         }
     }
 
@@ -254,15 +254,21 @@ impl Converter<'_> {
         Some((variable, outer, (**inner).clone()))
     }
 
-    /// `$a ?? $b`, where `$a` is a variable, parameter or call that may be null and `$b`
-    /// has its inner type. `$b` runs only when `$a` is null, as in PHP (P2R-105).
+    /// `$a ?? $b`, where `$a` is a variable, parameter, call or shape element that may be
+    /// null and `$b` has its inner type. `$b` runs only when `$a` is null, as in PHP
+    /// (P2R-105). A shape always has its keys, so PHP's isset of an element is a check
+    /// against null (P2R-203).
     pub(super) fn coalesce(&mut self, binary: &Binary<'_>) -> Option<(RExpr, RustType)> {
         let left_node = lists::unparenthesized(binary.lhs);
-        if !matches!(
-            left_node,
-            Expression::Variable(Variable::Direct(_))
-                | Expression::Call(Call::Function(_) | Call::StaticMethod(_))
-        ) {
+        let element = matches!(left_node, Expression::ArrayAccess(access)
+            if matches!(self.site_type(access.array), Ok(RustType::Shape(_))));
+        if !element
+            && !matches!(
+                left_node,
+                Expression::Variable(Variable::Direct(_))
+                    | Expression::Call(Call::Function(_) | Call::StaticMethod(_))
+            )
+        {
             self.record_refused(binary.lhs);
             self.record_refused(binary.rhs);
             let message = if matches!(
@@ -313,8 +319,10 @@ impl Converter<'_> {
                 lazy,
             }
         } else {
-            // `unwrap_or` takes the option, so a variable moves unless it is read again.
+            // `unwrap_or` takes the option, so a variable moves unless it is read again, and
+            // a field, which Rust cannot move out of its struct, is copied.
             let option = match (left, left_node) {
+                (field @ RExpr::Field(..), _) => RExpr::Method(Box::new(field), "clone"),
                 (RExpr::Var(name), _) if self.variables.is_borrowed(&name) => {
                     RExpr::MapOwned(Box::new(RExpr::Var(name)))
                 }

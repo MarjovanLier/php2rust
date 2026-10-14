@@ -1,7 +1,7 @@
 //! `match` as the whole value of a `return` or an assignment (P2R-120 to P2R-124), and
 //! `?:` as an `if` (P2R-180).
 
-use mago_span::HasSpan;
+use mago_span::{HasSpan, Span};
 use mago_syntax::cst::*;
 
 use super::control::emit;
@@ -313,39 +313,63 @@ impl Converter<'_> {
             );
             return None;
         }
+        // A check against null binds the value for the arm that runs when it is not null,
+        // which comes first in Rust; `=== null` swaps the arms (P2R-205).
+        let checked = [(true, then, node.r#else), (false, node.r#else, then)]
+            .into_iter()
+            .find_map(|(negated, bound, other)| {
+                let found = self.null_checked(node.condition, negated)?;
+                variables::mentions(bound, found.0.name).then_some((found, bound, other))
+            });
+        let (then, otherwise) = checked
+            .as_ref()
+            .map_or((then, node.r#else), |&(_, bound, other)| (bound, other));
         // The arms convert even when the condition does not, so their problems are reported.
-        let condition = self.condition(node.condition);
+        let mut binding = None;
+        let condition = match checked {
+            Some(((variable, outer, inner), ..)) => {
+                self.variables.read(outer, variable.span);
+                let pattern = self.pattern(outer, &inner);
+                binding = Some((variable, inner));
+                Some(RExpr::Let(pattern))
+            }
+            None => self.condition(node.condition),
+        };
         let start = self.variables.flow.current();
         let join = self.variables.flow.block();
         let mut arms = Vec::new();
-        for arm in [then, node.r#else] {
+        for arm in [then, otherwise] {
             let block = self.variables.flow.block();
             self.variables.flow.edge(start, block);
             self.variables.flow.enter(block);
-            arms.push(self.conditional_arm(arm, expected));
+            let bound = binding
+                .take()
+                .map(|(variable, inner)| self.bind_null(variable, inner));
+            arms.push(self.conditional_arm(arm, expected, node.span()));
+            self.variables.close_bindings(bound.as_slice());
             let end = self.variables.flow.current();
             self.variables.flow.edge(end, join);
         }
         self.variables.flow.enter(join);
-        let (otherwise, first) = (arms.pop().flatten(), arms.pop().flatten());
-        let (condition, (then_expr, ty), (else_expr, else_type)) = (condition?, first?, otherwise?);
+        let (last, first) = (arms.pop().flatten(), arms.pop().flatten());
+        let (condition, (then_expr, ty), (else_expr, else_type)) = (condition?, first?, last?);
         if else_type != ty {
             self.refuse(
-                node.r#else,
+                otherwise,
                 "the arms of a ?: must give one Rust type (P2R-180)",
             );
             return None;
         }
-        if !ty.is_copy() && ty != RustType::String {
+        if !ty.is_copy() && ty != RustType::String && !ty.inner().is_struct() {
             self.refuse(
                 node,
-                "a ?: of lists or objects, or of strings, lists or objects that may be null, is not supported yet (P2R-180)",
+                "a ?: of lists, or of strings or lists that may be null, is not supported yet (P2R-180)",
             );
             return None;
         }
         let (then_expr, else_expr) = if ty == RustType::String {
             let lent = self.lent_arm(then, then_expr);
-            (lent, self.lent_arm(node.r#else, else_expr))
+            (lent, self.lent_arm(otherwise, else_expr))
         } else {
             (Some(then_expr), Some(else_expr))
         };
@@ -358,13 +382,21 @@ impl Converter<'_> {
     }
 
     /// An arm of `?:` as a value of `expected` where it converts to it: P2R-25 and P2R-102
-    /// apply to it as to a returned value (P2R-180).
+    /// apply to it as to a returned value (P2R-180). An object or shape arm is owned,
+    /// copied as an assigned one is (P2R-132, P2R-205); `statement` is the span of the
+    /// `?:`.
     fn conditional_arm(
         &mut self,
         arm: &Expression<'_>,
         expected: Option<&RustType>,
+        statement: Span,
     ) -> Option<(RExpr, RustType)> {
         let (expr, ty) = self.value(arm, expected)?;
+        let expr = if ty.inner().is_struct() {
+            self.stored(arm, expr, &ty, statement)?
+        } else {
+            expr
+        };
         let Some(expected) = expected else {
             return Some((expr, ty));
         };

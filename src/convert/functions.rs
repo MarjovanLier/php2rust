@@ -336,8 +336,8 @@ impl Converter<'_> {
         };
         match types::rust_type(union, &self.type_names) {
             Ok(ty) => Some(ty),
-            Err(name) => {
-                self.refuse(node, format!("the type {name} has no Rust type (P2R-22)"));
+            Err(message) => {
+                self.refuse(node, message);
                 None
             }
         }

@@ -815,6 +815,11 @@ impl Converter<'_> {
                 {
                     "writing to a string offset is not supported (P2R-165)"
                 }
+                Expression::ArrayAccess(access)
+                    if matches!(self.site_type(access.array), Ok(RustType::Shape(_))) =>
+                {
+                    "a change to an array shape is not supported (P2R-201)"
+                }
                 Expression::ArrayAccess(_) | Expression::ArrayAppend(_) => {
                     "writing to a list index is not supported in version 1 (P2R-47)"
                 }
@@ -1248,8 +1253,16 @@ impl Converter<'_> {
         if borrowed {
             let message = if entry.php_name == THIS {
                 "$this cannot be assigned (P2R-135)"
-            } else if matches!(entry.ty, Some(RustType::Class(_))) {
+            } else if matches!(
+                entry.ty.as_ref().map(RustType::inner),
+                Some(RustType::Class(_))
+            ) {
                 "an object parameter cannot be assigned, because Rust borrows it (P2R-132)"
+            } else if matches!(
+                entry.ty.as_ref().map(RustType::inner),
+                Some(RustType::Shape(_))
+            ) {
+                "an array shape parameter cannot be assigned, because Rust borrows it (P2R-201)"
             } else if matches!(entry.ty.as_ref().map(RustType::inner), Some(RustType::Vec(element)) if self.is_changing(element))
             {
                 // Its copy would copy objects that never copy (P2R-145).
@@ -1471,7 +1484,6 @@ impl Converter<'_> {
             .expression_type(node)
             .ok_or_else(|| "Mago found no type here (P2R-34)".to_owned())?;
         types::rust_type(&lists::without_empty(union), &self.type_names)
-            .map_err(|name| format!("the type {name} has no Rust type (P2R-22)"))
     }
 
     /// True when Mago types `node` as `[]` only, which has no element type (P2R-21).
@@ -1864,6 +1876,15 @@ fn resolve_copy(
         }
         line.replace_range(start..=end, if again && !strict { ".clone()" } else { "" });
     }
+}
+
+/// True when `expression` reads or writes the variable `$name` (`name` with its `$`).
+pub(super) fn mentions(expression: &Expression<'_>, name: &[u8]) -> bool {
+    let mut accesses = Vec::new();
+    Accesses.walk_expression(expression, &mut accesses);
+    accesses.iter().any(|access| match access {
+        Access::Read(variable) | Access::Write(variable) => variable.name == name,
+    })
 }
 
 /// A variable that a refused expression reads or writes.

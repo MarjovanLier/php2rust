@@ -279,6 +279,13 @@ impl Converter<'_> {
         array: &Array<'_>,
         expected: Option<&RustType>,
     ) -> Option<(RExpr, RustType)> {
+        if array
+            .elements
+            .iter()
+            .any(|element| matches!(element, ArrayElement::KeyValue(_)))
+        {
+            return self.shape_literal(array, expected.map(RustType::inner));
+        }
         let mut values = Vec::new();
         for element in array.elements.iter() {
             match element {
@@ -354,7 +361,7 @@ impl Converter<'_> {
     }
 
     /// Records the variables of a refused list literal, then refuses it.
-    fn refuse_list(&mut self, array: &Array<'_>, message: impl Into<String>) {
+    pub(super) fn refuse_list(&mut self, array: &Array<'_>, message: impl Into<String>) {
         for element in array.elements.iter() {
             match element {
                 ArrayElement::KeyValue(element) => {
@@ -369,10 +376,13 @@ impl Converter<'_> {
         self.refuse(array, message);
     }
 
-    /// `$a[$i]` with an int index (P2R-47), and `$s[$i]`, the byte at an offset of a
-    /// string (P2R-165).
+    /// `$a[$i]` with an int index (P2R-47), `$s[$i]`, the byte at an offset of a string
+    /// (P2R-165), and `$s['k']`, a field of an array shape (P2R-203).
     pub(super) fn index(&mut self, access: &ArrayAccess<'_>) -> Option<(RExpr, RustType)> {
         let list = self.expression(access.array);
+        if let Some((object, RustType::Shape(name))) = list {
+            return self.shape_read(access, object, &name);
+        }
         let index = self.expression(access.index);
         let ((list, list_type), (index, index_type)) = (list?, index?);
         let element = match list_type {
@@ -563,7 +573,7 @@ mod tests {
         members.push(empty.clone());
         let maybe_empty = TUnion::from_vec(members);
         assert_eq!(
-            types::rust_type(&without_empty(&maybe_empty), &types::TypeNames::new()),
+            types::rust_type(&without_empty(&maybe_empty), &types::TypeNames::default()),
             Ok(RustType::Vec(Box::new(RustType::I64)))
         );
         let only = TUnion::from_vec(vec![empty]);

@@ -127,6 +127,12 @@ pub enum RExpr {
     Contains(Vec<RExpr>, Box<RExpr>),
     /// `if condition { then } else { otherwise }`: `?:` (P2R-180).
     If(Box<RExpr>, Box<RExpr>, Box<RExpr>),
+    /// `let Some(v) = v`, the condition of an `if` that binds a value checked against null
+    /// (P2R-205).
+    Let(String),
+    /// `S { field: value }`, a struct literal of an array shape, fields in PHP's order
+    /// (P2R-202).
+    Struct(String, Vec<(String, RExpr)>),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -369,6 +375,14 @@ fn render(expr: &RExpr, anchor: bool, min_precedence: u8) -> String {
                 text
             }
         }
+        RExpr::Let(pattern) => pattern.clone(),
+        RExpr::Struct(name, fields) => {
+            let parts: Vec<String> = fields
+                .iter()
+                .map(|(field, value)| format!("{field}: {}", render(value, false, 0)))
+                .collect();
+            format!("{name} {{ {} }}", parts.join(", "))
+        }
     }
 }
 
@@ -429,6 +443,7 @@ pub fn anchored(expr: &RExpr) -> bool {
         RExpr::Field(..) | RExpr::MethodCall(..) => true,
         RExpr::Contains(..) => true,
         RExpr::If(_, then, otherwise) => anchored(then) || anchored(otherwise),
+        RExpr::Let(_) | RExpr::Struct(..) => true,
     }
 }
 
@@ -469,7 +484,7 @@ pub fn literal_value(expr: &RExpr) -> Option<i64> {
         RExpr::Float(_) | RExpr::ToFloat(_) | RExpr::ToUsize(_) => None,
         RExpr::None | RExpr::Some(_) | RExpr::MapOwned(_) | RExpr::Unwrap { .. } => None,
         RExpr::Path(_) | RExpr::Field(..) | RExpr::MethodCall(..) => None,
-        RExpr::Contains(..) | RExpr::If(..) => None,
+        RExpr::Contains(..) | RExpr::If(..) | RExpr::Let(_) | RExpr::Struct(..) => None,
     }
 }
 

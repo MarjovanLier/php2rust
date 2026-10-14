@@ -46,6 +46,7 @@ mod modes;
 mod nulls;
 mod numbers;
 mod recursion;
+mod shapes;
 mod statements;
 mod strings;
 mod uses;
@@ -471,7 +472,7 @@ impl<'c> Converter<'c> {
             problems: Vec::new(),
             functions: HashMap::new(),
             enums: Vec::new(),
-            type_names: TypeNames::new(),
+            type_names: TypeNames::default(),
             classes: Vec::new(),
             current_method: None,
             current_class: None,
@@ -740,11 +741,19 @@ impl<'c> Converter<'c> {
         for ((module, slot, index, _), methods) in enum_slots.into_iter().zip(methods) {
             items[module][slot] = self.enum_item(index, methods);
         }
+        // Every body has converted, so every array shape the output uses is known; their
+        // structs come first, in the crate root for a directory (P2R-200, P2R-172).
+        let shapes = self.shape_items();
         if self.library {
+            for (name, _) in &shapes {
+                owners.insert(name.clone(), (0, crates::ItemKind::Type));
+            }
+            items[0].splice(0..0, shapes.into_iter().map(|(_, lines)| lines));
             return self.crate_files(items, &owners);
         }
         // Every body has converted, so every helper call is known (P2R-160).
         let mut items = items.remove(0);
+        items.splice(0..0, shapes.into_iter().map(|(_, lines)| lines));
         items.extend(self.helpers.iter().map(|(_, helper)| helper.lines()));
         vec![(String::new(), assemble(items, main))]
     }

@@ -1362,6 +1362,13 @@ impl Converter<'_> {
         node: &Expression<'_>,
     ) -> Option<(RExpr, RustType)> {
         let object = self.expression(access.object)?;
+        if matches!(&object.1, RustType::Option(inner) if matches!(**inner, RustType::Class(_))) {
+            self.refuse(
+                node,
+                "a property read on a value that may be null is not supported (P2R-106)",
+            );
+            return None;
+        }
         let RustType::Class(class) = &object.1 else {
             return self.enum_property(access, node, object);
         };

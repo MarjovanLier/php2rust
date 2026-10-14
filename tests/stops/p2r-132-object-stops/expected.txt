@@ -1,3 +1,1 @@
-input.php:14:33: a nullable object type is not supported yet (P2R-132)
 input.php:22:5: an object parameter cannot be assigned, because Rust borrows it (P2R-132)
-input.php:26:19: a nullable object type is not supported yet (P2R-132)

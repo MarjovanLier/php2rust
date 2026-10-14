@@ -19,6 +19,11 @@ cargo install --locked --path .
 
 `--locked` keeps every Mago crate on the pinned version.
 
+php2rust needs `rustfmt` on `PATH`: it lays out its output with
+`rustfmt --edition 2024` and an empty configuration, so a `rustfmt.toml` near the output
+does not change it. rustup's default profile installs rustfmt; with the minimal profile,
+run `rustup component add rustfmt`.
+
 ## Use
 
 ```sh
@@ -38,11 +43,13 @@ exist yet; `rustc --edition 2024 --crate-type lib crate/lib.rs` builds the crate
 |---|---|
 | 0 | Converted. |
 | 1 | The file holds PHP that php2rust does not convert yet. Each problem is printed as `path:line:column: message`. Nothing is written. |
-| 2 | The arguments are wrong, the file cannot be read, is not UTF-8 or is not valid PHP, or the output cannot be written. For a directory: no `-o`, an `-o` directory that exists or sits inside the input, or no `.php` file. Nothing is written. |
+| 2 | The arguments are wrong, the file cannot be read, is not UTF-8 or is not valid PHP, rustfmt cannot be run or fails on the output, or the output cannot be written. For a directory: no `-o`, an `-o` directory that exists or sits inside the input, or no `.php` file. Nothing is written. |
 
 The output compiles with no warnings under `rustc --edition 2024 -D warnings`, and
-`rustfmt --edition 2024 --check` leaves it unchanged. Its first line is a comment that
-points to the known differences below.
+`rustfmt --edition 2024 --check` with the default configuration leaves it unchanged. Its
+layout is that of the rustfmt on `PATH`, so another rustfmt version may lay out the same
+code differently; the tests use the rustfmt of the pinned toolchain. Its first line is a
+comment that points to the known differences below.
 
 ## Supported PHP
 
@@ -163,10 +170,9 @@ the others are findings of the Mago analyser. In short:
   one of them, `explode()` with a limit or an empty separator, and any
   `sprintf()` format other than text, `%s`, `%d` and `%%`, or with an argument count
   that does not match.
-- A `?:` without its middle part (`$a ?: $b`), inside another `?:`, as the result of a
-  `match` arm, wider than 50 bytes as Rust, of lists or objects, of a nullable string,
-  or with a string arm that is a call, a joined string, or a property read or list
-  element on a call or `new`.
+- A `?:` without its middle part (`$a ?: $b`), inside another `?:`, of lists or objects,
+  of a nullable string, or with a string arm that is a call, a joined string, or a
+  property read or list element on a call or `new`.
 - A namespace with braces, a second namespace, or one after other code. Imports that PHP
   rejects (two imports with one name, an import named like a class or function of the
   file, `as self`) or warns about (`use Foo;` outside a namespace).
@@ -226,9 +232,9 @@ the others are findings of the Mago analyser. In short:
   Rust name.
 - A name whose snake_case form is not a plain ASCII Rust name: `$_2` (it would become
   `2`), and any name with a letter outside ASCII, such as `$größe` or `$naïve`.
-- Code that rustc or rustfmt would reject or change: a statement that no path reaches,
-  int arithmetic that always overflows, `%` or `intdiv()` by a zero the tool can prove,
-  a function that calls itself on every path, and a statement too long for one line.
+- Code that rustc would reject: a statement that no path reaches, int arithmetic that
+  always overflows, `%` or `intdiv()` by a zero the tool can prove, and a function that
+  calls itself on every path.
 
 ## Known limitations
 
@@ -250,17 +256,12 @@ php2rust refuses some valid PHP that version 1 converts in other forms:
 - A variable that may be null stays an `Option` after an assignment that PHP knows makes
   it not null: after `if ($c === null) { $c = 0; }`, a plain use such as `$c + 1` or
   `echo $c` stops. A new variable from `??` works: `$n = $c ?? 0;`.
-- `$a ?? $b ?? 'x'` on local string variables in `echo` or an assignment is wider than
-  rustfmt's 60 columns for call arguments and method chains, so it stops.
 - A list holds `Option` elements only when its first write holds `null`:
   `$xs = [1, 2]; $xs[] = null;` stops.
 - A `for` step that reads a variable that a let-else in the loop body checks stops, also
   where Rust would accept the code.
 - `Nothing::from($v)` on an enum without cases stops: the call never returns, and rustc
   rejects the code after it.
-- An enum helper line with non-ASCII text that is longer than 100 bytes stops, also
-  where it fits in 100 columns, for example a long backing value with accents. The same
-  holds for a `match` pattern with non-ASCII text longer than 95 bytes.
 - Visibility is not copied: private methods and constants become `pub` in Rust.
 - A single input file still converts alone, so a class from another file of a library is
   unknown there (Mago reports it); convert the library's directory instead. A directory
@@ -274,17 +275,9 @@ php2rust refuses some valid PHP that version 1 converts in other forms:
   Mago finds that arm unreachable and gives it no type. `match ($n % 2)` with arms `0`,
   `1` and `-1` stops for the same two reasons. Handle the narrowed case inside the
   `match` instead of before it.
-- A `match` arm that rustfmt would split over several lines stops.
 - A nullable property read after a check against null is still an `Option`, so
   `if ($this->name !== null) { return $this->name . '!'; }` stops. Read the property into
   a variable first.
-- A `new` call with several string or list arguments is often wider than rustfmt's 60
-  columns for call arguments, so it stops. Put the arguments in variables first.
-- `$s ?? $this->name`, a nullable string parameter with a string property as the
-  default, is wider than rustfmt's 60 columns for a method chain, so it stops.
-- `$a ?? ...` on a local nullable string counts as a chain with `.clone()` even when the
-  variable is not read again, so such a line of 61 to 68 columns stops where rustfmt
-  would keep it. Put the default in a variable first.
 - A `match` that starts a new variable stops when its arms are all `[]` or all `null`,
   or when its list arms differ in whether their elements may be null (`[null, 1]` and
   `[5]`), because no arm gives the variable its type. Assign the variable first.

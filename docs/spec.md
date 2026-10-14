@@ -32,7 +32,15 @@ function do, so P2R-168 and P2R-169 apply to them. The two spec reviewers added 
 rules of P2R-160, the needle forms of P2R-163, the literal, sign and
 deprecated cast rules of P2R-166, the literal, cast and P2R-50 rules of
 P2R-167, the null, `static::` and declaration rules of P2R-168, and the
-scope and argument position rules of P2R-169.
+scope and argument position rules of P2R-169; the final review of the
+build added the wide list stop of P2R-163 and the `(int)` quirk of P2R-60.
+Section 18 (several files as one crate) was written on 14 Oct 2026; for a
+directory input it changes P2R-01, P2R-03, P2R-04, P2R-33, P2R-70,
+P2R-71, P2R-73, P2R-74 and P2R-76, and P2R-171 says how "the file" reads
+in sections 1 to 17. The two spec reviewers added the duplicate,
+letter case, module name and child module stops of P2R-172 and P2R-173,
+the global function fallback and path rules of P2R-171, the Rust-line and
+sort rules of P2R-174, and the folder rules of P2R-176.
 
 php2rust converts typed PHP source into normal, readable Rust (`Vec`,
 `String`, `i64`), without AI. It reads PHP with the Mago crates, uses Mago's
@@ -73,7 +81,7 @@ requirement IDs.
   leave a partial output file (review concern, not checked mechanically).
 - **P2R-06** The same input MUST always give the same stdout bytes, the same
   output file bytes and the same stderr bytes.
-- **P2R-07** Only the constructs that sections 3 to 5 and 11 to 17 list as
+- **P2R-07** Only the constructs that sections 3 to 5 and 11 to 18 list as
   converting may convert. Any other construct MUST stop the conversion,
   which means it is reported as a problem under P2R-03. Examples that stop
   in version 1 (section 16 converts `namespace`, `use` and class
@@ -1263,6 +1271,128 @@ small helper function that copies PHP's rules.
   and `E::tryFrom()` (P2R-114); a spread argument; and a name the function
   does not have, which PHP rejects when it runs and Mago does not report.
 
+## 18. Several files as one crate (milestone 2, slice 8)
+
+Real libraries and applications put one class in each file and name the
+classes of other files. This section converts a directory of PHP files
+together into one Rust library crate: Mago analyses all the files
+together, so a class of another file is known, and each namespace becomes a
+Rust module. One input file still converts as sections 1 to 17 say.
+
+- **P2R-170** The tool MUST also run as
+  `php2rust <input-dir> -o <output-dir>`. The input is every regular file
+  whose name ends in `.php` under `<input-dir>`, at any depth, without
+  following symbolic links, in byte order of its path relative to
+  `<input-dir>`; other files are ignored. With a directory input `-o` is
+  required, and it MUST name a path that does not exist yet whose parent
+  directory exists: the tool creates it as a directory that holds the crate
+  (P2R-172), so it never changes or deletes a file it did not write. P2R-04
+  applies, and these also exit 2, each with its reason: no `-o`; an `-o`
+  path that exists; an `-o` path inside `<input-dir>`; no `.php` file under
+  `<input-dir>`; and an input file that cannot be read, is not valid UTF-8
+  or is not valid PHP, named by its path (P2R-171). P2R-05 applies to the
+  directory: on exit 1 or 2 the `-o` path MUST NOT exist afterwards, and a
+  failed write MUST NOT leave a partial directory (the tool writes a
+  temporary directory beside it and renames it). P2R-06 covers every file
+  of the crate.
+- **P2R-171** A problem (P2R-03) MUST name its file as `<input-dir>`
+  exactly as given on the command line, joined with the file's relative
+  path by one `/` (none is added when `<input-dir>` ends in `/`). Problem
+  lines are sorted by that path, then by line, column and message, and the
+  span rule of P2R-03 compares problems of one file only. Mago analyses
+  every input file together, so a class, enum or function of one file is
+  known in every other file. For a directory input, "the file" in sections
+  1 to 17 means every input file together (P2R-31, P2R-43, P2R-48,
+  P2R-111, P2R-115, P2R-120, P2R-131, P2R-151, P2R-153, P2R-156, P2R-160,
+  P2R-163, P2R-168, P2R-169 and others), except in P2R-12, P2R-13, P2R-110
+  and P2R-150, which apply to each file alone (a `use` in one file may name
+  a class that another file declares). An unqualified call in a
+  namespace, whose name no `use function` import maps and whose namespaced
+  name no function of the crate has, MUST call the crate's function of that
+  name in the global namespace, as PHP falls back to it (the helpers file
+  of a framework).
+- **P2R-172** The crate MUST hold one Rust module for each PHP namespace
+  that declares an enum, class or function, and for each namespace between
+  the root and such a namespace. In this section namespace names compare
+  ignoring ASCII letter case, as PHP compares them. The crate root is the
+  file `lib.rs`, for the root namespace: the longest namespace that the
+  namespace of every input file that declares an enum, class or function
+  starts with, compared segment by segment (the global namespace when they
+  share none). A namespace below the root becomes the module path of its
+  segments below the root, each segment its snake_case name (P2R-30, a Rust
+  keyword as a raw identifier: `r#enum`). The module `a::b` is in the file
+  `a/b.rs`, and `a` in `a.rs` beside `lib.rs`, the layout `rustc` follows
+  from `pub mod a;` in `lib.rs` and `pub mod b;` in `a.rs`; a module that
+  holds no item still has its file, for its `pub mod` lines. The file name
+  leaves out `r#` (`enum.rs`). Each module file holds the P2R-52 line,
+  then the `pub mod` lines of its child modules, then its `use` lines
+  (P2R-174), then its items: the enums, classes and functions of every
+  input file of that namespace, files in path order and items in source
+  order, then the helpers (P2R-160) that its items call. One blank line
+  comes before each group and each item. The `pub mod` lines are sorted by
+  module name without `r#`, byte by byte (`a1`, `a10`, `a2`, `a_1`, `ab`,
+  `en`, `r#enum`, `enum_x`), as rustfmt sorts them. These stop the
+  conversion: a namespace segment whose snake_case name has no Rust form
+  (P2R-30), or is `self`, `super`, `crate` or `Self`, which a raw
+  identifier cannot carry; a module named `mod`, and a module directly
+  below the crate root named `lib` or `main`, which rustc rejects or warns
+  about beside `lib.rs`; two namespaces of different names whose module
+  paths are equal (`Acme\FooBar` and `Acme\Foo_Bar`); and two input files
+  whose namespaces hold, under equal leading segments, a segment that is
+  equal ignoring letter case but not byte for byte (`Acme\Shop` and
+  `ACME\Shop\Sub`, or `App\FooBar` and `App\Foobar`, which PHP reads as one
+  namespace), at the namespace statement of the later file in path order.
+- **P2R-173** Each enum, class and function of the crate MUST have a Rust
+  name that no other enum, class or function of the crate has, in any
+  module, because a module names the items of other modules by their Rust
+  name alone (P2R-174). Two declarations whose Rust names are equal, or
+  whose fully qualified names are equal ignoring letter case, stop the
+  conversion at each declaration, with the span of the whole declaration.
+  Mago's `duplicate-definition` finding is not printed, because the
+  declaration it names depends on how the path is written. A function whose
+  Rust name is the name of a child module of its own module stops the
+  conversion, because a `use` line of that function would import the
+  module too.
+- **P2R-174** A module whose Rust lines name an enum, class or function of
+  another module, as a type, as the first segment of a path (`Gender::Male`,
+  `Item::new`) or as a called function, MUST hold one
+  `use crate::<module path>::<Name>;` line for it (`use crate::<Name>;` for
+  an item of the crate root), and no other `use` lines. The Rust lines
+  count, not the PHP source: a default filled in at a call (P2R-168) names
+  its enum, and a `default` arm left out (P2R-121) names nothing. An enum
+  case, method, field or constant whose Rust name equals an item's is not
+  a use of it, and a name of the module's own items needs no line. The
+  `use` lines are sorted segment by segment, each segment without `r#`,
+  with a path that ends first before a longer one; segments compare by
+  rustfmt's version sorting: `_` before every other character, upper case
+  before lower case, and a run of digits by its number, where two segments
+  equal apart from leading zeros put the one with more zeros first
+  (`Dto2` before `Dto10`; `K_b`, `KB`, `Kb`). A `use` line stays on one
+  line at any width, as rustfmt keeps it, so P2R-51 does not refuse it.
+- **P2R-175** A directory input converts to a library: a statement outside
+  functions other than the P2R-12 `declare`, the P2R-150 `namespace` and
+  `use` statements, and enum and class declarations stops the conversion,
+  because a library has no `fn main()` (this replaces the `fn main()` rule
+  and the output order of P2R-33 for a directory input). The decisions that
+  P2R-115, P2R-141, P2R-143 and P2R-146 make for the whole file, which
+  helpers an enum holds, which classes change their objects and the form
+  of each object parameter, MUST be made for the whole crate.
+- **P2R-176** A case folder MAY hold a directory `input/` in place of
+  `input.php` and a directory `expected/` in place of `expected.rs`; the
+  crate written from `input/` MUST hold the same set of files as
+  `expected/`, each equal byte for byte, and every file MUST start with the
+  P2R-52 line. `rustfmt --edition 2024 --check expected/lib.rs` and
+  `rustc --edition 2024 --crate-type lib -D warnings expected/lib.rs` MUST
+  pass; both follow the modules. A stop folder MAY hold a directory `input/`
+  in place of `input.php`; run as `php2rust input -o out`, the tool MUST exit
+  1 with `expected.txt` on stderr and nothing on stdout, and `out` MUST NOT
+  exist afterwards. An error folder (P2R-74) MAY hold a directory `input/`
+  in place of `input.php`. The P2R-76 command rewrites `expected/` too and
+  removes the files the tool no longer writes. Review concern, not checked
+  mechanically: a call between two files of a crate is checked by rustc
+  only, because P2R-72 runs only a case with `fn main()` and a crate has
+  none.
+
 ## Spec checklist
 
 - [x] No `[NEEDS CLARIFICATION]` markers left. Decided in review: problems
@@ -1275,5 +1405,6 @@ small helper function that copies PHP's rules.
   by error folders and tests, P2R-50 to P2R-52 by P2R-71, the rest by CI or
   a file in the
   repository. Stated review concerns (P2R-05 partial write, P2R-72 case
-  coverage) are the only parts not checked mechanically.
+  coverage, P2R-176 calls between files checked by rustc only) are the only
+  parts not checked mechanically.
 - [x] No speculative features: later milestones carry no requirements yet.

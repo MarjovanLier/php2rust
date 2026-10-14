@@ -131,7 +131,9 @@ impl Converter<'_> {
             }
             other => {
                 let op = operation(other)?;
-                if let Some(message) = numbers::arithmetic_refusal(op, &target_type, &value_type) {
+                if let Some(message) = numbers::arithmetic_refusal(op, &target_type, &value_type)
+                    .or_else(|| numbers::shift_count_refusal(op, &expr))
+                {
                     self.refuse(expression, message);
                     return None;
                 }

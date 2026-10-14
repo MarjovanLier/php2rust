@@ -127,6 +127,8 @@ pub enum RExpr {
     Field(Box<RExpr>, String),
     /// `object.method(arguments)`, a method call (P2R-135).
     MethodCall(Box<RExpr>, String, Vec<RExpr>),
+    /// `[a, b].contains(needle)`: `in_array()` on a list literal (P2R-163).
+    Contains(Vec<RExpr>, Box<RExpr>),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -145,6 +147,9 @@ pub enum BinOp {
     Or,
     /// `/`, for `intdiv` and `fdiv` only (P2R-48).
     Div,
+    /// `<<` and `>>` by a literal count from 0 to 63 (P2R-167).
+    Shl,
+    Shr,
 }
 
 impl BinOp {
@@ -163,27 +168,34 @@ impl BinOp {
             Self::And => "&&",
             Self::Or => "||",
             Self::Div => "/",
+            Self::Shl => "<<",
+            Self::Shr => ">>",
         }
     }
 
     /// Rust precedence, which matches PHP for these operators: `*`, `/` and `%` bind tighter
-    /// than `+` and `-`, then the comparisons, then `&&`, then `||`. Above them come `as`
-    /// at [`CAST`], unary operators at [`UNARY`] and method calls and indexing at
-    /// [`POSTFIX`].
+    /// than `+` and `-`, then `<<` and `>>`, then the comparisons, then `&&`, then `||`.
+    /// Above them come `as` at [`CAST`], unary operators at [`UNARY`] and method calls and
+    /// indexing at [`POSTFIX`].
     fn precedence(self) -> u8 {
         match self {
-            Self::Mul | Self::Rem => 5,
-            Self::Add | Self::Sub => 4,
+            Self::Mul | Self::Rem | Self::Div => 6,
+            Self::Add | Self::Sub => 5,
+            Self::Shl | Self::Shr => 4,
             Self::Eq | Self::Ne | Self::Lt | Self::Gt | Self::Le | Self::Ge => 3,
             Self::And => 2,
             Self::Or => 1,
-            Self::Div => 5,
         }
     }
 
     /// True for `==`, `!=`, `<`, `>`, `<=` and `>=`.
     pub fn compares(self) -> bool {
         self.precedence() == 3
+    }
+
+    /// True for `<<` and `>>`.
+    pub fn shifts(self) -> bool {
+        self.precedence() == 4
     }
 }
 
@@ -193,11 +205,11 @@ pub struct TooWide;
 
 /// `as` binds tighter than every binary operator, so `(i + 1) as usize` needs its
 /// parentheses and `n * a.len() as i64` needs none.
-const CAST: u8 = 6;
+const CAST: u8 = 7;
 /// Unary minus and `!` bind tighter than every binary operator and `as`.
-const UNARY: u8 = 7;
+const UNARY: u8 = 8;
 /// A method call or an index binds tighter than everything else.
-const POSTFIX: u8 = 8;
+const POSTFIX: u8 = 9;
 
 /// Lays out `expr` on one line with only the parentheses Rust needs (P2R-43). With
 /// `anchor`, an expression made only of literals gets `_i64` on its first literal, so Rust
@@ -224,6 +236,8 @@ fn render(expr: &RExpr, anchor: bool, min_precedence: u8) -> Result<String, TooW
                 call_arguments(arguments)?
             ),
         )?,
+        // A method call binds tighter than a minus: `(-5_i64).to_string()` (P2R-166).
+        RExpr::Neg(_) if UNARY < min_precedence => format!("({})", render(expr, anchor, 0)?),
         // `--x` trips rustc's double_negations lint, so the inner minus gets parentheses.
         RExpr::Neg(inner) if matches!(**inner, RExpr::Neg(_)) => {
             format!("-({})", render(inner, anchor, 0)?)
@@ -253,7 +267,11 @@ fn render(expr: &RExpr, anchor: bool, min_precedence: u8) -> Result<String, TooW
         }
         RExpr::Binary(left, op, right) => {
             let precedence = op.precedence();
-            let left = render(left, anchor && !anchored(expr), precedence)?;
+            let mut left = render(left, anchor && !anchored(expr), precedence)?;
+            // As for `<`, rustc reads `as i64 <<` as the start of generic arguments.
+            if *op == BinOp::Shl && (left.ends_with(" as i64") || left.ends_with(" as f64")) {
+                left = format!("({left})");
+            }
             let right = render(right, false, precedence + 1)?;
             let text = format!("{left} {} {right}", op.text());
             if precedence < min_precedence {
@@ -269,10 +287,15 @@ fn render(expr: &RExpr, anchor: bool, min_precedence: u8) -> Result<String, TooW
             RExpr::List(items) => format!("&[{}]", elements(items, false)?),
             other => format!("&{}", render(other, false, UNARY)?),
         },
-        RExpr::RefMut(inner) => format!("&mut {}", render(inner, false, UNARY)?),
+        RExpr::RefMut(inner) => match &**inner {
+            // The `[]` default of a `&mut [C]` parameter (P2R-168).
+            RExpr::List(items) => format!("&mut [{}]", elements(items, false)?),
+            other => format!("&mut {}", render(other, false, UNARY)?),
+        },
+        // The receiver fixes no type, so one made only of literals gets `_i64` (P2R-166).
         RExpr::Method(inner, method) => chained(
             expr,
-            format!("{}.{method}()", render(inner, false, POSTFIX)?),
+            format!("{}.{method}()", render(inner, !anchored(inner), POSTFIX)?),
         )?,
         RExpr::Len(inner) => {
             // A length fixes no element type, so a list of literals gets `_i64` (P2R-49).
@@ -319,6 +342,16 @@ fn render(expr: &RExpr, anchor: bool, min_precedence: u8) -> Result<String, TooW
             format!("Some({text})")
         }
         RExpr::Path(path) => path.clone(),
+        // The elements fix no type, so a needle made only of literals makes the first one
+        // `_i64` (P2R-49).
+        RExpr::Contains(items, needle) => {
+            let anchor = matches!(&**needle, RExpr::Ref(inner) if !anchored(inner));
+            format!(
+                "[{}].contains({})",
+                elements(items, anchor)?,
+                call_arguments(std::slice::from_ref(needle))?
+            )
+        }
         RExpr::MapOwned(inner) => chained(
             expr,
             format!("{}.map(ToOwned::to_owned)", render(inner, false, POSTFIX)?),
@@ -437,6 +470,7 @@ pub fn anchored(expr: &RExpr) -> bool {
         RExpr::MapOwned(_) | RExpr::Unwrap { .. } | RExpr::Path(_) => true,
         // A field and a method have declared types.
         RExpr::Field(..) | RExpr::MethodCall(..) => true,
+        RExpr::Contains(..) => true,
     }
 }
 
@@ -463,6 +497,9 @@ pub fn literal_value(expr: &RExpr) -> Option<i64> {
                 | BinOp::And
                 | BinOp::Or => None,
                 BinOp::Div => left.checked_div(right),
+                // A shift loses the bits it moves out, in rustc as in PHP (P2R-167).
+                BinOp::Shl => left.checked_shl(u32::try_from(right).ok()?),
+                BinOp::Shr => left.checked_shr(u32::try_from(right).ok()?),
             }
         }
         RExpr::Str(_) | RExpr::Var(_) | RExpr::Call(..) => None,
@@ -474,6 +511,7 @@ pub fn literal_value(expr: &RExpr) -> Option<i64> {
         RExpr::Float(_) | RExpr::ToFloat(_) => None,
         RExpr::None | RExpr::Some(_) | RExpr::MapOwned(_) | RExpr::Unwrap { .. } => None,
         RExpr::Path(_) | RExpr::Field(..) | RExpr::MethodCall(..) => None,
+        RExpr::Contains(..) => None,
     }
 }
 
@@ -705,5 +743,56 @@ mod tests {
         assert_eq!(expr(&sum, false).unwrap(), "(2_i64 + 3) as f64");
         let negated = cast(RExpr::Neg(Box::new(n())));
         assert_eq!(expr(&negated, false).unwrap(), "-n as f64");
+    }
+
+    #[test]
+    fn shifts_bind_between_sums_and_comparisons() {
+        let n = || RExpr::Var("n".into());
+        let sum = binary(n(), BinOp::Add, RExpr::Int(1));
+        assert_eq!(
+            expr(&binary(sum, BinOp::Shl, RExpr::Int(2)), false).unwrap(),
+            "n + 1 << 2"
+        );
+        let shift = binary(n(), BinOp::Shl, RExpr::Int(2));
+        assert_eq!(
+            expr(&binary(shift, BinOp::Mul, RExpr::Int(3)), false).unwrap(),
+            "(n << 2) * 3"
+        );
+        // `as i64 <<` would start generic arguments, as `as i64 <` does.
+        let len = RExpr::Len(Box::new(n()));
+        assert_eq!(
+            expr(&binary(len, BinOp::Shl, RExpr::Int(2)), false).unwrap(),
+            "(n.len() as i64) << 2"
+        );
+        let literals = binary(RExpr::Int(1), BinOp::Shl, RExpr::Int(63));
+        assert_eq!(expr(&literals, true).unwrap(), "1_i64 << 63");
+        assert_eq!(literal_value(&literals), Some(i64::MIN));
+    }
+
+    #[test]
+    fn a_method_on_a_literal_or_an_operator_gets_i64_and_parentheses() {
+        let to_string = |inner| RExpr::Method(Box::new(inner), "to_string");
+        assert_eq!(
+            expr(&to_string(RExpr::Neg(int(5))), false).unwrap(),
+            "(-5_i64).to_string()"
+        );
+        assert_eq!(
+            expr(&to_string(RExpr::Int(3_000_000_000)), false).unwrap(),
+            "3000000000_i64.to_string()"
+        );
+        let sum = binary(RExpr::Var("n".into()), BinOp::Add, RExpr::Int(1));
+        assert_eq!(expr(&to_string(sum), false).unwrap(), "(n + 1).to_string()");
+    }
+
+    #[test]
+    fn contains_anchors_its_elements_only_for_a_literal_needle() {
+        let list = || vec![RExpr::Int(1), RExpr::Int(2)];
+        let needle = |inner| Box::new(RExpr::Ref(Box::new(inner)));
+        let literal = RExpr::Contains(list(), needle(RExpr::Int(2)));
+        assert_eq!(expr(&literal, false).unwrap(), "[1_i64, 2].contains(&2)");
+        let variable = RExpr::Contains(list(), needle(RExpr::Var("n".into())));
+        assert_eq!(expr(&variable, false).unwrap(), "[1, 2].contains(&n)");
+        let empty = RExpr::RefMut(Box::new(RExpr::List(Vec::new())));
+        assert_eq!(expr(&empty, false).unwrap(), "&mut []");
     }
 }

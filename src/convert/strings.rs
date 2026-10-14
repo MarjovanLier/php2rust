@@ -1,5 +1,6 @@
-//! Strings: `.`, interpolation, `strlen`, and the owned and borrowed forms Rust needs
-//! (P2R-20, P2R-24, P2R-26, P2R-45, P2R-48).
+//! Strings: `.`, interpolation, `strlen` and the string functions of section 17, and the
+//! owned and borrowed forms Rust needs (P2R-20, P2R-24, P2R-26, P2R-45, P2R-48, P2R-161
+//! to P2R-164).
 //!
 //! A joined string becomes one `format!` whose literal text has its braces doubled and
 //! whose values are positional `{}` arguments (P2R-45). A string literal and a string
@@ -9,6 +10,7 @@
 use mago_span::Span;
 use mago_syntax::cst::*;
 
+use super::helpers::Helper;
 use super::{Converter, nulls};
 use crate::printer::RExpr;
 use crate::types::{self, RustType};
@@ -55,6 +57,149 @@ impl Converter<'_> {
             return None;
         }
         Some((RExpr::Len(Box::new(expr)), RustType::I64))
+    }
+
+    /// `ctype_digit($s)` on a string: true when it is not empty and every byte is an ASCII
+    /// digit (P2R-161). PHP reads an int argument as a character code.
+    pub(super) fn ctype_digit(
+        &mut self,
+        call: &FunctionCall<'_>,
+        node: &Expression<'_>,
+    ) -> Option<(RExpr, RustType)> {
+        let arguments = self.built_in_arguments(
+            call,
+            node,
+            (1, 1),
+            "ctype_digit() takes one positional argument (P2R-161)",
+        )?;
+        let text = self.typed_argument(
+            arguments[0],
+            &RustType::String,
+            "ctype_digit() is supported only on a string (P2R-161)",
+        )?;
+        let text = self.borrowed(text, &RustType::String);
+        Some((
+            self.helper_call(Helper::CtypeDigit, vec![text]),
+            RustType::Bool,
+        ))
+    }
+
+    /// `str_starts_with`, `str_ends_with` and `str_contains` on two strings, as the `str`
+    /// method `method`: both compare bytes, and an empty needle gives true (P2R-162).
+    pub(super) fn string_search(
+        &mut self,
+        call: &FunctionCall<'_>,
+        node: &Expression<'_>,
+        method: &str,
+    ) -> Option<(RExpr, RustType)> {
+        let name = format!("str_{method}");
+        let arguments = self.built_in_arguments(
+            call,
+            node,
+            (2, 2),
+            &format!("{name}() takes two positional arguments (P2R-162)"),
+        )?;
+        let message = format!("{name}() is supported only on strings (P2R-162)");
+        // Both convert first, so problems in both are reported.
+        let haystack = self.typed_argument(arguments[0], &RustType::String, &message);
+        let needle = self.typed_argument(arguments[1], &RustType::String, &message);
+        let (haystack, needle) = (haystack?, needle?);
+        let needle = self.borrowed(needle, &RustType::String);
+        Some((
+            RExpr::MethodCall(Box::new(haystack), method.to_owned(), vec![needle]),
+            RustType::Bool,
+        ))
+    }
+
+    /// `substr($s, $start)` and `substr($s, $start, $length)`, with PHP 8's rules for a
+    /// start or length past either end (P2R-164).
+    pub(super) fn substr(
+        &mut self,
+        call: &FunctionCall<'_>,
+        node: &Expression<'_>,
+    ) -> Option<(RExpr, RustType)> {
+        let arguments = self.built_in_arguments(
+            call,
+            node,
+            (2, 3),
+            "substr() takes two or three positional arguments (P2R-164)",
+        )?;
+        if let Some(&length) = arguments.get(2)
+            && nulls::is_null(length)
+        {
+            self.record_refused(arguments[0]);
+            self.record_refused(arguments[1]);
+            self.refuse(
+                length,
+                "substr() with a null length is not supported (P2R-164)",
+            );
+            return None;
+        }
+        let message = "substr() is supported only on a string and int offsets (P2R-164)";
+        let text = self.typed_argument(arguments[0], &RustType::String, message);
+        let start = self.typed_argument(arguments[1], &RustType::I64, message);
+        let length = match arguments.get(2) {
+            Some(&length) => self
+                .typed_argument(length, &RustType::I64, message)
+                .map(|length| RExpr::Some(Box::new(length))),
+            None => Some(RExpr::None),
+        };
+        let (text, start, length) = (text?, start?, length?);
+        let text = self.borrowed(text, &RustType::String);
+        let call = self.helper_call(Helper::PhpSubstr, vec![text, start, length]);
+        Some((call, RustType::String))
+    }
+
+    /// The positional arguments of a call of a built-in function, when there are from
+    /// `min` to `max` of them, or `None` with `message` recorded: a named or spread
+    /// argument stops it as well (P2R-169).
+    pub(super) fn built_in_arguments<'arena>(
+        &mut self,
+        call: &FunctionCall<'arena>,
+        node: &Expression<'_>,
+        (min, max): (usize, usize),
+        message: &str,
+    ) -> Option<Vec<&'arena Expression<'arena>>> {
+        let values: Option<Vec<&'arena Expression<'arena>>> = call
+            .argument_list
+            .arguments
+            .iter()
+            .map(|argument| match argument {
+                Argument::Positional(positional) if positional.ellipsis.is_none() => {
+                    Some(positional.value)
+                }
+                _ => None,
+            })
+            .collect();
+        match values {
+            Some(values) if (min..=max).contains(&values.len()) => Some(values),
+            _ => {
+                self.record_refused(node);
+                self.refuse(node, message.to_owned());
+                None
+            }
+        }
+    }
+
+    /// An argument of a built-in function that must have the type `wanted`, converted but
+    /// not yet lent. A value that may be null stops (P2R-106).
+    pub(super) fn typed_argument(
+        &mut self,
+        value: &Expression<'_>,
+        wanted: &RustType,
+        message: &str,
+    ) -> Option<RExpr> {
+        let (expr, ty) = self.expression(value)?;
+        if ty == *wanted {
+            return Some(expr);
+        }
+        let message = if matches!(ty, RustType::Option(_)) {
+            nulls::NULL_BUILT_IN
+        } else {
+            message
+        };
+        self.refuse(value, message.to_owned());
+        None
     }
 
     /// A value where Rust needs an owned `String` or `Vec`: an assignment or a return. A

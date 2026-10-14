@@ -12,7 +12,8 @@ use mago_span::HasSpan;
 use mago_syntax::cst::*;
 use mago_syntax::walker::Walker;
 
-use super::{Converter, ParameterSignature, nulls};
+use super::helpers::Helper;
+use super::{Converter, ParameterSignature, nulls, parameter_index};
 use crate::printer::RExpr;
 use crate::types::{self, RustType};
 
@@ -86,13 +87,14 @@ struct Sites<'c> {
 }
 
 impl Sites<'_> {
-    /// Each variable passed alone as an argument flows into its parameter's type.
+    /// Each variable passed alone as an argument flows into its parameter's type; a named
+    /// argument flows into the parameter of its name (P2R-169).
     fn arguments(&mut self, list: &ArgumentList<'_>, parameters: &[ParameterSignature]) {
-        for (argument, parameter) in list.arguments.iter().zip(parameters) {
-            if let Argument::Positional(positional) = argument
-                && positional.ellipsis.is_none()
+        for (position, argument) in list.arguments.iter().enumerate() {
+            if let Some(parameter) =
+                parameter_index(position, argument, parameters).and_then(|at| parameters.get(at))
                 && let Expression::Variable(Variable::Direct(variable)) =
-                    unparenthesized(positional.value)
+                    unparenthesized(argument.value())
             {
                 self.add(variable, Some(parameter.ty.clone()), true);
             }
@@ -373,30 +375,157 @@ impl Converter<'_> {
         self.refuse(array, message);
     }
 
-    /// `$a[$i]` with an int index (P2R-47).
+    /// `$a[$i]` with an int index (P2R-47), and `$s[$i]`, the byte at an offset of a
+    /// string (P2R-165).
     pub(super) fn index(&mut self, access: &ArrayAccess<'_>) -> Option<(RExpr, RustType)> {
         let list = self.expression(access.array);
         let index = self.expression(access.index);
         let ((list, list_type), (index, index_type)) = (list?, index?);
-        let RustType::Vec(element) = list_type else {
-            let message = if matches!(list_type, RustType::Option(_)) {
-                "a value that may be null cannot be read by index (P2R-106)"
-            } else {
-                "only a list can be read by index (P2R-47)"
-            };
-            self.refuse(access, message);
-            return None;
+        let element = match list_type {
+            RustType::Vec(element) => Some(*element),
+            RustType::String => None,
+            RustType::Option(_) => {
+                self.refuse(
+                    access,
+                    "a value that may be null cannot be read by index (P2R-106)",
+                );
+                return None;
+            }
+            _ => {
+                self.refuse(
+                    access,
+                    "only a list or a string can be read by index (P2R-47, P2R-165)",
+                );
+                return None;
+            }
         };
         if index_type != RustType::I64 {
-            let message = if matches!(index_type, RustType::Option(_)) {
-                "a value that may be null cannot be a list index (P2R-106)"
-            } else {
-                "a list index must be an int (P2R-47)"
+            let message = match (&index_type, &element) {
+                (RustType::Option(_), Some(_)) => {
+                    "a value that may be null cannot be a list index (P2R-106)"
+                }
+                (RustType::Option(_), None) => {
+                    "a value that may be null cannot be a string offset (P2R-106)"
+                }
+                (_, Some(_)) => "a list index must be an int (P2R-47)",
+                (_, None) => "a string offset must be an int (P2R-165)",
             };
             self.refuse(access.index, message);
             return None;
         }
-        Some((RExpr::Index(Box::new(list), Box::new(index)), *element))
+        let Some(element) = element else {
+            let text = self.borrowed(list, &RustType::String);
+            let call = self.helper_call(Helper::PhpOffset, vec![text, index]);
+            return Some((call, RustType::String));
+        };
+        Some((RExpr::Index(Box::new(list), Box::new(index)), element))
+    }
+
+    /// `in_array($v, [...], true)` on a list literal of int, string or enum case literals
+    /// of the needle's type, as `[a, b].contains(&v)`. Without `true` PHP compares loosely
+    /// (P2R-163).
+    pub(super) fn in_array(
+        &mut self,
+        call: &FunctionCall<'_>,
+        node: &Expression<'_>,
+    ) -> Option<(RExpr, RustType)> {
+        let arguments = self.built_in_arguments(
+            call,
+            node,
+            (3, 3),
+            "in_array() converts only with three positional arguments, the last true, because PHP otherwise compares loosely (P2R-163)",
+        )?;
+        let (value, list, strict) = (arguments[0], arguments[1], arguments[2]);
+        if !matches!(
+            unparenthesized(strict),
+            Expression::Literal(Literal::True(_))
+        ) {
+            self.record_refused(node);
+            self.refuse(
+                strict,
+                "in_array() converts only with true as its third argument, because PHP otherwise compares loosely (P2R-163)",
+            );
+            return None;
+        }
+        let items = match unparenthesized(list) {
+            Expression::Array(array) if !array.elements.is_empty() => array
+                .elements
+                .iter()
+                .map(|element| match element {
+                    ArrayElement::Value(element) if self.literal_element(element.value) => {
+                        Some(element.value)
+                    }
+                    _ => None,
+                })
+                .collect::<Option<Vec<_>>>(),
+            _ => None,
+        };
+        let Some(items) = items else {
+            self.record_refused(node);
+            self.refuse(
+                list,
+                "in_array() converts only on a list literal with elements that are all int, string or enum case literals (P2R-163)",
+            );
+            return None;
+        };
+        let needle = self.expression(value);
+        let converted: Option<Vec<(RExpr, RustType)>> =
+            items.iter().map(|item| self.expression(item)).collect();
+        let ((needle, ty), converted) = (needle?, converted?);
+        if matches!(ty, RustType::Option(_)) {
+            self.refuse(value, nulls::NULL_BUILT_IN);
+            return None;
+        }
+        if !matches!(ty, RustType::I64 | RustType::String | RustType::Enum(_)) {
+            self.refuse(
+                value,
+                "in_array() converts only an int, string or enum needle (P2R-163)",
+            );
+            return None;
+        }
+        let mut elements = Vec::new();
+        for (item, (expr, element)) in items.iter().zip(converted) {
+            if element != ty {
+                // PHP reads an integer literal above PHP_INT_MAX as a float (P2R-49).
+                let message = if element == RustType::F64 {
+                    "an integer literal above PHP_INT_MAX is a float in PHP, which in_array() does not convert (P2R-163)"
+                } else {
+                    "every element of the list must have the needle's type (P2R-163)"
+                };
+                self.refuse(*item, message);
+                return None;
+            }
+            elements.push(expr);
+        }
+        // An owned string lends a `&str`, which the elements are (P2R-163).
+        let needle = if ty == RustType::String && !self.is_reference(&needle) {
+            RExpr::Method(Box::new(needle), "as_str")
+        } else {
+            needle
+        };
+        Some((
+            RExpr::Contains(elements, Box::new(RExpr::Ref(Box::new(needle)))),
+            RustType::Bool,
+        ))
+    }
+
+    /// True for an element `in_array()` takes: an int literal with or without unary minus,
+    /// a string literal without interpolation, or a case of an enum of the file (P2R-163).
+    fn literal_element(&self, value: &Expression<'_>) -> bool {
+        match unparenthesized(value) {
+            Expression::Literal(Literal::Integer(_) | Literal::String(_)) => true,
+            Expression::UnaryPrefix(unary) => {
+                matches!(unary.operator, UnaryPrefixOperator::Negation(_))
+                    && matches!(
+                        unparenthesized(unary.operand),
+                        Expression::Literal(Literal::Integer(_))
+                    )
+            }
+            Expression::Access(Access::ClassConstant(access)) => {
+                self.enum_case_of(access).is_some()
+            }
+            _ => false,
+        }
     }
 
     /// `count($list)`, the length as `i64` (P2R-48).

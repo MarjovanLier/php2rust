@@ -4,7 +4,7 @@ use mago_span::HasSpan;
 use mago_syntax::cst::*;
 
 use super::variables::{self, changes_variable};
-use super::{Converter, Mode, ParameterSignature, lists, nulls, numbers};
+use super::{Converter, Mode, ParameterSignature, lists, nulls, numbers, parameter_index};
 use crate::printer::{self, BinOp, RExpr};
 use crate::types::RustType;
 
@@ -63,6 +63,30 @@ impl Converter<'_> {
             Expression::Call(Call::Function(call)) if self.calls_built_in(call, b"fdiv") => {
                 self.fdiv(call, expression)
             }
+            Expression::Call(Call::Function(call)) if self.calls_built_in(call, b"ctype_digit") => {
+                self.ctype_digit(call, expression)
+            }
+            Expression::Call(Call::Function(call))
+                if self.calls_built_in(call, b"str_starts_with") =>
+            {
+                self.string_search(call, expression, "starts_with")
+            }
+            Expression::Call(Call::Function(call))
+                if self.calls_built_in(call, b"str_ends_with") =>
+            {
+                self.string_search(call, expression, "ends_with")
+            }
+            Expression::Call(Call::Function(call))
+                if self.calls_built_in(call, b"str_contains") =>
+            {
+                self.string_search(call, expression, "contains")
+            }
+            Expression::Call(Call::Function(call)) if self.calls_built_in(call, b"substr") => {
+                self.substr(call, expression)
+            }
+            Expression::Call(Call::Function(call)) if self.calls_built_in(call, b"in_array") => {
+                self.in_array(call, expression)
+            }
             Expression::Call(Call::Function(call)) => match self.call(call, expression)? {
                 (call, Some(ty)) => Some((call, ty)),
                 (_, None) => {
@@ -78,6 +102,7 @@ impl Converter<'_> {
             {
                 self.not(unary)
             }
+            Expression::UnaryPrefix(unary) if unary.operator.is_cast() => self.cast(unary),
             Expression::Literal(Literal::Null(null)) => {
                 self.refuse(null, "the type null has no Rust type (P2R-22)");
                 None
@@ -147,6 +172,8 @@ impl Converter<'_> {
             BinaryOperator::Subtraction(_) => BinOp::Sub,
             BinaryOperator::Multiplication(_) => BinOp::Mul,
             BinaryOperator::Modulo(_) => BinOp::Rem,
+            BinaryOperator::LeftShift(_) => BinOp::Shl,
+            BinaryOperator::RightShift(_) => BinOp::Shr,
             BinaryOperator::Division(_) => {
                 self.record_refused(binary.lhs);
                 self.record_refused(binary.rhs);
@@ -195,7 +222,9 @@ impl Converter<'_> {
         let left = self.expression(binary.lhs);
         let right = self.expression(binary.rhs);
         let ((left, left_type), (right, right_type)) = (left?, right?);
-        if let Some(message) = numbers::arithmetic_refusal(op, &left_type, &right_type) {
+        if let Some(message) = numbers::arithmetic_refusal(op, &left_type, &right_type)
+            .or_else(|| numbers::shift_count_refusal(op, &right))
+        {
             self.refuse(binary, message);
             return None;
         }
@@ -270,71 +299,132 @@ impl Converter<'_> {
     }
 
     /// The arguments of a call to a function, method or constructor with these
-    /// parameters, each converted as for its parameter (P2R-24, P2R-25, P2R-133). `None`
-    /// when a problem is recorded.
-    pub(super) fn arguments(
+    /// parameters, in parameter order, each converted as for its parameter (P2R-24,
+    /// P2R-25, P2R-133). A named argument goes to the parameter of its name, and a
+    /// parameter the call leaves out gets its default (P2R-168, P2R-169). `None` when a
+    /// problem is recorded.
+    pub(super) fn arguments<'arena>(
         &mut self,
-        list: &ArgumentList<'_>,
+        list: &ArgumentList<'arena>,
         parameters: &[ParameterSignature],
         node: &Expression<'_>,
     ) -> Option<Vec<RExpr>> {
-        let mut arguments = Vec::new();
+        let mut slots: Vec<Option<&'arena Expression<'arena>>> = vec![None; parameters.len()];
+        let mut extra = Vec::new();
         let mut converted = true;
+        // The first parameter a later argument may go to.
+        let mut next = 0;
+        let mut named = false;
         for (position, argument) in list.arguments.iter().enumerate() {
-            match argument {
-                // Mago reports an argument whose type does not match the parameter (P2R-11).
-                Argument::Positional(positional) if positional.ellipsis.is_none() => {
-                    let parameter = parameters.get(position).map(|p| &p.ty);
-                    match self.value(positional.value, parameter) {
-                        Some((_, ty))
-                            if parameter.is_some_and(|p| nulls::null_for_plain(&ty, p)) =>
-                        {
-                            self.refuse(
-                                positional.value,
-                                "a value that may be null cannot go to a parameter that is not nullable (P2R-106)",
-                            );
-                            converted = false;
-                        }
-                        Some((expr, ty)) => {
-                            let declared = parameter.unwrap_or(&ty);
-                            let mode = parameters.get(position).map_or(Mode::Shared, |p| p.mode);
-                            let passed = self
-                                .declared_value(positional.value, expr, &ty, declared)
-                                .and_then(|expr| match mode {
-                                    Mode::Shared => Some(self.borrowed(expr, &ty)),
-                                    Mode::Mut => self.lent(positional.value, expr),
-                                    Mode::Owned => {
-                                        self.stored(positional.value, expr, &ty, node.span())
-                                    }
-                                });
-                            match passed {
-                                Some(expr) => arguments.push(nulls::wrapped(expr, &ty, declared)),
-                                None => converted = false,
-                            }
-                        }
-                        None => converted = false,
-                    }
+            let problem = match argument {
+                Argument::Positional(_) if argument.is_unpacked() => {
+                    Some("a spread argument is not supported (P2R-169)")
                 }
-                other => {
-                    let value = match other {
-                        Argument::Positional(positional) => positional.value,
-                        Argument::Named(named) => named.value,
-                    };
-                    self.record_refused(value);
-                    self.refuse(
-                        other,
-                        "named and spread arguments are not supported (P2R-07)",
-                    );
-                    converted = false;
+                // PHP rejects the file; Mago does not report it.
+                Argument::Positional(_) if named => Some(
+                    "a positional argument cannot follow a named one, which PHP rejects (P2R-169)",
+                ),
+                Argument::Positional(_) => None,
+                // Mago reports a name the function does not have (P2R-11).
+                Argument::Named(_) => match parameter_index(position, argument, parameters) {
+                    Some(index) if index >= next => None,
+                    Some(_) => Some(
+                        "named arguments must follow the order of the parameters, because PHP runs them in the written order (P2R-169)",
+                    ),
+                    None => Some("the function has no parameter of this name (P2R-169)"),
+                },
+            };
+            named |= matches!(argument, Argument::Named(_));
+            if let Some(message) = problem {
+                self.record_refused(argument.value());
+                self.refuse(argument, message);
+                converted = false;
+                continue;
+            }
+            match parameter_index(position, argument, parameters).filter(|&i| i >= next) {
+                Some(index) if index < parameters.len() => {
+                    slots[index] = Some(argument.value());
+                    next = index + 1;
                 }
+                _ => extra.push(argument.value()),
             }
         }
-        // PHP accepts extra arguments to a user function; Rust does not.
-        if converted && arguments.len() != parameters.len() {
-            self.refuse(node, "a call must pass one argument per parameter (P2R-07)");
+        // Named arguments follow the order of the parameters, so this is PHP's order too.
+        let mut arguments = Vec::new();
+        let mut missing = false;
+        for (parameter, slot) in parameters.iter().zip(slots) {
+            let passed = match slot {
+                Some(value) => self.argument(value, parameter, node),
+                None if parameter.default.is_some() => self.default_argument(parameter),
+                None => {
+                    missing = true;
+                    continue;
+                }
+            };
+            match passed {
+                Some(expr) => arguments.push(expr),
+                None => converted = false,
+            }
+        }
+        // Their problems are reported too. PHP accepts extra arguments to a user function;
+        // Rust does not.
+        for value in &extra {
+            converted &= self.value(value, None).is_some();
+        }
+        if converted && !extra.is_empty() {
+            self.refuse(
+                node,
+                "a call cannot pass more arguments than the function has parameters (P2R-07)",
+            );
+            converted = false;
+        }
+        if converted && missing {
+            self.refuse(
+                node,
+                "a call must pass an argument for each parameter without a default (P2R-07)",
+            );
             converted = false;
         }
         converted.then_some(arguments)
+    }
+
+    /// The written argument `value` for `parameter`, converted as for it. Mago reports an
+    /// argument whose type does not match the parameter (P2R-11).
+    fn argument(
+        &mut self,
+        value: &Expression<'_>,
+        parameter: &ParameterSignature,
+        node: &Expression<'_>,
+    ) -> Option<RExpr> {
+        let declared = &parameter.ty;
+        let (expr, ty) = self.value(value, Some(declared))?;
+        if nulls::null_for_plain(&ty, declared) {
+            self.refuse(
+                value,
+                "a value that may be null cannot go to a parameter that is not nullable (P2R-106)",
+            );
+            return None;
+        }
+        let expr = self.declared_value(value, expr, &ty, declared)?;
+        let passed = match parameter.mode {
+            Mode::Shared => self.borrowed(expr, &ty),
+            Mode::Mut => self.lent(value, expr)?,
+            Mode::Owned => self.stored(value, expr, &ty, node.span())?,
+        };
+        Some(nulls::wrapped(passed, &ty, declared))
+    }
+
+    /// The default of `parameter`, converted at its declaration, for a call that leaves
+    /// it out, passed as an argument for that parameter is: `&[]`, `&mut []`, `Vec::new()`
+    /// or `Some(&[])` by the parameter's form (P2R-143, P2R-168).
+    fn default_argument(&self, parameter: &ParameterSignature) -> Option<RExpr> {
+        let (expr, ty) = parameter.default.clone()?;
+        let declared = &parameter.ty;
+        Some(match parameter.mode {
+            Mode::Shared => nulls::wrapped(self.borrowed(expr, &ty), &ty, declared),
+            Mode::Mut => RExpr::RefMut(Box::new(nulls::wrapped(expr, &ty, declared))),
+            Mode::Owned => nulls::wrapped(expr, &ty, declared),
+        })
     }
 
     /// The argument `expr`, converted from `value`, for a parameter that changes its

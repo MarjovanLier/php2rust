@@ -1,7 +1,7 @@
 //! Walks the Mago syntax tree and writes Rust (docs/spec.md sections 2 to 5).
 
 use std::borrow::Cow;
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeSet, HashMap, HashSet};
 
 use mago_allocator::LocalArena;
 use mago_analyzer::Analyzer;
@@ -37,6 +37,7 @@ mod expressions;
 mod flow;
 mod foreach;
 mod functions;
+mod helpers;
 mod lists;
 mod matching;
 mod modes;
@@ -292,6 +293,25 @@ struct ParameterSignature {
     snake: String,
     ty: RustType,
     mode: Mode,
+    /// The default value, converted at the declaration, with its Rust type (P2R-168).
+    default: Option<(RExpr, RustType)>,
+}
+
+/// The parameter a written argument of a call goes to: a positional one to the parameter
+/// at its position, a named one to the parameter of its name, which PHP matches with its
+/// letter case (P2R-169). `None` for a spread argument or a name no parameter has.
+fn parameter_index(
+    position: usize,
+    argument: &Argument<'_>,
+    parameters: &[ParameterSignature],
+) -> Option<usize> {
+    match argument {
+        Argument::Positional(_) if argument.is_unpacked() => None,
+        Argument::Positional(_) => Some(position),
+        Argument::Named(named) => parameters
+            .iter()
+            .position(|parameter| parameter.php_name == named.name.value),
+    }
 }
 
 /// How a parameter of a changing type takes its argument; any other parameter is
@@ -360,6 +380,8 @@ struct Converter<'c> {
     loops: modes::Loops,
     /// The variables of the body being converted: a function, or `fn main()`.
     variables: Variables,
+    /// The helpers the output calls (P2R-160).
+    helpers: BTreeSet<helpers::Helper>,
 }
 
 impl<'c> Converter<'c> {
@@ -386,6 +408,7 @@ impl<'c> Converter<'c> {
             dropped_defaults: Vec::new(),
             loops: modes::Loops::default(),
             variables: Variables::default(),
+            helpers: BTreeSet::new(),
         }
     }
 
@@ -577,6 +600,8 @@ impl<'c> Converter<'c> {
         for ((slot, index, _), methods) in enum_slots.into_iter().zip(methods) {
             items[slot] = self.enum_item(index, methods);
         }
+        // Every body has converted, so every helper call is known (P2R-160).
+        items.extend(self.helpers.iter().map(|helper| helper.lines()));
         assemble(items, main)
     }
 }

@@ -9,7 +9,9 @@ use mago_syntax::cst::*;
 
 use super::recursion::{self, Target};
 use super::variables::THIS;
-use super::{Context, Converter, Mode, ParameterSignature, Signature, Variables, lists, nulls};
+use super::{
+    Context, Converter, Mode, ParameterSignature, Signature, Variables, helpers, lists, nulls,
+};
 use crate::names;
 use crate::printer::{self, RExpr};
 use crate::types::{self, RustType};
@@ -478,6 +480,7 @@ impl Converter<'_> {
                 "a constructor with a body is not supported (P2R-130)",
             ),
         }
+        self.defaults_last(&method.parameter_list);
         for parameter in method.parameter_list.parameters.iter() {
             let problem = if !parameter.is_promoted_property() {
                 Some(
@@ -491,8 +494,6 @@ impl Converter<'_> {
                 )
             } else if parameter.ampersand.is_some() || parameter.ellipsis.is_some() {
                 Some("a promoted property cannot be by reference or variadic (P2R-130)")
-            } else if parameter.default_value.is_some() {
-                Some("a parameter default value is not supported (P2R-130)")
             } else if !parameter.attribute_lists.is_empty() {
                 Some("attributes are not supported (P2R-07)")
             } else {
@@ -530,6 +531,10 @@ impl Converter<'_> {
             let Some(rust_name) = self.rust_name(php_name, &parameter.variable) else {
                 continue;
             };
+            if helpers::is_helper(&rust_name) {
+                self.refuse(&parameter.variable, helpers::HELPER_NAME);
+                continue;
+            }
             if fields.iter().any(|f| f.rust_name == rust_name) {
                 self.refuse(
                     &parameter.variable,
@@ -557,6 +562,18 @@ impl Converter<'_> {
                 );
                 continue;
             }
+            // A `self::Case` default names this class (P2R-168).
+            let outer = self.current_class.replace(index);
+            let default = parameter
+                .default_value
+                .as_ref()
+                .map(|default| self.parameter_default(parameter, default.value, &ty));
+            self.current_class = outer;
+            let default = match default {
+                Some(None) => continue,
+                Some(found) => found,
+                None => None,
+            };
             fields.push(ParameterSignature {
                 php_name: php_name.to_vec(),
                 rust_name,
@@ -565,6 +582,7 @@ impl Converter<'_> {
                     .to_snake_case(),
                 ty,
                 mode: Mode::Shared,
+                default,
             });
         }
         self.classes[index].complete = fields.len() == constructor.parameter_list.parameters.len();
@@ -671,6 +689,7 @@ impl Converter<'_> {
                 .to_snake_case(),
             ty,
             mode: Mode::Shared,
+            default: None,
         };
         self.classes[index].declared.push((signature, default));
         self.classes[index].writable = true;
@@ -750,6 +769,8 @@ impl Converter<'_> {
         let class = self.name_key(name, name.value);
         let is_enum = self.classes[index].is_enum;
         let mut methods: Vec<MethodInfo> = Vec::new();
+        // A `self::Case` default names this class or enum (P2R-168).
+        let outer = self.current_class.replace(index);
         for member in members.iter() {
             let ClassLikeMember::Method(method) = member else {
                 continue;
@@ -803,7 +824,7 @@ impl Converter<'_> {
                 );
                 continue;
             };
-            let mut converted = true;
+            let mut converted = self.defaults_last(&method.parameter_list);
             let mut parameters: Vec<ParameterSignature> = Vec::new();
             for (parameter, meta) in method
                 .parameter_list
@@ -868,6 +889,7 @@ impl Converter<'_> {
                 });
             }
         }
+        self.current_class = outer;
         self.classes[index].methods = methods;
     }
 
@@ -1250,6 +1272,7 @@ impl Converter<'_> {
                 snake: "self".to_owned(),
                 ty: self.classes[class].own_type(),
                 mode: self.classes[class].methods[at].self_mode,
+                default: None,
             });
         }
         parameters.extend(signature.parameters.iter().cloned());

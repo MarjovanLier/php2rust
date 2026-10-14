@@ -7,6 +7,7 @@
 use mago_span::HasSpan;
 use mago_syntax::cst::*;
 
+use super::helpers::Helper;
 use super::{Converter, nulls};
 use crate::printer::{self, BinOp, RExpr};
 use crate::types::RustType;
@@ -79,6 +80,55 @@ impl Converter<'_> {
         let left = widened(left, &left_type, &RustType::F64);
         let right = widened(right, &right_type, &RustType::F64);
         Some((division(left, right), RustType::F64))
+    }
+
+    /// `(int)` of a string, which reads the number at its start as PHP does, and
+    /// `(string)` of an int. Every other cast stops (P2R-07, P2R-166).
+    pub(super) fn cast(&mut self, unary: &UnaryPrefix<'_>) -> Option<(RExpr, RustType)> {
+        let (int, problem) = match unary.operator {
+            UnaryPrefixOperator::IntCast(..) => (true, None),
+            UnaryPrefixOperator::StringCast(..) => (false, None),
+            // PHP 8.5 prints a deprecation for both when it compiles the file; Mago does not
+            // report it.
+            UnaryPrefixOperator::IntegerCast(..) | UnaryPrefixOperator::BinaryCast(..) => (
+                false,
+                Some(
+                    "PHP 8.5 deprecates (integer) and (binary); write (int) or (string) (P2R-166)",
+                ),
+            ),
+            _ => (false, Some("this cast is not supported (P2R-07)")),
+        };
+        if let Some(message) = problem {
+            self.record_refused(unary.operand);
+            self.refuse(unary, message);
+            return None;
+        }
+        let (operand, ty) = self.expression(unary.operand)?;
+        match (int, &ty) {
+            (_, RustType::Option(_)) => {
+                self.refuse(
+                    unary,
+                    "a cast of a value that may be null is not supported (P2R-106)",
+                );
+                None
+            }
+            (true, RustType::String) => {
+                let text = self.borrowed(operand, &ty);
+                Some((self.helper_call(Helper::PhpInt, vec![text]), RustType::I64))
+            }
+            (false, RustType::I64) => Some((
+                RExpr::Method(Box::new(operand), "to_string"),
+                RustType::String,
+            )),
+            (true, _) => {
+                self.refuse(unary, "(int) is supported only on a string (P2R-166)");
+                None
+            }
+            (false, _) => {
+                self.refuse(unary, "(string) is supported only on an int (P2R-166)");
+                None
+            }
+        }
     }
 
     /// The two arguments of `intdiv` or `fdiv`, converted.
@@ -201,7 +251,7 @@ fn int_literal(expr: &RExpr) -> Option<i64> {
 }
 
 /// Why arithmetic on these operand types does not convert, or `None` when it does: both
-/// int, or both float except for `%` (P2R-43, P2R-44).
+/// int, or both float except for `%`, `<<` and `>>` (P2R-43, P2R-44, P2R-167).
 pub(super) fn arithmetic_refusal(
     op: BinOp,
     left: &RustType,
@@ -209,16 +259,26 @@ pub(super) fn arithmetic_refusal(
 ) -> Option<&'static str> {
     match (left, right) {
         (RustType::I64, RustType::I64) => None,
+        (RustType::Option(_), _) | (_, RustType::Option(_)) => {
+            Some("arithmetic on a value that may be null is not supported (P2R-106)")
+        }
+        _ if op.shifts() => Some("<< and >> need two int operands (P2R-167)"),
         (RustType::F64, RustType::F64) if op != BinOp::Rem => None,
         (RustType::F64, RustType::F64) => Some("% on a float is not supported (P2R-43)"),
         (RustType::I64, RustType::F64) | (RustType::F64, RustType::I64) => {
             Some("arithmetic that mixes int and float is not supported (P2R-44)")
         }
-        (RustType::Option(_), _) | (_, RustType::Option(_)) => {
-            Some("arithmetic on a value that may be null is not supported (P2R-106)")
-        }
         _ => Some("arithmetic needs two int or two float operands (P2R-43)"),
     }
+}
+
+/// Why the count of a shift does not convert, or `None` when it does: an int literal from
+/// 0 to 63. PHP gives 0 or -1 for a larger count and throws for a negative one, where Rust
+/// panics (P2R-167).
+pub(super) fn shift_count_refusal(op: BinOp, count: &RExpr) -> Option<&'static str> {
+    (op.shifts() && !matches!(count, RExpr::Int(0..=63))).then_some(
+        "a shift count must be an int literal from 0 to 63, where PHP and Rust agree (P2R-167)",
+    )
 }
 
 #[cfg(test)]

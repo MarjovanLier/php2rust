@@ -8,9 +8,11 @@ use mago_span::HasSpan;
 use mago_syntax::cst::*;
 
 use super::{
-    Context, Converter, Mode, ParameterSignature, Signature, Variables, classes, recursion,
+    Context, Converter, Mode, ParameterSignature, Signature, Variables, classes, helpers, lists,
+    recursion,
 };
 use crate::names;
+use crate::printer::RExpr;
 use crate::types::{self, RustType};
 
 impl Converter<'_> {
@@ -31,6 +33,10 @@ impl Converter<'_> {
                     &function.name,
                     "a function named main is not supported (P2R-31)",
                 );
+                continue;
+            }
+            if helpers::is_helper(&rust_name) {
+                self.refuse(&function.name, helpers::HELPER_NAME);
                 continue;
             }
             if self
@@ -91,7 +97,7 @@ impl Converter<'_> {
             return None;
         };
         let mut parameters: Vec<ParameterSignature> = Vec::new();
-        let mut converted = true;
+        let mut converted = self.defaults_last(&function.parameter_list);
         for (parameter, meta) in function
             .parameter_list
             .parameters
@@ -129,13 +135,10 @@ impl Converter<'_> {
         taken: &HashSet<String>,
         earlier: &[ParameterSignature],
     ) -> Option<ParameterSignature> {
-        if parameter.ampersand.is_some()
-            || parameter.ellipsis.is_some()
-            || parameter.default_value.is_some()
-        {
+        if parameter.ampersand.is_some() || parameter.ellipsis.is_some() {
             self.refuse(
                 parameter,
-                "by-reference, variadic and default parameters are not supported (P2R-07)",
+                "by-reference and variadic parameters are not supported (P2R-07)",
             );
             return None;
         }
@@ -160,6 +163,10 @@ impl Converter<'_> {
             );
             return None;
         }
+        if helpers::is_helper(&rust_name) {
+            self.refuse(&parameter.variable, helpers::HELPER_NAME);
+            return None;
+        }
         let ty = self.declared_type(parameter, declared)?;
         if types::nullable_object(&ty) {
             self.refuse(parameter, types::NULLABLE_OBJECT);
@@ -172,6 +179,10 @@ impl Converter<'_> {
             );
             return None;
         }
+        let default = match &parameter.default_value {
+            Some(default) => Some(self.parameter_default(parameter, default.value, &ty)?),
+            None => None,
+        };
         let snake = std::str::from_utf8(php_name)
             .unwrap_or_default()
             .to_snake_case();
@@ -181,7 +192,105 @@ impl Converter<'_> {
             snake,
             ty,
             mode: Mode::Shared,
+            default,
         })
+    }
+
+    /// The default value of `parameter`, whose type is `ty`, converted at its
+    /// declaration, with its Rust type: an int or float literal with or without unary
+    /// minus, a bool or string literal, `null` for a nullable declared type, `[]` for a
+    /// list type, or a case of an enum of the file (P2R-168).
+    pub(super) fn parameter_default(
+        &mut self,
+        parameter: &FunctionLikeParameter<'_>,
+        value: &Expression<'_>,
+        ty: &RustType,
+    ) -> Option<(RExpr, RustType)> {
+        let value = lists::unparenthesized(value);
+        let form = match value {
+            Expression::Literal(_) => true,
+            Expression::UnaryPrefix(unary) => {
+                matches!(unary.operator, UnaryPrefixOperator::Negation(_))
+                    && matches!(
+                        lists::unparenthesized(unary.operand),
+                        Expression::Literal(Literal::Integer(_) | Literal::Float(_))
+                    )
+            }
+            Expression::Array(array) => array.elements.is_empty(),
+            // PHP rejects `static::` in a default when it compiles the file; Mago does not
+            // report it.
+            Expression::Access(Access::ClassConstant(access)) => {
+                !matches!(access.class, Expression::Static(_))
+                    && self.enum_case_of(access).is_some()
+            }
+            _ => false,
+        };
+        if !form {
+            self.record_refused(value);
+            self.refuse(
+                value,
+                "a parameter default must be a literal, null, [] or an enum case (P2R-168)",
+            );
+            return None;
+        }
+        let inner = ty.inner();
+        let (expr, found) = match value {
+            // PHP deprecates a null default for a type that is not nullable, and rejects it
+            // on a promoted parameter; Mago does not report it as an error.
+            Expression::Literal(Literal::Null(_))
+                if !parameter.hint.as_ref().is_some_and(nullable) =>
+            {
+                self.refuse(
+                    value,
+                    "a null default needs a nullable type, ?T or T|null (P2R-168)",
+                );
+                return None;
+            }
+            Expression::Literal(Literal::Null(_)) => (RExpr::None, ty.clone()),
+            Expression::Array(_) if matches!(inner, RustType::Vec(_)) => {
+                (RExpr::List(Vec::new()), inner.clone())
+            }
+            Expression::Array(_) => {
+                self.refuse(
+                    value,
+                    "a parameter default must have the parameter's type (P2R-168)",
+                );
+                return None;
+            }
+            other => self.expression(other)?,
+        };
+        // An int fits a float parameter (P2R-25); every other value must have the
+        // parameter's type, or its inner type for a nullable one.
+        let widens = found == RustType::I64 && *inner == RustType::F64;
+        if found != *ty && found != *inner && !widens {
+            self.refuse(
+                value,
+                "a parameter default must have the parameter's type (P2R-168)",
+            );
+            return None;
+        }
+        let expr = self.declared_value(value, expr, &found, ty)?;
+        Some((expr, if widens { RustType::F64 } else { found }))
+    }
+
+    /// Refuses a parameter with a default before one without, which PHP deprecates with a
+    /// message when it compiles the file (P2R-168). False when it refuses one.
+    pub(super) fn defaults_last(&mut self, list: &FunctionLikeParameterList<'_>) -> bool {
+        let parameters: Vec<&FunctionLikeParameter<'_>> = list.parameters.iter().collect();
+        let early = parameters.iter().enumerate().find(|(at, parameter)| {
+            parameter.default_value.is_some()
+                && parameters[at + 1..]
+                    .iter()
+                    .any(|later| later.default_value.is_none() && later.ellipsis.is_none())
+        });
+        if let Some((_, parameter)) = early {
+            self.refuse(
+                *parameter,
+                "a parameter with a default before one without is deprecated in PHP (P2R-168)",
+            );
+            return false;
+        }
+        true
     }
 
     /// The return type of the function or method `name`. `Some(None)` is `void`; `None`
@@ -305,5 +414,15 @@ impl Converter<'_> {
         lines.extend(body);
         lines.push("}".to_owned());
         Some(lines)
+    }
+}
+
+/// True for a declared type that names null: `?T` or a union with `null` (P2R-168).
+fn nullable(hint: &Hint<'_>) -> bool {
+    match hint {
+        Hint::Nullable(_) | Hint::Null(_) => true,
+        Hint::Union(union) => nullable(union.left) || nullable(union.right),
+        Hint::Parenthesized(inner) => nullable(inner.hint),
+        _ => false,
     }
 }

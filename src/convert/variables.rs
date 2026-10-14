@@ -48,7 +48,9 @@ use mago_syntax::walker::Walker;
 
 use super::control::Loop;
 use super::flow::{Flow, Var};
-use super::{Converter, Mode, ParameterSignature, classes, lists, nulls, numbers, strings};
+use super::{
+    Converter, Mode, ParameterSignature, classes, helpers, lists, nulls, numbers, strings,
+};
 use crate::printer::{self, BinOp, RExpr};
 use crate::types::{self, RustType};
 
@@ -777,6 +779,8 @@ impl Converter<'_> {
                     AssignmentOperator::Addition(_) => Some("+="),
                     AssignmentOperator::Subtraction(_) => Some("-="),
                     AssignmentOperator::Multiplication(_) => Some("*="),
+                    AssignmentOperator::LeftShift(_) => Some("<<="),
+                    AssignmentOperator::RightShift(_) => Some(">>="),
                     AssignmentOperator::Concat(_) => Some(".="),
                     _ => None,
                 };
@@ -815,13 +819,16 @@ impl Converter<'_> {
                 self.expression(value);
             }
             self.record_refused_target(target);
-            let message = if matches!(
-                target,
-                Expression::ArrayAccess(_) | Expression::ArrayAppend(_)
-            ) {
-                "writing to a list index is not supported in version 1 (P2R-47)"
-            } else {
-                "only a plain variable can be assigned to in version 1 (P2R-07)"
+            let message = match target {
+                Expression::ArrayAccess(access)
+                    if self.site_type(access.array) == Ok(RustType::String) =>
+                {
+                    "writing to a string offset is not supported (P2R-165)"
+                }
+                Expression::ArrayAccess(_) | Expression::ArrayAppend(_) => {
+                    "writing to a list index is not supported in version 1 (P2R-47)"
+                }
+                _ => "only a plain variable can be assigned to in version 1 (P2R-07)",
             };
             self.refuse(expression, message);
             return None;
@@ -901,6 +908,7 @@ impl Converter<'_> {
         // write (P2R-34).
         if let (Some(op), Some((_, current_type))) = (operation(operator), &current)
             && let Some(message) = numbers::arithmetic_refusal(op, current_type, &value_type)
+                .or_else(|| numbers::shift_count_refusal(op, &expr))
         {
             self.record_write(variable);
             self.refuse(expression, message);
@@ -1398,6 +1406,10 @@ impl Converter<'_> {
                     variable,
                     format!("{name} is already the Rust name of a function or variable (P2R-31)"),
                 );
+                false
+            }
+            Some(name) if helpers::is_helper(name) => {
+                self.refuse(variable, helpers::HELPER_NAME);
                 false
             }
             Some(_) => true,
@@ -1960,6 +1972,8 @@ pub(super) fn operation(operator: &str) -> Option<BinOp> {
         "+=" => Some(BinOp::Add),
         "-=" => Some(BinOp::Sub),
         "*=" => Some(BinOp::Mul),
+        "<<=" => Some(BinOp::Shl),
+        ">>=" => Some(BinOp::Shr),
         _ => None,
     }
 }

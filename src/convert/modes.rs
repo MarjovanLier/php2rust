@@ -19,7 +19,7 @@ use mago_syntax::cst::*;
 use mago_syntax::walker::Walker;
 
 use super::lists::unparenthesized;
-use super::{Converter, Mode, ParameterSignature};
+use super::{Converter, Mode, ParameterSignature, parameter_index};
 use crate::types::{self, RustType};
 
 /// The foreach loops whose form the forms of the file decide (P2R-146), by the span of the
@@ -212,18 +212,27 @@ fn turn_up(parameters: &mut [ParameterSignature], found: &Forms) -> bool {
     grew
 }
 
-/// The forms of each parameter position over several callees.
-fn positions<'p>(lists: impl Iterator<Item = &'p [ParameterSignature]>) -> Vec<Vec<Mode>> {
-    let mut positions: Vec<Vec<Mode>> = Vec::new();
-    for list in lists {
-        for (position, parameter) in list.iter().enumerate() {
-            if positions.len() <= position {
-                positions.push(Vec::new());
-            }
-            positions[position].push(parameter.mode);
-        }
-    }
-    positions
+/// The forms of the parameter each written argument goes to, over several callees; a
+/// named argument goes to the parameter of its name (P2R-169).
+fn positions<'p>(
+    arguments: &ArgumentList<'_>,
+    lists: impl Iterator<Item = &'p [ParameterSignature]>,
+) -> Vec<Vec<Mode>> {
+    let lists: Vec<&[ParameterSignature]> = lists.collect();
+    arguments
+        .arguments
+        .iter()
+        .enumerate()
+        .map(|(position, argument)| {
+            lists
+                .iter()
+                .filter_map(|parameters| {
+                    let at = parameter_index(position, argument, parameters)?;
+                    Some(parameters.get(at)?.mode)
+                })
+                .collect()
+        })
+        .collect()
 }
 
 impl<'ast, 'arena> Body<'ast, 'arena, '_, '_> {
@@ -303,18 +312,19 @@ impl<'ast, 'arena> Body<'ast, 'arena, '_, '_> {
         }
     }
 
-    /// The arguments of a call whose parameter forms at each position are `modes`.
+    /// The arguments of a call whose parameter forms for each written argument are
+    /// `modes`.
     fn arguments(&mut self, list: &ArgumentList<'_>, modes: &[Vec<Mode>]) {
         for (position, argument) in list.arguments.iter().enumerate() {
-            let Argument::Positional(positional) = argument else {
+            if argument.is_unpacked() {
                 continue;
-            };
+            }
             let modes = modes.get(position).map(Vec::as_slice).unwrap_or_default();
             if modes.contains(&Mode::Owned) {
-                self.moved(positional.value);
+                self.moved(argument.value());
             }
             if modes.contains(&Mode::Mut) {
-                self.change_chain(positional.value);
+                self.change_chain(argument.value());
             }
         }
     }
@@ -587,10 +597,11 @@ impl<'ast, 'arena> Body<'ast, 'arena, '_, '_> {
                 .iter()
                 .enumerate()
                 .any(|(position, argument)| {
-                    let Argument::Positional(positional) = argument else {
+                    if argument.is_unpacked() {
                         return false;
-                    };
-                    let alone = matches!(unparenthesized(positional.value),
+                    }
+                    let value = argument.value();
+                    let alone = matches!(unparenthesized(value),
                     Expression::Variable(Variable::Direct(v)) if v.name == root);
                     let lent = modes.get(position).is_some_and(|m| m.contains(&Mode::Mut));
                     if !alone || !lent {
@@ -604,7 +615,7 @@ impl<'ast, 'arena> Body<'ast, 'arena, '_, '_> {
                         .collect::<Vec<_>>();
                     found.chains.iter().all(|chain| {
                         chain.root != root
-                            || chain.expression.span() == positional.value.span()
+                            || chain.expression.span() == value.span()
                             || (later
                                 .iter()
                                 .any(|span| contains(*span, chain.expression.span()))
@@ -653,16 +664,19 @@ impl<'ast, 'arena> Body<'ast, 'arena, '_, '_> {
         }
     }
 
-    /// The forms of the parameters a call may pass its arguments to, by position.
+    /// The forms of the parameters a call may pass its arguments to, by written argument.
     fn call_modes(&self, call: CallNode<'_, '_>) -> Vec<Vec<Mode>> {
         let converter = self.converter;
+        let arguments = call.arguments();
         match call {
             CallNode::Function(call) => {
                 let Expression::Identifier(name) = call.function else {
                     return Vec::new();
                 };
                 match converter.functions.get(&converter.identifier_key(name)) {
-                    Some(signature) => positions(std::iter::once(signature.parameters.as_slice())),
+                    Some(signature) => {
+                        positions(arguments, std::iter::once(signature.parameters.as_slice()))
+                    }
                     None => Vec::new(),
                 }
             }
@@ -671,20 +685,26 @@ impl<'ast, 'arena> Body<'ast, 'arena, '_, '_> {
                     return Vec::new();
                 };
                 let methods = self.methods(call.object, name.value);
-                positions(methods.iter().map(|&(class, at)| {
-                    converter.classes[class].methods[at]
-                        .signature
-                        .parameters
-                        .as_slice()
-                }))
+                positions(
+                    arguments,
+                    methods.iter().map(|&(class, at)| {
+                        converter.classes[class].methods[at]
+                            .signature
+                            .parameters
+                            .as_slice()
+                    }),
+                )
             }
             CallNode::Static(call) => match self.static_method(call) {
-                Some((class, at)) => positions(std::iter::once(
-                    converter.classes[class].methods[at]
-                        .signature
-                        .parameters
-                        .as_slice(),
-                )),
+                Some((class, at)) => positions(
+                    arguments,
+                    std::iter::once(
+                        converter.classes[class].methods[at]
+                            .signature
+                            .parameters
+                            .as_slice(),
+                    ),
+                ),
                 None => Vec::new(),
             },
         }
@@ -1063,7 +1083,7 @@ impl<'ast, 'arena, 'x, 'c> Walker<'ast, 'arena, Body<'ast, 'arena, 'x, 'c>> for 
             return;
         };
         let class = &body.converter.classes[class];
-        let modes = positions(std::iter::once(class.fields.as_slice()));
+        let modes = positions(list, std::iter::once(class.fields.as_slice()));
         body.arguments(list, &modes);
     }
 

@@ -96,7 +96,9 @@ converts:
   declaration. Every parameter and return type must be declared. A `string` parameter
   becomes `&str` and a `list<T>` parameter `&[T]`. A call may use any letter case, as
   in PHP. Statements outside functions become `fn main()`; a file of only functions
-  becomes a library.
+  becomes a library. A function or method may change its own `string` or list
+  parameter: its body then starts with a copy (`let mut p = p.to_string();`), as PHP
+  passes one.
 - parameter defaults that are literals, `null` (for `?T` or `T|null`), `[]` or enum
   cases, in functions, methods and constructors. A call that leaves a parameter out
   passes its default in Rust. Named arguments (`f(1, wide: true)`) convert when they
@@ -110,6 +112,10 @@ converts:
   `match` on an int, bool, string or enum, whose conditions are literals or enum cases.
   Several conditions in one arm become `a | b`, and `default` becomes `_`, or is left
   out when the other arms already cover every enum case or both `true` and `false`.
+- `$c ? $a : $b` with a bool condition: `if c { a } else { b }`, of int, float, bool,
+  string or enum arms, or of `?int`, `?float`, `?bool` or a nullable enum where the
+  place it stands in has such a type. String arms are lent, and the result is copied
+  once where a `String` is needed: `(if c { "a" } else { "b" }).to_string()`.
 - `+`, `-`, `*`, unary minus, `+=`, `-=`, `*=`, `++` and `--` on two ints or two floats,
   `%` on ints, `===` and `!==` on two ints, floats, bools or strings, `==` and `!=` on
   two ints, floats or bools, `<`, `>`, `<=` and `>=` on two ints or two floats, and `&&`,
@@ -122,10 +128,15 @@ converts:
 - lists: the literal `[a, b]`, the empty list `[]`, append (`$a[] = x`) and read
   (`$a[$i]`). A read of a string offset (`$s[$i]`) gives that byte as a string.
 - the built-in functions `count()`, `strlen()`, `intdiv()`, `fdiv()`, `ctype_digit()`,
-  `str_starts_with()`, `str_ends_with()`, `str_contains()`, `substr()`, and
-  `in_array($v, [...], true)` on a list literal. Where PHP's rules differ from Rust's
-  standard library, the output holds a small private helper function that copies them
-  (`php_int`, `php_offset`, `php_substr`, `ctype_digit`), only when it calls one.
+  `str_starts_with()`, `str_ends_with()`, `str_contains()`, `substr()`,
+  `in_array($v, [...], true)` on a list literal, `trim()`, `ltrim()` and `rtrim()` with
+  one argument, `ucfirst()`, `lcfirst()`, `strtolower()`, `strtoupper()`,
+  `str_repeat()`, `str_replace()` on three strings, `implode()` of a list of strings,
+  `explode()` without a limit, and `sprintf()` with a literal format of text, `%s`, `%d`
+  and `%%`. Where PHP's rules differ from Rust's standard library, the output holds a
+  small private helper function that copies them (`php_int`, `php_offset`,
+  `php_substr`, `php_trim`, `php_ltrim`, `php_rtrim`, `php_ucfirst`, `php_lcfirst`,
+  `php_replace`, `php_explode`, `ctype_digit`), only when it calls one.
 - integer literals in every PHP form, float literals, and single-quoted and
   double-quoted strings.
 
@@ -143,9 +154,17 @@ the others are findings of the Mago analyser. In short:
   default for a type that is not nullable, and a default before a parameter without
   one. Named arguments in another order than the parameters, a positional argument
   after a named one, a spread argument, and a named argument of a built-in function.
-- A function, variable or parameter named like a helper (`php_int`, `php_offset`,
-  `php_substr`, `ctype_digit`), which would hide it. A shift by a count that is not a
-  literal from 0 to 63, and a write to a string offset.
+- A function, variable or parameter named like a helper (`php_int`, `php_substr` and the
+  others above), which would hide it. A shift by a count that is not a literal from 0 to
+  63, and a write to a string offset.
+- For the string functions: `trim()` with a second argument, a `str_repeat()` count that
+  may be negative, an array argument of `str_replace()`, `implode()` with one argument or
+  with a glue that is a call, `explode()` with a limit or an empty separator, and any
+  `sprintf()` format other than text, `%s`, `%d` and `%%`, or with an argument count
+  that does not match.
+- A `?:` without its middle part (`$a ?: $b`), inside another `?:`, as the result of a
+  `match` arm, wider than 50 bytes as Rust, of lists or objects, of a nullable string,
+  or with a string arm that is a call or a joined string.
 - A namespace with braces, a second namespace, or one after other code. Imports that PHP
   rejects (two imports with one name, an import named like a class or function of the
   file, `as self`) or warns about (`use Foo;` outside a namespace).
@@ -198,9 +217,8 @@ the others are findings of the Mago analyser. In short:
 - PHP behaviour that Rust would not copy exactly: `/` (use `intdiv()` or `fdiv()`), `**`,
   `<=>`, `==` and ordering on strings, arithmetic or comparison that mixes int and float,
   a float or bool in `echo` or in a string, a condition that is not a bool, an
-  assignment or `++` used as a value, a write to a list index, a function that changes
-  its own string or list parameter, and a `foreach` by reference or one that changes the
-  list it iterates.
+  assignment or `++` used as a value, a write to a list index, and a `foreach` by
+  reference or one that changes the list it iterates.
 - A read that a path reaches with no assignment before it, a variable whose type
   changes, a value that is assigned and never read, and two PHP names that give the same
   Rust name.
@@ -302,6 +320,10 @@ php2rust refuses some valid PHP that version 1 converts in other forms:
 - An `int` property that overflows in `+=`, `-=`, `*=`, `++` or `--`: PHP throws a
   `TypeError` (exit code 255 when uncaught), because a typed property cannot hold the
   float; Rust panics in a debug build, as for a variable.
+- `str_repeat()` with a count that is negative at run time, and `explode()` with a
+  separator that is empty at run time: PHP throws a `ValueError` (exit code 255 when
+  uncaught), Rust panics (exit code 101), or `str_repeat()` of an empty string gives an
+  empty string.
 - Comments and docblocks are not copied (version 1).
 
 ## Development

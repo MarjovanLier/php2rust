@@ -26,8 +26,9 @@ stops of P2R-154, the helper names and the function rules of P2R-155,
 the case, `class`, `final private`, width and P2R-50 rules of P2R-156,
 and the non-ASCII stop of P2R-157. Section 17 (strings and scalars) was
 written on 14 Oct 2026; it changes P2R-07, P2R-31, P2R-33, P2R-43,
-P2R-47, P2R-48, P2R-60, P2R-72, P2R-106, P2R-114, P2R-130, P2R-133, P2R-135
-and P2R-153. The two spec reviewers added the lending, call and naming
+P2R-47, P2R-48, P2R-60, P2R-72, P2R-106 and P2R-130. P2R-114, P2R-133,
+P2R-135 and P2R-153 keep their text: their calls convert as calls of a
+function do, so P2R-168 and P2R-169 apply to them. The two spec reviewers added the lending, call and naming
 rules of P2R-160, the needle forms of P2R-163, the literal, sign and
 deprecated cast rules of P2R-166, the literal, cast and P2R-50 rules of
 P2R-167, the null, `static::` and declaration rules of P2R-168, and the
@@ -414,8 +415,9 @@ Each milestone gets its own requirements in this file when its work starts.
   section 15 follows what real code needs: namespaces, static methods and
   constants (section 16); several files converted together into one crate
   with one module per namespace; built-in string, regex and array
-  functions; default parameter values and named arguments; maps and array
-  shapes; interfaces and inheritance; exceptions; closures. The goal is
+  functions (section 17 converts the first string functions, default
+  parameter values and named arguments); maps and array shapes; interfaces
+  and inheritance; exceptions; closures. The goal is
   code of the kind a Laravel application holds. Two points are open:
   - PHP functions with no counterpart in Rust's standard library
     (`preg_replace`, `DateTime::createFromFormat`) need either helper
@@ -1252,7 +1254,7 @@ small helper function that copies PHP's rules.
   positional argument after a named one, which PHP rejects and Mago does
   not report; a named argument of a built-in function or of `E::from()`
   and `E::tryFrom()` (P2R-114); a spread argument; and a name the function
-  does not have (Mago reports it, P2R-11).
+  does not have, which PHP rejects when it runs and Mago does not report.
 
 ## Spec checklist
 

@@ -24,13 +24,21 @@ cargo install --locked --path .
 ```sh
 php2rust input.php            # Rust on stdout
 php2rust input.php -o out.rs  # Rust in out.rs
+php2rust src -o crate         # every .php file under src as one library crate in crate/
 ```
+
+With a directory, php2rust analyses all its `.php` files together, so a class of one file
+is known in the others, and writes one Rust module for each PHP namespace below the
+namespace the files share: `Acme\Shop\Model` in a package whose files all sit under
+`Acme\Shop` becomes `model.rs`, and the shared namespace becomes `lib.rs`. A module names
+the items of other modules with `use crate::...;` lines. The output directory must not
+exist yet; `rustc --edition 2024 --crate-type lib crate/lib.rs` builds the crate.
 
 | Exit code | Meaning |
 |---|---|
 | 0 | Converted. |
 | 1 | The file holds PHP that php2rust does not convert yet. Each problem is printed as `path:line:column: message`. Nothing is written. |
-| 2 | The arguments are wrong, the file cannot be read, is not UTF-8 or is not valid PHP, or the output cannot be written. Nothing is written. |
+| 2 | The arguments are wrong, the file cannot be read, is not UTF-8 or is not valid PHP, or the output cannot be written. For a directory: no `-o`, an `-o` directory that exists or sits inside the input, or no `.php` file. Nothing is written. |
 
 The output compiles with no warnings under `rustc --edition 2024 -D warnings`, and
 `rustfmt --edition 2024 --check` leaves it unchanged. Its first line is a comment that
@@ -234,8 +242,12 @@ php2rust refuses some valid PHP that version 1 converts in other forms:
   where it fits in 100 columns, for example a long backing value with accents. The same
   holds for a `match` pattern with non-ASCII text longer than 95 bytes.
 - Visibility is not copied: private methods and constants become `pub` in Rust.
-- Only one file converts at a time, so a class from another file of a library is
-  unknown (Mago reports it).
+- A single input file still converts alone, so a class from another file of a library is
+  unknown there (Mago reports it); convert the library's directory instead. A directory
+  converts to a library only: code outside functions stops, and an item of a package
+  outside the directory is unknown.
+- In a directory, every enum, class and function needs a Rust name of its own across the
+  whole crate, and two spellings of one namespace in other letter case stop.
 - A `match` on a value that Mago narrows stops where PHP never fails. After
   `if ($s === Suit::Hearts) { return 0; }`, a `match` with arms for every other case
   stops: without `default` because Rust needs every case, and with `default` because

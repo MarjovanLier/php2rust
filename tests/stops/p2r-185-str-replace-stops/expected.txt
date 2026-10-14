@@ -1,0 +1,3 @@
+input.php:8:22: str_replace() is supported only on three strings (P2R-185)
+input.php:9:10: str_replace() converts with three string arguments only (P2R-185)
+input.php:10:27: str_replace() is supported only on three strings (P2R-185)

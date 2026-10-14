@@ -1,0 +1,3 @@
+input.php:7:25: Possible argument type mismatch for argument #2 of `str_repeat`: expected `non-negative-int`, but possibly received `int`. (possibly-invalid-argument)
+input.php:8:25: str_repeat() with a negative count always fails (P2R-184)
+input.php:9:10: str_repeat() takes two positional arguments (P2R-184)

@@ -1,0 +1,3 @@
+input.php:17:21: a constructor with a body is not supported (P2R-130)
+input.php:27:21: a string or list parameter cannot be changed, because PHP passes a copy (P2R-24)
+input.php:36:5: an object parameter cannot be assigned, because Rust borrows it (P2R-132)

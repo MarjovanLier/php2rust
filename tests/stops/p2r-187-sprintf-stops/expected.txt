@@ -1,0 +1,8 @@
+input.php:7:18: sprintf() converts only %s, %d and %% in its format (P2R-187)
+input.php:8:18: sprintf() converts only %s, %d and %% in its format (P2R-187)
+input.php:9:18: sprintf() converts only %s, %d and %% in its format (P2R-187)
+input.php:10:18: sprintf() converts only %s, %d and %% in its format (P2R-187)
+input.php:11:10: sprintf() needs one argument for each %s and %d (P2R-187)
+input.php:12:24: %d in sprintf() takes an int argument (P2R-187)
+input.php:13:24: %s in sprintf() takes a string or int argument (P2R-187)
+input.php:14:18: sprintf() converts only with a string literal as its format (P2R-187)

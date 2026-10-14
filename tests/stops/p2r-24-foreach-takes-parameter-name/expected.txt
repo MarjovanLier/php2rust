@@ -1,0 +1,1 @@
+input.php:12:23: a string or list parameter cannot be changed, because PHP passes a copy (P2R-24)

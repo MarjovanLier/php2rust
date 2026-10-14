@@ -1,1 +1,1 @@
-input.php:7:5: a string or list parameter cannot be changed, because PHP passes a copy (P2R-24)
+input.php:7:5: the parameter $s is assigned before it is read (P2R-35)

@@ -159,12 +159,14 @@ the others are findings of the Mago analyser. In short:
   63, and a write to a string offset.
 - For the string functions: `trim()` with a second argument, a `str_repeat()` count that
   may be negative, an array argument of `str_replace()`, `implode()` with one argument or
-  with a glue that is a call, `explode()` with a limit or an empty separator, and any
+  with a glue other than a literal, constant, variable, parameter or property read on
+  one of them, `explode()` with a limit or an empty separator, and any
   `sprintf()` format other than text, `%s`, `%d` and `%%`, or with an argument count
   that does not match.
 - A `?:` without its middle part (`$a ?: $b`), inside another `?:`, as the result of a
   `match` arm, wider than 50 bytes as Rust, of lists or objects, of a nullable string,
-  or with a string arm that is a call or a joined string.
+  or with a string arm that is a call, a joined string, or a property read or list
+  element on a call or `new`.
 - A namespace with braces, a second namespace, or one after other code. Imports that PHP
   rejects (two imports with one name, an import named like a class or function of the
   file, `as self`) or warns about (`use Foo;` outside a namespace).

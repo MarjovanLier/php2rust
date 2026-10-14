@@ -87,6 +87,9 @@ impl Converter<'_> {
             Expression::Call(Call::Function(call)) if self.calls_built_in(call, b"in_array") => {
                 self.in_array(call, expression)
             }
+            Expression::Call(Call::Function(call)) if self.string_function_name(call).is_some() => {
+                self.string_function(call, expression)
+            }
             Expression::Call(Call::Function(call)) => match self.call(call, expression)? {
                 (call, Some(ty)) => Some((call, ty)),
                 (_, None) => {
@@ -146,6 +149,7 @@ impl Converter<'_> {
                 self.refuse(expression, "clone is not supported (P2R-136)");
                 None
             }
+            Expression::Conditional(node) => self.conditional(node, None),
             Expression::Match(_) => {
                 self.record_refused(expression);
                 self.refuse(

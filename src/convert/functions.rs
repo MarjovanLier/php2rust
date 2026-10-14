@@ -6,6 +6,7 @@ use heck::ToSnakeCase;
 use mago_codex::ttype::union::TUnion;
 use mago_span::HasSpan;
 use mago_syntax::cst::*;
+use mago_syntax::walker::Walker;
 
 use super::{
     Context, Converter, Mode, ParameterSignature, Signature, Variables, classes, helpers, lists,
@@ -356,9 +357,10 @@ impl Converter<'_> {
         let key = self.function_key(function);
         let signature = self.functions.get(&key)?.clone();
         // A function has its own variables; those of `fn main()` wait until it ends.
+        let copied = self.copied_parameters(function.body.statements.iter(), &signature.parameters);
         let outer = std::mem::replace(
             &mut self.variables,
-            Variables::with_parameters(&signature.parameters),
+            Variables::with_parameters(&signature.parameters, &copied),
         );
         let outer_function = self.current_function.replace(key);
         let outer_calls = std::mem::take(&mut self.self_calls);
@@ -393,6 +395,7 @@ impl Converter<'_> {
             );
         }
         let parameters = self.finish_variables(&mut body);
+        body.splice(0..0, copy_lines(&signature.parameters, &copied, 1));
         self.variables = outer;
         self.current_function = outer_function;
         self.self_calls = outer_calls;
@@ -415,6 +418,83 @@ impl Converter<'_> {
         lines.push("}".to_owned());
         Some(lines)
     }
+}
+
+impl Converter<'_> {
+    /// The PHP names of the string and list parameters that `statements` change by an
+    /// assignment, `.=` or an append, which work on a copy (P2R-181). A list of a type that
+    /// changes its objects is left out: its change still stops (P2R-143).
+    pub(super) fn copied_parameters<'ast, 'arena: 'ast>(
+        &self,
+        statements: impl IntoIterator<Item = &'ast Statement<'arena>>,
+        parameters: &[ParameterSignature],
+    ) -> HashSet<Vec<u8>> {
+        let mut written = HashSet::new();
+        for statement in statements {
+            Written.walk_statement(statement, &mut written);
+        }
+        parameters
+            .iter()
+            .filter(|parameter| written.contains(&parameter.php_name))
+            .filter(|parameter| match parameter.ty.inner() {
+                RustType::String => true,
+                RustType::Vec(element) => !self.is_changing(element),
+                _ => false,
+            })
+            .map(|parameter| parameter.php_name.clone())
+            .collect()
+    }
+}
+
+/// The copy line of each parameter in `copied`, in parameter order, at `depth` (P2R-181).
+pub(super) fn copy_lines(
+    parameters: &[ParameterSignature],
+    copied: &HashSet<Vec<u8>>,
+    depth: usize,
+) -> Vec<String> {
+    parameters
+        .iter()
+        .filter(|parameter| copied.contains(&parameter.php_name))
+        .map(|parameter| {
+            let name = &parameter.rust_name;
+            let copy = match &parameter.ty {
+                RustType::Option(_) => "map(ToOwned::to_owned)",
+                RustType::Vec(_) => "to_vec()",
+                _ => "to_string()",
+            };
+            format!("{}let mut {name} = {name}.{copy};", "    ".repeat(depth))
+        })
+        .collect()
+}
+
+/// Collects the PHP names, without `$`, of the variables that an assignment or an append
+/// writes, outside nested functions, closures and classes.
+struct Written;
+
+impl<'ast, 'arena> Walker<'ast, 'arena, HashSet<Vec<u8>>> for Written {
+    fn walk_in_assignment(
+        &self,
+        assignment: &'ast Assignment<'arena>,
+        names: &mut HashSet<Vec<u8>>,
+    ) {
+        let variable = match lists::unparenthesized(assignment.lhs) {
+            Expression::Variable(Variable::Direct(variable)) => variable,
+            Expression::ArrayAppend(append) => match lists::unparenthesized(append.array) {
+                Expression::Variable(Variable::Direct(variable)) => variable,
+                _ => return,
+            },
+            _ => return,
+        };
+        names.insert(variable.name[1..].to_vec());
+    }
+
+    fn walk_function(&self, _: &'ast Function<'arena>, _: &mut HashSet<Vec<u8>>) {}
+
+    fn walk_closure(&self, _: &'ast Closure<'arena>, _: &mut HashSet<Vec<u8>>) {}
+
+    fn walk_arrow_function(&self, _: &'ast ArrowFunction<'arena>, _: &mut HashSet<Vec<u8>>) {}
+
+    fn walk_class(&self, _: &'ast Class<'arena>, _: &mut HashSet<Vec<u8>>) {}
 }
 
 /// True for a declared type that names null: `?T` or a union with `null` (P2R-168).

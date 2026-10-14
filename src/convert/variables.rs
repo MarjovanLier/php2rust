@@ -39,7 +39,7 @@
 //! - After a loop, the value is the meet of the value at the loop head and at every
 //!   `break`.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use heck::ToSnakeCase;
 use mago_span::{HasSpan, Span};
@@ -154,6 +154,9 @@ struct Entry {
     mode: Mode,
     /// A change goes through the variable, so it needs `mut` (P2R-148).
     changed: bool,
+    /// A string or list parameter that the body changes, so the body starts with a copy
+    /// line and the variable owns its value from there on (P2R-181).
+    copied: bool,
 }
 
 /// A foreach key or value (P2R-41), or the binding of a null check (P2R-104).
@@ -257,11 +260,16 @@ impl Default for Variables {
 
 impl Variables {
     /// A function body, where each parameter holds its argument from the start.
-    pub(super) fn with_parameters(parameters: &[ParameterSignature]) -> Self {
+    /// The parameters whose PHP names are in `copied` own a copy of their value (P2R-181).
+    pub(super) fn with_parameters(
+        parameters: &[ParameterSignature],
+        copied: &HashSet<Vec<u8>>,
+    ) -> Self {
         let mut variables = Self::default();
         for (var, parameter) in parameters.iter().enumerate() {
             variables.flow.write(var, None);
             variables.entries.push(Entry {
+                copied: copied.contains(&parameter.php_name),
                 php_name: parameter.php_name.clone(),
                 rust_name: parameter.rust_name.clone(),
                 ty: Some(parameter.ty.clone()),
@@ -395,7 +403,9 @@ impl Variables {
             .iter()
             .rev()
             .find(|e| e.rust_name == rust_name && !closed(e))
-            .is_some_and(|e| (e.parameter.is_some() && e.mode != Mode::Owned) || e.borrowed)
+            .is_some_and(|e| {
+                (e.parameter.is_some() && e.mode != Mode::Owned && !e.copied) || e.borrowed
+            })
     }
 
     /// The mode of the parameter or foreach value named `rust_name`, or `Owned` for a
@@ -1244,7 +1254,9 @@ impl Converter<'_> {
             );
             return true;
         }
+        // A copied parameter owns its value (P2R-181).
         let borrowed = entry.parameter.is_some()
+            && !entry.copied
             && entry
                 .ty
                 .as_ref()
@@ -1423,6 +1435,7 @@ impl Converter<'_> {
             binding: None,
             mode: Mode::Shared,
             changed: false,
+            copied: false,
         });
         (self.variables.entries.len() - 1, named)
     }
@@ -1762,9 +1775,10 @@ impl Converter<'_> {
                 // An owned parameter that a change goes through needs `mut`; a `&mut`
                 // parameter is a reference, which needs none (P2R-148).
                 let changed = entry.changed && entry.mode == Mode::Owned;
+                // A copied parameter's `mut` is on its copy line (P2R-181).
                 let name = if unused[var] {
                     format!("_{snake}")
-                } else if facts.reassigned[var] || changed {
+                } else if (facts.reassigned[var] || changed) && !entry.copied {
                     format!("mut {}", entry.rust_name)
                 } else {
                     entry.rust_name.clone()

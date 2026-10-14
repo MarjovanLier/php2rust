@@ -345,11 +345,12 @@ impl Converter<'_> {
     }
 
     /// True for a string value that Rust holds as a `&str`: the result of `??` when both
-    /// sides are borrowed (P2R-105), and an enum's `name()` or string `value()`, which
-    /// return `&'static str` (P2R-113). Callers ask only about string values.
+    /// sides are borrowed (P2R-105), of `?:` (P2R-180), and an enum's `name()` or string
+    /// `value()`, which return `&'static str` (P2R-113). Callers ask only about string
+    /// values.
     pub(super) fn lends(&self, expr: &RExpr) -> bool {
         match expr {
-            RExpr::Method(_, "name" | "value") => true,
+            RExpr::Method(_, "name" | "value") | RExpr::If(..) => true,
             // A string constant is a `&'static str`; any other path is a Copy enum case
             // (P2R-156).
             RExpr::Path(_) => true,

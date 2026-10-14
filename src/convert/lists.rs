@@ -268,6 +268,7 @@ impl Converter<'_> {
             (Expression::Literal(Literal::Null(_)), Some(ty @ RustType::Option(_))) => {
                 Some((RExpr::None, ty.clone()))
             }
+            (Expression::Conditional(node), _) => self.conditional(node, expected),
             (other, _) => self.expression(other),
         }
     }

@@ -11,7 +11,7 @@ use mago_span::Span;
 use mago_syntax::cst::*;
 
 use super::helpers::Helper;
-use super::{Converter, nulls};
+use super::{Converter, lists, nulls};
 use crate::printer::RExpr;
 use crate::types::{self, RustType};
 
@@ -149,6 +149,320 @@ impl Converter<'_> {
         let text = self.borrowed(text, &RustType::String);
         let call = self.helper_call(Helper::PhpSubstr, vec![text, start, length]);
         Some((call, RustType::String))
+    }
+
+    /// The name of the section 19 built-in function a call runs, when it runs one.
+    pub(super) fn string_function_name(&self, call: &FunctionCall<'_>) -> Option<&'static str> {
+        const NAMES: [&str; 12] = [
+            "trim",
+            "ltrim",
+            "rtrim",
+            "ucfirst",
+            "lcfirst",
+            "strtolower",
+            "strtoupper",
+            "str_repeat",
+            "str_replace",
+            "implode",
+            "explode",
+            "sprintf",
+        ];
+        NAMES
+            .into_iter()
+            .find(|name| self.calls_built_in(call, name.as_bytes()))
+    }
+
+    /// A call of a built-in function of section 19 (P2R-182 to P2R-187).
+    pub(super) fn string_function(
+        &mut self,
+        call: &FunctionCall<'_>,
+        node: &Expression<'_>,
+    ) -> Option<(RExpr, RustType)> {
+        match self.string_function_name(call)? {
+            "trim" => self.string_helper(call, node, "trim", Helper::PhpTrim),
+            "ltrim" => self.string_helper(call, node, "ltrim", Helper::PhpLtrim),
+            "rtrim" => self.string_helper(call, node, "rtrim", Helper::PhpRtrim),
+            "ucfirst" => self.string_helper(call, node, "ucfirst", Helper::PhpUcfirst),
+            "lcfirst" => self.string_helper(call, node, "lcfirst", Helper::PhpLcfirst),
+            "strtolower" => self.ascii_case(call, node, "strtolower", "to_ascii_lowercase"),
+            "strtoupper" => self.ascii_case(call, node, "strtoupper", "to_ascii_uppercase"),
+            "str_repeat" => self.str_repeat(call, node),
+            "str_replace" => self.str_replace(call, node),
+            "implode" => self.implode(call, node),
+            "explode" => self.explode(call, node),
+            _ => self.sprintf(call, node),
+        }
+    }
+
+    /// A built-in function of one `string` argument that converts to a helper call, of
+    /// type `String`: `trim`, `ltrim`, `rtrim`, `ucfirst` and `lcfirst` (P2R-182,
+    /// P2R-183).
+    pub(super) fn string_helper(
+        &mut self,
+        call: &FunctionCall<'_>,
+        node: &Expression<'_>,
+        name: &str,
+        helper: Helper,
+    ) -> Option<(RExpr, RustType)> {
+        let arguments = self.built_in_arguments(
+            call,
+            node,
+            (1, 1),
+            &format!("{name}() converts with one string argument only (P2R-182, P2R-183)"),
+        )?;
+        let message = format!("{name}() is supported only on a string (P2R-182, P2R-183)");
+        let text = self.typed_argument(arguments[0], &RustType::String, &message)?;
+        let text = self.borrowed(text, &RustType::String);
+        Some((self.helper_call(helper, vec![text]), RustType::String))
+    }
+
+    /// `strtolower()` and `strtoupper()` as the `str` method `method`, which changes only
+    /// ASCII letters, as PHP 8.2 and later do (P2R-183).
+    pub(super) fn ascii_case(
+        &mut self,
+        call: &FunctionCall<'_>,
+        node: &Expression<'_>,
+        name: &str,
+        method: &str,
+    ) -> Option<(RExpr, RustType)> {
+        let arguments = self.built_in_arguments(
+            call,
+            node,
+            (1, 1),
+            &format!("{name}() takes one positional argument (P2R-183)"),
+        )?;
+        let message = format!("{name}() is supported only on a string (P2R-183)");
+        let text = self.typed_argument(arguments[0], &RustType::String, &message)?;
+        Some((
+            RExpr::MethodCall(Box::new(text), method.to_owned(), Vec::new()),
+            RustType::String,
+        ))
+    }
+
+    /// `str_repeat($s, $n)` as `s.repeat(n)`: a literal count stays a plain literal, any
+    /// other count is cast; Mago reports a count that may be negative (P2R-184).
+    pub(super) fn str_repeat(
+        &mut self,
+        call: &FunctionCall<'_>,
+        node: &Expression<'_>,
+    ) -> Option<(RExpr, RustType)> {
+        let arguments = self.built_in_arguments(
+            call,
+            node,
+            (2, 2),
+            "str_repeat() takes two positional arguments (P2R-184)",
+        )?;
+        let message = "str_repeat() is supported only on a string and an int count (P2R-184)";
+        let text = self.typed_argument(arguments[0], &RustType::String, message);
+        let count = self.typed_argument(arguments[1], &RustType::I64, message);
+        let (text, count) = (text?, count?);
+        let count = match count {
+            RExpr::Int(value) if value >= 0 => RExpr::Int(value),
+            // A length is a `usize` already.
+            RExpr::Len(list) => RExpr::Method(list, "len"),
+            RExpr::Neg(_) | RExpr::Int(_) => {
+                self.refuse(
+                    arguments[1],
+                    "str_repeat() with a negative count always fails (P2R-184)",
+                );
+                return None;
+            }
+            other => RExpr::ToUsize(Box::new(other)),
+        };
+        Some((
+            RExpr::MethodCall(Box::new(text), "repeat".to_owned(), vec![count]),
+            RustType::String,
+        ))
+    }
+
+    /// `str_replace($search, $replace, $subject)` on three strings, as the helper
+    /// `php_replace` in PHP's order (P2R-185).
+    pub(super) fn str_replace(
+        &mut self,
+        call: &FunctionCall<'_>,
+        node: &Expression<'_>,
+    ) -> Option<(RExpr, RustType)> {
+        let arguments = self.built_in_arguments(
+            call,
+            node,
+            (3, 3),
+            "str_replace() converts with three string arguments only (P2R-185)",
+        )?;
+        let message = "str_replace() is supported only on three strings (P2R-185)";
+        let converted: Vec<Option<RExpr>> = arguments
+            .iter()
+            .map(|argument| self.typed_argument(argument, &RustType::String, message))
+            .collect();
+        let converted = converted.into_iter().collect::<Option<Vec<RExpr>>>()?;
+        let lent = converted
+            .into_iter()
+            .map(|text| self.borrowed(text, &RustType::String))
+            .collect();
+        Some((self.helper_call(Helper::PhpReplace, lent), RustType::String))
+    }
+
+    /// `implode($glue, $list)` on a string and a list of strings, as `list.join(glue)`.
+    /// Rust runs the list first, so the glue must have no effect (P2R-186).
+    pub(super) fn implode(
+        &mut self,
+        call: &FunctionCall<'_>,
+        node: &Expression<'_>,
+    ) -> Option<(RExpr, RustType)> {
+        let arguments = self.built_in_arguments(
+            call,
+            node,
+            (2, 2),
+            "implode() converts with a glue and a list only (P2R-186)",
+        )?;
+        let plain = matches!(
+            lists::unparenthesized(arguments[0]),
+            Expression::Literal(Literal::String(_))
+                | Expression::Variable(Variable::Direct(_))
+                | Expression::Access(Access::Property(_) | Access::ClassConstant(_))
+        );
+        if !plain {
+            self.record_refused(node);
+            self.refuse(
+                arguments[0],
+                "implode() needs a literal, variable, property or constant as its glue, because Rust runs the list first (P2R-186)",
+            );
+            return None;
+        }
+        let list_type = RustType::Vec(Box::new(RustType::String));
+        let glue = self.typed_argument(
+            arguments[0],
+            &RustType::String,
+            "implode() needs a string glue (P2R-186)",
+        );
+        let list = self.typed_argument(
+            arguments[1],
+            &list_type,
+            "implode() is supported only on a list of strings (P2R-186)",
+        );
+        let (glue, list) = (glue?, list?);
+        let glue = self.borrowed(glue, &RustType::String);
+        Some((
+            RExpr::MethodCall(Box::new(list), "join".to_owned(), vec![glue]),
+            RustType::String,
+        ))
+    }
+
+    /// `explode($separator, $s)` on two strings, as the helper `php_explode`, which gives a
+    /// list of strings (P2R-186).
+    pub(super) fn explode(
+        &mut self,
+        call: &FunctionCall<'_>,
+        node: &Expression<'_>,
+    ) -> Option<(RExpr, RustType)> {
+        let arguments = self.built_in_arguments(
+            call,
+            node,
+            (2, 2),
+            "explode() converts with a separator and a string only (P2R-186)",
+        )?;
+        let message = "explode() is supported only on two strings (P2R-186)";
+        let separator = self.typed_argument(arguments[0], &RustType::String, message);
+        let text = self.typed_argument(arguments[1], &RustType::String, message);
+        let (separator, text) = (separator?, text?);
+        // PHP throws a ValueError on an empty separator; Mago does not report it.
+        if matches!(&separator, RExpr::Str(literal) if literal.is_empty()) {
+            self.refuse(
+                arguments[0],
+                "explode() with an empty separator always fails (P2R-186)",
+            );
+            return None;
+        }
+        let lent = vec![
+            self.borrowed(separator, &RustType::String),
+            self.borrowed(text, &RustType::String),
+        ];
+        let list = RustType::Vec(Box::new(RustType::String));
+        Some((self.helper_call(Helper::PhpExplode, lent), list))
+    }
+
+    /// `sprintf()` with a literal format of text, `%s`, `%d` and `%%`, as `format!` with
+    /// one value for each `%s` and `%d` (P2R-187).
+    pub(super) fn sprintf(
+        &mut self,
+        call: &FunctionCall<'_>,
+        node: &Expression<'_>,
+    ) -> Option<(RExpr, RustType)> {
+        let arguments = self.built_in_arguments(
+            call,
+            node,
+            (1, usize::MAX),
+            "sprintf() takes a format and positional arguments (P2R-187)",
+        )?;
+        let format = match lists::unparenthesized(arguments[0]) {
+            Expression::Literal(Literal::String(literal)) => self.string_literal(literal),
+            _ => {
+                self.record_refused(node);
+                self.refuse(
+                    arguments[0],
+                    "sprintf() converts only with a string literal as its format (P2R-187)",
+                );
+                return None;
+            }
+        };
+        let format = format?;
+        let mut text = String::new();
+        let mut wanted: Vec<bool> = Vec::new();
+        let mut chars = format.chars();
+        while let Some(c) = chars.next() {
+            match c {
+                '{' => text.push_str("{{"),
+                '}' => text.push_str("}}"),
+                '%' => match chars.next() {
+                    Some('%') => text.push('%'),
+                    // `true` for `%d`, which takes an int only.
+                    Some(spec @ ('s' | 'd')) => {
+                        text.push_str("{}");
+                        wanted.push(spec == 'd');
+                    }
+                    _ => {
+                        self.record_refused(node);
+                        self.refuse(
+                            arguments[0],
+                            "sprintf() converts only %s, %d and %% in its format (P2R-187)",
+                        );
+                        return None;
+                    }
+                },
+                other => text.push(other),
+            }
+        }
+        let values = &arguments[1..];
+        if values.len() != wanted.len() {
+            self.record_refused(node);
+            self.refuse(
+                node,
+                "sprintf() needs one argument for each %s and %d (P2R-187)",
+            );
+            return None;
+        }
+        let mut converted = Vec::new();
+        let mut fine = true;
+        for (value, &int_only) in values.iter().zip(&wanted) {
+            let Some((expr, ty)) = self.expression(value) else {
+                fine = false;
+                continue;
+            };
+            let accepted = ty == RustType::I64 || (!int_only && ty == RustType::String);
+            if !accepted {
+                let message = if matches!(ty, RustType::Option(_)) {
+                    nulls::NULL_BUILT_IN
+                } else if int_only {
+                    "%d in sprintf() takes an int argument (P2R-187)"
+                } else {
+                    "%s in sprintf() takes a string or int argument (P2R-187)"
+                };
+                self.refuse(*value, message);
+                fine = false;
+                continue;
+            }
+            converted.push(expr);
+        }
+        fine.then_some((RExpr::Format(text, converted), RustType::String))
     }
 
     /// The positional arguments of a call of a built-in function, when there are from

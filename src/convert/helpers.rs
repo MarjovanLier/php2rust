@@ -11,14 +11,28 @@ pub(super) enum Helper {
     PhpInt,
     PhpOffset,
     PhpSubstr,
+    PhpTrim,
+    PhpLtrim,
+    PhpRtrim,
+    PhpUcfirst,
+    PhpLcfirst,
+    PhpReplace,
+    PhpExplode,
 }
 
 impl Helper {
-    const ALL: [Helper; 4] = [
+    const ALL: [Helper; 11] = [
         Helper::CtypeDigit,
         Helper::PhpInt,
         Helper::PhpOffset,
         Helper::PhpSubstr,
+        Helper::PhpTrim,
+        Helper::PhpLtrim,
+        Helper::PhpRtrim,
+        Helper::PhpUcfirst,
+        Helper::PhpLcfirst,
+        Helper::PhpReplace,
+        Helper::PhpExplode,
     ];
 
     fn name(self) -> &'static str {
@@ -27,6 +41,13 @@ impl Helper {
             Helper::PhpInt => "php_int",
             Helper::PhpOffset => "php_offset",
             Helper::PhpSubstr => "php_substr",
+            Helper::PhpTrim => "php_trim",
+            Helper::PhpLtrim => "php_ltrim",
+            Helper::PhpRtrim => "php_rtrim",
+            Helper::PhpUcfirst => "php_ucfirst",
+            Helper::PhpLcfirst => "php_lcfirst",
+            Helper::PhpReplace => "php_replace",
+            Helper::PhpExplode => "php_explode",
         }
     }
 
@@ -37,6 +58,13 @@ impl Helper {
             Helper::PhpInt => PHP_INT,
             Helper::PhpOffset => PHP_OFFSET,
             Helper::PhpSubstr => PHP_SUBSTR,
+            Helper::PhpTrim => PHP_TRIM,
+            Helper::PhpLtrim => PHP_LTRIM,
+            Helper::PhpRtrim => PHP_RTRIM,
+            Helper::PhpUcfirst => PHP_UCFIRST,
+            Helper::PhpLcfirst => PHP_LCFIRST,
+            Helper::PhpReplace => PHP_REPLACE,
+            Helper::PhpExplode => PHP_EXPLODE,
         }
     }
 
@@ -140,3 +168,56 @@ const PHP_SUBSTR: &str = r"fn php_substr(text: &str, start: i64, length: Option<
     let (from, to) = (start as usize, (start + length) as usize);
     String::from_utf8_lossy(&text.as_bytes()[from..to]).into_owned()
 }";
+
+/// `trim()`, `ltrim()` and `rtrim()` with PHP's default bytes, which leave `\x0C` and
+/// Unicode spaces where Rust's `trim` removes them (P2R-182).
+const PHP_TRIM: &str = r"fn php_trim(text: &str) -> String {
+    text.trim_matches([' ', '\t', '\n', '\r', '\0', '\x0B'])
+        .to_string()
+}";
+
+const PHP_LTRIM: &str = r"fn php_ltrim(text: &str) -> String {
+    text.trim_start_matches([' ', '\t', '\n', '\r', '\0', '\x0B'])
+        .to_string()
+}";
+
+const PHP_RTRIM: &str = r"fn php_rtrim(text: &str) -> String {
+    text.trim_end_matches([' ', '\t', '\n', '\r', '\0', '\x0B'])
+        .to_string()
+}";
+
+/// `ucfirst()` and `lcfirst()`: the first byte when it is an ASCII letter (P2R-183).
+const PHP_UCFIRST: &str = r"fn php_ucfirst(text: &str) -> String {
+    let mut text = text.to_string();
+    if let Some(first) = text.get_mut(..1) {
+        first.make_ascii_uppercase();
+    }
+    text
+}";
+
+const PHP_LCFIRST: &str = r"fn php_lcfirst(text: &str) -> String {
+    let mut text = text.to_string();
+    if let Some(first) = text.get_mut(..1) {
+        first.make_ascii_lowercase();
+    }
+    text
+}";
+
+/// `str_replace()`, which gives the subject unchanged for an empty search, where Rust's
+/// `replace` inserts the replacement between every character (P2R-185).
+const PHP_REPLACE: &str = r"fn php_replace(search: &str, replace: &str, subject: &str) -> String {
+    if search.is_empty() {
+        subject.to_string()
+    } else {
+        subject.replace(search, replace)
+    }
+}";
+
+/// `explode()`, which PHP stops with a `ValueError` on an empty separator (P2R-186).
+const PHP_EXPLODE: &str = r#"fn php_explode(separator: &str, text: &str) -> Vec<String> {
+    assert!(
+        !separator.is_empty(),
+        "explode(): separator must not be empty"
+    );
+    text.split(separator).map(str::to_owned).collect()
+}"#;

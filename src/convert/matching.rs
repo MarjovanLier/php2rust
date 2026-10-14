@@ -1,4 +1,5 @@
-//! `match` as the whole value of a `return` or an assignment (P2R-120 to P2R-124).
+//! `match` as the whole value of a `return` or an assignment (P2R-120 to P2R-124), and
+//! `?:` as an `if` (P2R-180).
 
 use mago_span::HasSpan;
 use mago_syntax::cst::*;
@@ -12,6 +13,17 @@ use crate::types::RustType;
 /// rustfmt keeps an arm's pattern on one line while it ends by this column, which leaves
 /// room for ` => {` (P2R-157).
 const PATTERN_WIDTH: usize = 95;
+
+/// rustfmt's `single_line_if_else_max_width`: a wider `if` goes over several lines
+/// (P2R-180).
+const IF_WIDTH: usize = 50;
+
+/// True when an arm of type `ty` converts to `expected`: the same type, a value where an
+/// `Option` of it is needed, or an int where a float is (P2R-25, P2R-102).
+fn fits(ty: &RustType, expected: &RustType) -> bool {
+    let inner = expected.inner();
+    ty == expected || ty == inner || (*ty.inner() == RustType::I64 && *inner == RustType::F64)
+}
 
 /// An arm whose value has converted, before the `return` or assignment finishes it.
 struct Arm<'a, 'arena> {
@@ -304,6 +316,13 @@ impl Converter<'_> {
                     "Mago finds this arm unreachable and gives its value no type (P2R-120)",
                 );
                 fine = false;
+            } else if matches!(unparenthesized(result), Expression::Conditional(_)) {
+                self.record_refused(result);
+                self.refuse(
+                    result,
+                    "a ?: as the result of a match arm is not supported, because rustfmt writes it as a block (P2R-180)",
+                );
+                fine = false;
             } else if let Some((expr, ty)) = self.value(result, expected) {
                 arms.push(Arm {
                     pattern,
@@ -320,6 +339,134 @@ impl Converter<'_> {
         self.variables.flow.enter(join);
         let (subject, _) = subject?;
         fine.then_some(Converted { subject, arms })
+    }
+
+    /// `$c ? $a : $b` as `if c { a } else { b }`, with `expected` as the type of the place
+    /// it stands in. Each arm is its own path of the flow graph, as an arm of a `match` is
+    /// (P2R-180). `None` when a problem is recorded.
+    pub(super) fn conditional(
+        &mut self,
+        node: &Conditional<'_>,
+        expected: Option<&RustType>,
+    ) -> Option<(RExpr, RustType)> {
+        let Some(then) = node.then else {
+            self.record_refused(node.condition);
+            self.record_refused(node.r#else);
+            self.refuse(
+                node,
+                "the short form ?: tests PHP truthiness and is not supported (P2R-180)",
+            );
+            return None;
+        };
+        let parts = [node.condition, then, node.r#else];
+        // Mago reads an unparenthesized nested `?:` from the left, where PHP rejects it.
+        if let Some(&nested) = parts
+            .iter()
+            .find(|part| matches!(unparenthesized(part), Expression::Conditional(_)))
+        {
+            for part in parts {
+                self.record_refused(part);
+            }
+            self.refuse(
+                nested,
+                "a ?: cannot be the condition or an arm of another ?: (P2R-180)",
+            );
+            return None;
+        }
+        // The arms convert even when the condition does not, so their problems are reported.
+        let condition = self.condition(node.condition);
+        let start = self.variables.flow.current();
+        let join = self.variables.flow.block();
+        let mut arms = Vec::new();
+        for arm in [then, node.r#else] {
+            let block = self.variables.flow.block();
+            self.variables.flow.edge(start, block);
+            self.variables.flow.enter(block);
+            arms.push(self.conditional_arm(arm, expected));
+            let end = self.variables.flow.current();
+            self.variables.flow.edge(end, join);
+        }
+        self.variables.flow.enter(join);
+        let (otherwise, first) = (arms.pop().flatten(), arms.pop().flatten());
+        let (condition, (then_expr, ty), (else_expr, else_type)) = (condition?, first?, otherwise?);
+        if else_type != ty {
+            self.refuse(
+                node.r#else,
+                "the arms of a ?: must give one Rust type (P2R-180)",
+            );
+            return None;
+        }
+        if !ty.is_copy() && ty != RustType::String {
+            self.refuse(
+                node,
+                "a ?: of lists or objects, or of strings, lists or objects that may be null, is not supported yet (P2R-180)",
+            );
+            return None;
+        }
+        let (then_expr, else_expr) = if ty == RustType::String {
+            let lent = self.lent_arm(then, then_expr);
+            (lent, self.lent_arm(node.r#else, else_expr))
+        } else {
+            (Some(then_expr), Some(else_expr))
+        };
+        let expr = RExpr::If(
+            Box::new(condition),
+            Box::new(then_expr?),
+            Box::new(else_expr?),
+        );
+        // Measured with the `_i64` the first arm may get.
+        if !printer::expr(&expr, true).is_ok_and(|text| text.len() <= IF_WIDTH) {
+            self.refuse(
+                node,
+                "an if wider than 50 bytes is not supported, because rustfmt splits it over several lines (P2R-180)",
+            );
+            return None;
+        }
+        Some((expr, ty))
+    }
+
+    /// An arm of `?:` as a value of `expected` where it converts to it: P2R-25 and P2R-102
+    /// apply to it as to a returned value (P2R-180).
+    fn conditional_arm(
+        &mut self,
+        arm: &Expression<'_>,
+        expected: Option<&RustType>,
+    ) -> Option<(RExpr, RustType)> {
+        let (expr, ty) = self.value(arm, expected)?;
+        let Some(expected) = expected else {
+            return Some((expr, ty));
+        };
+        if nulls::null_for_plain(&ty, expected) {
+            self.refuse(
+                arm,
+                "a value that may be null cannot stand where the type is not nullable (P2R-106)",
+            );
+            return None;
+        }
+        if !fits(&ty, expected) {
+            return Some((expr, ty));
+        }
+        let expr = self.declared_value(arm, expr, &ty, expected)?;
+        Some((nulls::wrapped(expr, &ty, expected), expected.clone()))
+    }
+
+    /// A string arm of `?:` as a `&str`, so the `if` lends one as `??` does: a literal or
+    /// a parameter as it is, a variable, property read or list element as `v.as_str()`
+    /// (P2R-180). Rust drops any other string at the end of the arm, so it stops.
+    fn lent_arm(&mut self, arm: &Expression<'_>, expr: RExpr) -> Option<RExpr> {
+        match expr {
+            _ if self.is_reference(&expr) => Some(expr),
+            RExpr::Var(_) | RExpr::Field(..) | RExpr::Index(..) => {
+                Some(RExpr::Method(Box::new(expr), "as_str"))
+            }
+            _ => {
+                self.refuse(
+                    arm,
+                    "a string arm of ?: must be a literal, a variable, a parameter, a property read or a list element, because Rust drops any other string at the end of the arm (P2R-180)",
+                );
+                None
+            }
+        }
     }
 
     /// The subject as Rust text, with its type. A string compares as `&str` (P2R-122).

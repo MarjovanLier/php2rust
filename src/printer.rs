@@ -115,6 +115,8 @@ pub enum RExpr {
     Float(f64),
     /// `value as f64`: an int where a float is declared (P2R-25).
     ToFloat(Box<RExpr>),
+    /// `value as usize`: the count of `str_repeat()` (P2R-184).
+    ToUsize(Box<RExpr>),
     /// The literal `null` (P2R-102).
     None,
     /// A value where an `Option` is needed (P2R-102).
@@ -137,6 +139,8 @@ pub enum RExpr {
     MethodCall(Box<RExpr>, String, Vec<RExpr>),
     /// `[a, b].contains(needle)`: `in_array()` on a list literal (P2R-163).
     Contains(Vec<RExpr>, Box<RExpr>),
+    /// `if condition { then } else { otherwise }`: `?:` (P2R-180).
+    If(Box<RExpr>, Box<RExpr>, Box<RExpr>),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -340,6 +344,14 @@ fn render(expr: &RExpr, anchor: bool, min_precedence: u8) -> Result<String, TooW
                 text
             }
         }
+        RExpr::ToUsize(inner) => {
+            let text = format!("{} as usize", render(inner, true, CAST)?);
+            if CAST < min_precedence {
+                format!("({text})")
+            } else {
+                text
+            }
+        }
         RExpr::None => "None".to_owned(),
         // rustfmt lays out `Some(..)` as a call.
         RExpr::Some(inner) => {
@@ -381,6 +393,20 @@ fn render(expr: &RExpr, anchor: bool, min_precedence: u8) -> Result<String, TooW
             }
             let option = render(option, false, POSTFIX)?;
             chained(expr, format!("{option}.{method}({argument})"))?
+        }
+        // The converter refuses an `if` that rustfmt would split (P2R-180).
+        RExpr::If(condition, then, otherwise) => {
+            let text = format!(
+                "if {} {{ {} }} else {{ {} }}",
+                render(condition, false, 0)?,
+                render(then, anchor && !anchored(expr), 0)?,
+                render(otherwise, false, 0)?
+            );
+            if min_precedence > 0 {
+                format!("({text})")
+            } else {
+                text
+            }
         }
     })
 }
@@ -475,7 +501,7 @@ pub fn anchored(expr: &RExpr) -> bool {
         RExpr::List(items) => items.iter().any(anchored),
         RExpr::Index(list, _) => anchored(list),
         // A float literal without a suffix is f64, as is a cast to it.
-        RExpr::Float(_) | RExpr::ToFloat(_) => true,
+        RExpr::Float(_) | RExpr::ToFloat(_) | RExpr::ToUsize(_) => true,
         // `None` alone, or `Some(5)`, leaves the inner type to inference (P2R-49).
         RExpr::None => false,
         RExpr::Some(inner) => anchored(inner),
@@ -483,6 +509,7 @@ pub fn anchored(expr: &RExpr) -> bool {
         // A field and a method have declared types.
         RExpr::Field(..) | RExpr::MethodCall(..) => true,
         RExpr::Contains(..) => true,
+        RExpr::If(_, then, otherwise) => anchored(then) || anchored(otherwise),
     }
 }
 
@@ -520,10 +547,10 @@ pub fn literal_value(expr: &RExpr) -> Option<i64> {
         RExpr::RefMut(_) => None,
         RExpr::Bool(_) | RExpr::Not(_) => None,
         RExpr::List(_) | RExpr::Index(..) => None,
-        RExpr::Float(_) | RExpr::ToFloat(_) => None,
+        RExpr::Float(_) | RExpr::ToFloat(_) | RExpr::ToUsize(_) => None,
         RExpr::None | RExpr::Some(_) | RExpr::MapOwned(_) | RExpr::Unwrap { .. } => None,
         RExpr::Path(_) | RExpr::Field(..) | RExpr::MethodCall(..) => None,
-        RExpr::Contains(..) => None,
+        RExpr::Contains(..) | RExpr::If(..) => None,
     }
 }
 

@@ -10,7 +10,8 @@ use mago_syntax::cst::*;
 use super::recursion::{self, Target};
 use super::variables::THIS;
 use super::{
-    Context, Converter, Mode, ParameterSignature, Signature, Variables, helpers, lists, nulls,
+    Context, Converter, Mode, ParameterSignature, Signature, Variables, functions, helpers, lists,
+    nulls,
 };
 use crate::names;
 use crate::printer::{self, RExpr};
@@ -1277,7 +1278,11 @@ impl Converter<'_> {
         }
         parameters.extend(signature.parameters.iter().cloned());
         // A method has its own variables, as a function does.
-        let outer = std::mem::replace(&mut self.variables, Variables::with_parameters(&parameters));
+        let copied = self.copied_parameters(block.statements.iter(), &signature.parameters);
+        let outer = std::mem::replace(
+            &mut self.variables,
+            Variables::with_parameters(&parameters, &copied),
+        );
         let outer_method = self.current_method.replace((class, at));
         let outer_class = self.current_class.replace(class);
         let outer_calls = std::mem::take(&mut self.self_calls);
@@ -1311,6 +1316,10 @@ impl Converter<'_> {
             );
         }
         let parameters = self.finish_variables(&mut body);
+        body.splice(
+            0..0,
+            functions::copy_lines(&signature.parameters, &copied, 2),
+        );
         self.variables = outer;
         self.current_method = outer_method;
         self.current_class = outer_class;

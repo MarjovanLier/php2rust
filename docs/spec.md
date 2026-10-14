@@ -48,8 +48,9 @@ spec reviewer added the context type, `_i64`, `&str` arm, nesting, byte
 width and `match` arm rules of P2R-180, the owned-local rule of P2R-181,
 PHP's argument order in P2R-185 and P2R-186, Mago's count check in
 P2R-184, and the `%` grammar of P2R-187. Section 20 (layout by rustfmt)
-was written on 14 Oct 2026; it changes P2R-04 and P2R-51, and P2R-191
-lists the layout rules it removes.
+was written on 14 Oct 2026; it changes P2R-04, P2R-06, P2R-51, P2R-82,
+P2R-83 and P2R-176, and P2R-191 lists the requirements whose layout rules
+it removes.
 
 php2rust converts typed PHP source into normal, readable Rust (`Vec`,
 `String`, `i64`), without AI. It reads PHP with the Mago crates, uses Mago's
@@ -307,7 +308,8 @@ requirement IDs.
   NOT contain `allow` or `expect` attributes. Clippy is not required on the
   output.
 - **P2R-51** The output MUST be unchanged by `rustfmt --edition 2024 --check`
-  with rustfmt's default configuration. The tool lays out its output by
+  with rustfmt's default configuration, run with the rustfmt that laid it
+  out (the pinned toolchain's for the tests). The tool lays out its output by
   running rustfmt (P2R-190), so no rule of this file copies rustfmt's
   layout, and no statement stops because rustfmt would split it over
   several lines (P2R-191).
@@ -1514,17 +1516,22 @@ writing Rust does. P2R-51 records the change.
   so an input that stops exits 1 whether or not rustfmt can run. When
   rustfmt cannot be started, exits with an error, or would change its own
   result when run again on it, the tool MUST print one fixed message for
-  each of the three to stderr and exit 2 (P2R-04), and P2R-05 and P2R-170
-  apply: nothing at `-o`, and no temporary file or directory left. The
+  each of the three to stderr and exit 2 (P2R-04); a private directory that
+  cannot be made or written gives exit 2 with the operating system's
+  reason. In each case P2R-05 and P2R-170 apply: nothing at `-o`, and no
+  temporary file or directory left. The
   output then depends on the rustfmt version as well as the input (P2R-06);
   the tests run the pinned toolchain's rustfmt (P2R-83). rustfmt keeps a
   statement it cannot fit, such as one with a long string literal, as the
   tool gave it, so the tool writes each statement and each block line on a
   line of its own, indented four spaces for each block level, with no
-  trailing whitespace. A case folder that holds a `rustfmt.toml` beside its
-  input checks that the tool ignores it, and a CLI test runs the tool with
-  an empty `PATH`, and with a `rustfmt` that fails and one that changes its
-  result on a second run, and checks the three exits 2.
+  trailing whitespace. CLI tests check that a `.rustfmt.toml` in the home
+  directory and a `rustfmt.toml` in the working directory leave the output
+  unchanged, and run the tool with an empty `PATH`, a `rustfmt` that fails
+  and one that changes its result on a second run, checking the three exits
+  2, their stderr bytes, and an empty temporary directory afterwards. The
+  case folder of this requirement holds a `rustfmt.toml` beside its input,
+  which the check of P2R-71 must ignore too.
 - **P2R-191** A construct MUST NOT stop the conversion because of the width
   of its Rust text or the layout rustfmt gives it. The rules that sections
   6 and 11 to 19 stated only to copy rustfmt's layout are removed from

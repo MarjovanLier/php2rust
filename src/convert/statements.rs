@@ -135,6 +135,7 @@ impl Converter<'_> {
         let converted = match expression {
             Expression::Call(Call::Function(call)) => self.call(call, expression),
             Expression::Call(Call::Method(call)) => self.method_call(call, expression),
+            Expression::Call(Call::StaticMethod(call)) => self.static_call(call, expression),
             _ => {
                 self.record_refused(expression);
                 self.refuse(

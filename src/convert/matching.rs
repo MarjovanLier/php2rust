@@ -9,10 +9,14 @@ use super::{Converter, nulls};
 use crate::printer::{self, RExpr};
 use crate::types::RustType;
 
+/// rustfmt keeps an arm's pattern on one line while it ends by this column, which leaves
+/// room for ` => {` (P2R-157).
+const PATTERN_WIDTH: usize = 95;
+
 /// An arm whose value has converted, before the `return` or assignment finishes it.
 struct Arm<'a, 'arena> {
-    /// `1 | 2`, or `_` for `default`.
-    pattern: String,
+    /// The conditions, `["1", "2"]` for `1 | 2`, or `["_"]` for `default`.
+    pattern: Vec<String>,
     node: &'a Expression<'arena>,
     expr: RExpr,
     ty: RustType,
@@ -53,7 +57,7 @@ impl Converter<'_> {
                 .map(|expr| nulls::wrapped(expr, &arm.ty, returns))
                 .and_then(|expr| self.render(arm.node, &expr, false));
             match rendered {
-                Some(text) => lines.push((arm.node, format!("{} => {text},", arm.pattern))),
+                Some(text) => lines.push((arm.node, arm.pattern, text)),
                 None => fine = false,
             }
         }
@@ -146,7 +150,7 @@ impl Converter<'_> {
             let Some(text) = self.render(arm.node, &expr, false) else {
                 return true;
             };
-            lines.push((arm.node, format!("{} => {text},", arm.pattern)));
+            lines.push((arm.node, arm.pattern, text));
         }
         let open = format!("match {} {{", converted.subject);
         let open = if declares {
@@ -162,18 +166,46 @@ impl Converter<'_> {
     }
 
     /// Writes the opening line, the arms one level deeper and `};` (P2R-123). An arm that
-    /// holds a copy mark is measured at the end of the body, once the mark is resolved.
+    /// holds a copy mark is measured at the end of the body, once the mark is resolved. A
+    /// pattern of several conditions that ends after column 95 goes one condition per line,
+    /// as rustfmt writes it (P2R-157).
     fn push_match(
         &mut self,
         open: String,
-        arms: Vec<(&Expression<'_>, String)>,
+        arms: Vec<(&Expression<'_>, Vec<String>, String)>,
         depth: usize,
         body: &mut Vec<String>,
     ) {
         body.push(open);
-        for (node, line) in arms {
+        let indent = "    ".repeat(depth + 1);
+        for (node, pattern, value) in arms {
+            let joined = pattern.join(" | ");
+            let wide = indent.len() + joined.len() > PATTERN_WIDTH;
+            if wide && !joined.is_ascii() {
+                // rustfmt counts columns and the tool counts bytes, so the layout rustfmt
+                // picks is not known.
+                self.refuse(
+                    node,
+                    "a match pattern with non-ASCII text longer than 95 bytes is not supported (P2R-157)",
+                );
+                continue;
+            }
+            let (last, earlier) = match pattern.split_last() {
+                Some((last, earlier)) if wide && !earlier.is_empty() => (last.clone(), earlier),
+                _ => (joined, &[][..]),
+            };
+            for (at, condition) in earlier.iter().enumerate() {
+                let line = if at == 0 {
+                    condition.clone()
+                } else {
+                    format!("| {condition}")
+                };
+                body.push(self.emit(node, depth + 1, line));
+            }
+            let lead = if earlier.is_empty() { "" } else { "| " };
+            let line = format!("{lead}{last} => {value},");
             let line = if line.contains(COPY) {
-                format!("{}{line}", "    ".repeat(depth + 1))
+                format!("{indent}{line}")
             } else {
                 self.emit(node, depth + 1, line)
             };
@@ -193,7 +225,7 @@ impl Converter<'_> {
         let subject = self.match_subject(node.expression);
         let mut fine = subject.is_some();
         let mut patterns: Vec<String> = Vec::new();
-        let mut results: Vec<(String, &'a Expression<'arena>, bool)> = Vec::new();
+        let mut results: Vec<(Vec<String>, &'a Expression<'arena>, bool)> = Vec::new();
         let mut default: Option<&'a Expression<'arena>> = None;
         for arm in node.arms.iter() {
             match arm {
@@ -229,7 +261,7 @@ impl Converter<'_> {
                         }
                     }
                     fine &= converted;
-                    results.push((alternatives.join(" | "), arm.expression, converted));
+                    results.push((alternatives, arm.expression, converted));
                 }
             }
         }
@@ -239,7 +271,7 @@ impl Converter<'_> {
             // runs: it is not converted and its reads do not count (P2R-121), nor its
             // calls (P2R-50).
             (Some(result), Some(Ok(()))) => self.dropped_defaults.push(result.span()),
-            (Some(result), _) => results.push(("_".to_owned(), result, true)),
+            (Some(result), _) => results.push((vec!["_".to_owned()], result, true)),
             (None, Some(Err(message))) => {
                 self.refuse(node, message);
                 fine = false;
@@ -337,12 +369,10 @@ impl Converter<'_> {
                     .string_literal(string)
                     .map(|text| printer::quote(&text));
             }
-            (Expression::Access(Access::ClassConstant(access)), RustType::Enum(name)) => {
-                match self.enum_case(access, condition)? {
-                    (RExpr::Path(path), RustType::Enum(found)) if found == *name => Some(path),
-                    _ => None,
-                }
-            }
+            (Expression::Access(Access::ClassConstant(access)), RustType::Enum(name)) => self
+                .enum_case_of(access)
+                .filter(|(found, _)| found == name)
+                .map(|(found, case)| format!("{found}::{case}")),
             _ => None,
         };
         if pattern.is_none() {

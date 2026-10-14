@@ -18,7 +18,6 @@ use mago_span::{HasSpan, Span};
 use mago_syntax::cst::*;
 use mago_syntax::walker::Walker;
 
-use super::enums::class_key;
 use super::lists::unparenthesized;
 use super::{Converter, Mode, ParameterSignature};
 use crate::types::{self, RustType};
@@ -93,7 +92,7 @@ impl Converter<'_> {
             for statement in program.statements.iter() {
                 match statement {
                     Statement::Function(function) => {
-                        let key = function.name.value.to_ascii_lowercase();
+                        let key = self.function_key(function);
                         let Some(signature) = self.functions.get(&key) else {
                             continue;
                         };
@@ -105,11 +104,17 @@ impl Converter<'_> {
                             grew |= turn_up(&mut signature.parameters, &found);
                         }
                     }
-                    Statement::Class(declaration) => {
-                        let Some(class) = self.class_index(declaration) else {
+                    Statement::Class(_) | Statement::Enum(_) => {
+                        let (name, members) = match statement {
+                            Statement::Class(d) => (&d.name, &d.members),
+                            Statement::Enum(d) => (&d.name, &d.members),
+                            _ => continue,
+                        };
+                        let key = self.name_key(name, name.value);
+                        let Some(class) = self.classes.iter().position(|c| c.key == key) else {
                             continue;
                         };
-                        for member in declaration.members.iter() {
+                        for member in members.iter() {
                             let ClassLikeMember::Method(method) = member else {
                                 continue;
                             };
@@ -136,7 +141,6 @@ impl Converter<'_> {
                             }
                         }
                     }
-                    Statement::Enum(_) => {}
                     // A statement of `fn main()`, which decides only its loops.
                     other => {
                         let statements = std::slice::from_ref(other);
@@ -329,10 +333,7 @@ impl<'ast, 'arena> Body<'ast, 'arena, '_, '_> {
         match unparenthesized(expression) {
             Expression::Variable(Variable::Direct(variable)) => {
                 match self.root_named(variable.name, depth) {
-                    Root::This => {
-                        let class = &converter.classes[self.class?];
-                        Some(RustType::Class(class.rust_name.clone()))
-                    }
+                    Root::This => Some(converter.classes[self.class?].own_type()),
                     Root::Value(at) => match self.type_at(self.open[at].list, at)? {
                         RustType::Vec(element) => Some(*element),
                         _ => None,
@@ -365,16 +366,22 @@ impl<'ast, 'arena> Body<'ast, 'arena, '_, '_> {
                     .clone()
             }
             Expression::Call(Call::Function(call)) => {
-                let Expression::Identifier(Identifier::Local(name)) = call.function else {
+                let Expression::Identifier(name) = call.function else {
                     return None;
                 };
-                let key = name.value.to_ascii_lowercase();
+                let key = converter.identifier_key(name);
                 converter.functions.get(&key)?.returns.clone()
             }
             Expression::Instantiation(instantiation) => {
-                let key = class_key(instantiation.class)?;
-                let class = converter.classes.iter().find(|c| c.key == key)?;
+                let class = &converter.classes[self.class_of(instantiation.class)?];
                 Some(RustType::Class(class.rust_name.clone()))
+            }
+            Expression::Call(Call::StaticMethod(call)) => {
+                let (class, at) = self.static_method(call)?;
+                converter.classes[class].methods[at]
+                    .signature
+                    .returns
+                    .clone()
             }
             _ => None,
         }
@@ -645,10 +652,10 @@ impl<'ast, 'arena> Body<'ast, 'arena, '_, '_> {
         let converter = self.converter;
         match call {
             CallNode::Function(call) => {
-                let Expression::Identifier(Identifier::Local(name)) = call.function else {
+                let Expression::Identifier(name) = call.function else {
                     return Vec::new();
                 };
-                match converter.functions.get(&name.value.to_ascii_lowercase()) {
+                match converter.functions.get(&converter.identifier_key(name)) {
                     Some(signature) => positions(std::iter::once(signature.parameters.as_slice())),
                     None => Vec::new(),
                 }
@@ -664,6 +671,37 @@ impl<'ast, 'arena> Body<'ast, 'arena, '_, '_> {
                         .parameters
                         .as_slice()
                 }))
+            }
+            CallNode::Static(call) => match self.static_method(call) {
+                Some((class, at)) => positions(std::iter::once(
+                    converter.classes[class].methods[at]
+                        .signature
+                        .parameters
+                        .as_slice(),
+                )),
+                None => Vec::new(),
+            },
+        }
+    }
+
+    /// The method a static call runs (P2R-153).
+    fn static_method(&self, call: &StaticMethodCall<'_>) -> Option<(usize, usize)> {
+        let converter = self.converter;
+        let class = self.class_of(call.class)?;
+        let ClassLikeMemberSelector::Identifier(name) = &call.method else {
+            return None;
+        };
+        Some((class, converter.method_index(class, name.value)?))
+    }
+
+    /// The class or enum a class expression names: `self` and `static` name the one whose
+    /// method this body is (P2R-153).
+    fn class_of(&self, class: &Expression<'_>) -> Option<usize> {
+        match class {
+            Expression::Self_(_) | Expression::Static(_) => self.class,
+            other => {
+                let key = self.converter.class_key(other)?;
+                self.converter.classes.iter().position(|c| c.key == key)
             }
         }
     }
@@ -715,6 +753,7 @@ struct Chain<'ast, 'arena> {
 enum CallNode<'ast, 'arena> {
     Function(&'ast FunctionCall<'arena>),
     Method(&'ast MethodCall<'arena>),
+    Static(&'ast StaticMethodCall<'arena>),
 }
 
 impl<'ast, 'arena> CallNode<'ast, 'arena> {
@@ -722,6 +761,7 @@ impl<'ast, 'arena> CallNode<'ast, 'arena> {
         match self {
             CallNode::Function(call) => &call.argument_list,
             CallNode::Method(call) => &call.argument_list,
+            CallNode::Static(call) => &call.argument_list,
         }
     }
 }
@@ -846,6 +886,9 @@ impl<'ast, 'arena> Walker<'ast, 'arena, Found<'ast, 'arena>> for Chains {
         match expression {
             Expression::Call(Call::Method(call)) => found.pending.push(CallNode::Method(call)),
             Expression::Call(Call::Function(call)) => found.pending.push(CallNode::Function(call)),
+            Expression::Call(Call::StaticMethod(call)) => {
+                found.pending.push(CallNode::Static(call))
+            }
             Expression::Binary(binary)
                 if matches!(binary.operator, BinaryOperator::StringConcat(_)) =>
             {
@@ -993,20 +1036,27 @@ impl<'ast, 'arena, 'x, 'c> Walker<'ast, 'arena, Body<'ast, 'arena, 'x, 'c>> for 
         body.arguments(&call.argument_list, &modes);
     }
 
+    fn walk_in_static_method_call(
+        &self,
+        call: &'ast StaticMethodCall<'arena>,
+        body: &mut Body<'ast, 'arena, 'x, 'c>,
+    ) {
+        let modes = body.call_modes(CallNode::Static(call));
+        body.arguments(&call.argument_list, &modes);
+    }
+
     fn walk_in_instantiation(
         &self,
         instantiation: &'ast Instantiation<'arena>,
         body: &mut Body<'ast, 'arena, 'x, 'c>,
     ) {
-        let (Some(key), Some(list)) =
-            (class_key(instantiation.class), &instantiation.argument_list)
-        else {
+        let (Some(class), Some(list)) = (
+            body.class_of(instantiation.class),
+            &instantiation.argument_list,
+        ) else {
             return;
         };
-        let classes = &body.converter.classes;
-        let Some(class) = classes.iter().find(|c| c.key == key) else {
-            return;
-        };
+        let class = &body.converter.classes[class];
         let modes = positions(std::iter::once(class.fields.as_slice()));
         body.arguments(list, &modes);
     }

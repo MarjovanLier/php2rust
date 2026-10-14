@@ -14,6 +14,7 @@ use mago_codex::populator::populate_codebase;
 use mago_codex::reference::SymbolReferences;
 use mago_codex::scanner::scan_program;
 use mago_database::file::File;
+use mago_names::ResolvedNames;
 use mago_names::resolver::NameResolver;
 use mago_php_version::PHPVersion;
 use mago_prelude::Prelude;
@@ -44,6 +45,7 @@ mod numbers;
 mod recursion;
 mod statements;
 mod strings;
+mod uses;
 mod variables;
 
 /// The first line of every output (P2R-52).
@@ -73,27 +75,33 @@ pub fn convert(path: &str, source: Vec<u8>) -> Result<String, Failure> {
         return Err(Failure::Invalid(problem::render(path, &file, errors)));
     }
     let resolved = NameResolver::new(&arena).resolve(program);
+    let statements = flattened(program);
+    let flat = Program {
+        statements: Sequence { nodes: &statements },
+        ..program.clone()
+    };
     let mut codebase = Prelude::build().metadata;
-    // An enum or class may not take the name of a class-like PHP has built in, and once the
-    // file is scanned the two cannot be told apart (P2R-111, P2R-131).
-    let built_in_classes: HashSet<Vec<u8>> = program
-        .statements
+    // An enum or class may not take the fully qualified name of a class-like PHP has built
+    // in, and once the file is scanned the two cannot be told apart (P2R-111, P2R-131,
+    // P2R-151).
+    let built_in_classes: HashSet<Vec<u8>> = statements
         .iter()
         .filter_map(|statement| {
             let name = match statement {
-                Statement::Enum(declaration) => declaration.name.value,
-                Statement::Class(declaration) => declaration.name.value,
+                Statement::Enum(declaration) => &declaration.name,
+                Statement::Class(declaration) => &declaration.name,
                 _ => return None,
             };
+            let full = resolved.resolve(name).unwrap_or(name.value);
             codebase
-                .get_class_like(name)
+                .get_class_like(full)
                 .is_some()
-                .then(|| name.to_ascii_lowercase())
+                .then(|| full.to_ascii_lowercase())
         })
         .collect();
-    // PHP rejects a function named like one it has built in; Mago does not (P2R-31).
-    let built_in_functions: HashSet<Vec<u8>> = program
-        .statements
+    // PHP rejects a function named like one it has built in; Mago does not. Inside a
+    // namespace PHP accepts it, and the tool still refuses it (P2R-31, P2R-151).
+    let built_in_functions: HashSet<Vec<u8>> = statements
         .iter()
         .filter_map(|statement| match statement {
             Statement::Function(function)
@@ -138,16 +146,42 @@ pub fn convert(path: &str, source: Vec<u8>) -> Result<String, Failure> {
         .filter(|issue| reported(issue))
         .filter_map(mago_problem)
         .collect();
-    let mut converter = Converter::new(&codebase, artifacts);
+    let mut converter = Converter::new(&codebase, &resolved, artifacts);
     converter.built_in_classes = built_in_classes;
     converter.built_in_functions = built_in_functions;
-    let rust = converter.program(program);
+    let rust = converter.program(&flat);
     problems.append(&mut converter.problems);
     if problems.is_empty() {
         Ok(rust)
     } else {
         Err(Failure::Refused(problem::render(path, &file, problems)))
     }
+}
+
+/// The top-level statements with those of an unbraced namespace lifted out of it, as PHP
+/// runs them. The namespace stays in front of them with an empty body, so its place can be
+/// checked; a braced namespace stays whole and is refused (P2R-150).
+fn flattened<'a>(program: &Program<'a>) -> Vec<Statement<'a>> {
+    let mut statements = Vec::new();
+    for statement in program.statements.iter() {
+        match statement {
+            Statement::Namespace(namespace) => match &namespace.body {
+                NamespaceBody::Implicit(body) => {
+                    statements.push(Statement::Namespace(Namespace {
+                        body: NamespaceBody::Implicit(NamespaceImplicitBody {
+                            terminator: body.terminator,
+                            statements: Sequence::empty(),
+                        }),
+                        ..namespace.clone()
+                    }));
+                    statements.extend(body.statements.iter().cloned());
+                }
+                NamespaceBody::BraceDelimited(_) => statements.push(statement.clone()),
+            },
+            other => statements.push(other.clone()),
+        }
+    }
+    statements
 }
 
 /// Mago findings that refuse the conversion (P2R-11).
@@ -293,6 +327,8 @@ enum Context<'t> {
 
 struct Converter<'c> {
     codebase: &'c CodebaseMetadata,
+    /// The fully qualified name of each name in the file, as PHP resolves it (P2R-151).
+    resolved: &'c ResolvedNames<'c>,
     /// The type Mago found for each expression, keyed by its span (P2R-21).
     artifacts: AnalysisArtifacts,
     problems: Vec<Problem>,
@@ -306,7 +342,12 @@ struct Converter<'c> {
     classes: Vec<classes::ClassInfo>,
     /// The class and method whose body is converting, by index (P2R-135).
     current_method: Option<(usize, usize)>,
-    /// The method calls of that body that call the method itself (P2R-50, P2R-135).
+    /// The class or enum whose body is converting, which `self` and `static` name
+    /// (P2R-153, P2R-156).
+    current_class: Option<usize>,
+    /// The key of the function whose body is converting (P2R-151).
+    current_function: Option<Vec<u8>>,
+    /// The calls of that body that call the function or method itself (P2R-50, P2R-135).
     self_calls: Vec<Span>,
     /// The lowercase names of the file's enums and classes that PHP already has as a
     /// class-like (P2R-111, P2R-131).
@@ -322,9 +363,14 @@ struct Converter<'c> {
 }
 
 impl<'c> Converter<'c> {
-    fn new(codebase: &'c CodebaseMetadata, artifacts: AnalysisArtifacts) -> Self {
+    fn new(
+        codebase: &'c CodebaseMetadata,
+        resolved: &'c ResolvedNames<'c>,
+        artifacts: AnalysisArtifacts,
+    ) -> Self {
         Self {
             codebase,
+            resolved,
             artifacts,
             problems: Vec::new(),
             functions: HashMap::new(),
@@ -332,6 +378,8 @@ impl<'c> Converter<'c> {
             type_names: TypeNames::new(),
             classes: Vec::new(),
             current_method: None,
+            current_class: None,
+            current_function: None,
             self_calls: Vec::new(),
             built_in_classes: HashSet::new(),
             built_in_functions: HashSet::new(),
@@ -339,6 +387,50 @@ impl<'c> Converter<'c> {
             loops: modes::Loops::default(),
             variables: Variables::default(),
         }
+    }
+
+    /// The lowercase fully qualified name of the name at `node`, written `raw`: PHP class
+    /// and function names ignore letter case (P2R-32, P2R-111, P2R-151).
+    fn name_key(&self, node: &impl HasSpan, raw: &[u8]) -> Vec<u8> {
+        let full = self.resolved.resolve(&node.span().start).unwrap_or(raw);
+        full.strip_prefix(b"\\")
+            .unwrap_or(full)
+            .to_ascii_lowercase()
+    }
+
+    /// The key of a declared function: its fully qualified name (P2R-151).
+    fn function_key(&self, function: &Function<'_>) -> Vec<u8> {
+        self.name_key(&function.name, function.name.value)
+    }
+
+    /// The key of the class, enum or function a name in a use refers to, as PHP resolves
+    /// it from the namespace and the `use` lines (P2R-151).
+    fn identifier_key(&self, identifier: &Identifier<'_>) -> Vec<u8> {
+        self.name_key(identifier, identifier.value())
+    }
+
+    /// The key of the class or enum a class name in a use refers to: a name, or `self` and
+    /// `static` inside the body of a class or enum, where `static` is `self` because no
+    /// class extends another (P2R-153). `None` for `parent` or an expression.
+    fn class_key(&self, class: &Expression<'_>) -> Option<Vec<u8>> {
+        match class {
+            Expression::Identifier(identifier) => Some(self.identifier_key(identifier)),
+            Expression::Self_(_) | Expression::Static(_) => {
+                Some(self.classes[self.current_class?].key.clone())
+            }
+            _ => None,
+        }
+    }
+
+    /// True for a call of the built-in function `name` (lowercase): by its name in any
+    /// letter case, with or without a leading `\`, or inside a namespace where PHP falls
+    /// back to the global function (P2R-32, P2R-151).
+    fn calls_built_in(&self, call: &FunctionCall<'_>, name: &[u8]) -> bool {
+        let Expression::Identifier(identifier) = call.function else {
+            return false;
+        };
+        let key = self.identifier_key(identifier);
+        !self.functions.contains_key(&key) && key.rsplit(|b| *b == b'\\').next() == Some(name)
     }
 
     fn refuse(&mut self, node: &impl HasSpan, message: impl Into<String>) {
@@ -368,6 +460,7 @@ impl<'c> Converter<'c> {
     }
 
     fn program(&mut self, program: &Program<'_>) -> String {
+        self.check_uses(program.statements.as_slice());
         self.register_enums(program);
         self.register_class_names(program);
         self.register(program);
@@ -382,7 +475,7 @@ impl<'c> Converter<'c> {
         let mut items: Vec<Vec<String>> = Vec::new();
         let mut main: Vec<String> = Vec::new();
         // Each enum's place among the items, filled once every use is known (P2R-115).
-        let mut enum_slots: Vec<(usize, usize)> = Vec::new();
+        let mut enum_slots: Vec<(usize, usize, &Enum<'_>)> = Vec::new();
         let mut declared = false;
         let mut started = false;
         // A statement of `fn main()` has run, so a later enum is not declared yet (P2R-110).
@@ -402,6 +495,15 @@ impl<'c> Converter<'c> {
                 {
                     declared = true
                 }
+                // The statements of an unbraced namespace follow it at the top level
+                // (P2R-150).
+                Statement::Namespace(namespace)
+                    if declared
+                        && !started
+                        && matches!(namespace.body, NamespaceBody::Implicit(_)) =>
+                {
+                    started = true
+                }
                 other => {
                     if !declared && !started {
                         self.refuse(
@@ -411,6 +513,14 @@ impl<'c> Converter<'c> {
                     }
                     started = true;
                     match other {
+                        // Without the declare, that problem is the one reported.
+                        Statement::Namespace(_) if !declared => {}
+                        Statement::Namespace(_) => self.refuse(
+                            other,
+                            "a file may hold one namespace statement, without braces, right after the declare (P2R-150)",
+                        ),
+                        // A `use` only changes how names resolve (P2R-150).
+                        Statement::Use(_) => {}
                         Statement::Function(function) => {
                             if let Some(item) = self.function(function) {
                                 items.push(item);
@@ -425,7 +535,7 @@ impl<'c> Converter<'c> {
                             }
                             if let Some(index) = self.enum_index(declaration) {
                                 items.push(Vec::new());
-                                enum_slots.push((items.len() - 1, index));
+                                enum_slots.push((items.len() - 1, index, declaration));
                             }
                         }
                         // PHP declares a readonly class before any statement runs, so it may
@@ -454,8 +564,14 @@ impl<'c> Converter<'c> {
             });
         }
         self.finish_variables(&mut main);
-        for (slot, index) in enum_slots {
-            items[slot] = self.enum_item(index);
+        // Every enum method converts before any enum is written, because a method can use
+        // the helpers of any enum (P2R-115, P2R-155).
+        let methods: Vec<Vec<Vec<String>>> = enum_slots
+            .iter()
+            .map(|(_, _, declaration)| self.enum_methods(declaration))
+            .collect();
+        for ((slot, index, _), methods) in enum_slots.into_iter().zip(methods) {
+            items[slot] = self.enum_item(index, methods);
         }
         assemble(items, main)
     }

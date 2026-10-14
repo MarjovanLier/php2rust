@@ -5,6 +5,7 @@ use mago_span::{HasSpan, Span};
 use mago_syntax::cst::*;
 
 use super::Converter;
+use super::classes::ClassInfo;
 use crate::names;
 use crate::printer::{self, RExpr};
 use crate::types::RustType;
@@ -15,7 +16,7 @@ const TAKEN: &[&str] = &["Option", "String", "Vec", "ToOwned"];
 /// Names PHP reserves, its keywords and type names, which no enum may take; each one fails
 /// `php -l` as an enum name on PHP 8.5, while Mago's parser accepts them (P2R-111). `enum`
 /// itself is allowed.
-const RESERVED: &str = "abstract and array as bool break callable case catch class clone \
+pub(super) const RESERVED: &str = "abstract and array as bool break callable case catch class clone \
     const continue declare default die do echo else elseif empty enddeclare endfor endforeach \
     endif endswitch endwhile eval exit extends false final finally float fn for foreach \
     function global goto if implements include include_once instanceof insteadof int \
@@ -75,6 +76,12 @@ impl Converter<'_> {
             }
             self.type_names
                 .insert(info.key.clone(), RustType::Enum(info.rust_name.clone()));
+            // Its methods and constants live with those of the classes (P2R-155).
+            self.classes.push(ClassInfo::new(
+                info.key.clone(),
+                info.rust_name.clone(),
+                true,
+            ));
             self.enums.push(info);
         }
     }
@@ -90,7 +97,9 @@ impl Converter<'_> {
         let php = String::from_utf8_lossy(name.value);
         let lower = php.to_ascii_lowercase();
         if RESERVED.split_whitespace().any(|word| word == lower)
-            || self.built_in_classes.contains(lower.as_bytes())
+            || self
+                .built_in_classes
+                .contains(&self.name_key(name, name.value))
         {
             self.refuse(
                 name,
@@ -110,7 +119,7 @@ impl Converter<'_> {
 
     /// The enum an enum declaration registered, when its name converts.
     pub(super) fn enum_index(&self, declaration: &Enum<'_>) -> Option<usize> {
-        let key = declaration.name.value.to_ascii_lowercase();
+        let key = self.name_key(&declaration.name, declaration.name.value);
         self.enums.iter().position(|e| e.key == key)
     }
 
@@ -143,12 +152,21 @@ impl Converter<'_> {
         };
         let mut cases: Vec<Case> = Vec::new();
         for member in declaration.members.iter() {
-            let ClassLikeMember::EnumCase(case) = member else {
-                self.refuse(
-                    member,
-                    "an enum with a method, constant, property or trait is not supported (P2R-110)",
-                );
-                continue;
+            let case = match member {
+                ClassLikeMember::EnumCase(case) => case,
+                // Section 16 converts methods and constants (P2R-155, P2R-156).
+                ClassLikeMember::Method(method) => {
+                    self.method_shape(method);
+                    continue;
+                }
+                ClassLikeMember::Constant(_) => continue,
+                _ => {
+                    self.refuse(
+                        member,
+                        "an enum with a property or trait is not supported (P2R-110)",
+                    );
+                    continue;
+                }
             };
             let name = case.item.name();
             let php_case = String::from_utf8_lossy(name.value);
@@ -196,7 +214,7 @@ impl Converter<'_> {
             });
         }
         Some(EnumInfo {
-            key: declaration.name.value.to_ascii_lowercase(),
+            key: self.name_key(&declaration.name, declaration.name.value),
             rust_name,
             backing,
             cases,
@@ -236,6 +254,14 @@ impl Converter<'_> {
         literal.map(|value| value.to_string())
     }
 
+    /// True when the enum with the key `key` has a case with the PHP name `php`.
+    pub(super) fn has_case(&self, key: &[u8], php: &[u8]) -> bool {
+        self.enums
+            .iter()
+            .filter(|e| e.key == key)
+            .any(|e| e.cases.iter().any(|case| case.php_name == php))
+    }
+
     /// The paths of the cases of the enum named `rust_name`, as `E::Case`, in source order.
     pub(super) fn case_paths(&self, rust_name: &str) -> Vec<String> {
         self.enums
@@ -251,37 +277,57 @@ impl Converter<'_> {
 
     /// The enum a class name in a use refers to, whatever its letter case (P2R-111).
     fn enum_of(&self, class: &Expression<'_>) -> Option<usize> {
-        let key = class_key(class)?;
+        let key = self.class_key(class)?;
         self.enums.iter().position(|e| e.key == key)
     }
 
-    /// `E::Case`, a case of an enum of the file (P2R-112).
-    pub(super) fn enum_case(
+    /// The Rust names of the enum and case that `E::Case`, `self::Case` or `static::Case`
+    /// names, for a case of an enum of the file (P2R-112, P2R-153).
+    pub(super) fn enum_case_of(
+        &self,
+        access: &ClassConstantAccess<'_>,
+    ) -> Option<(String, String)> {
+        let ClassLikeConstantSelector::Identifier(name) = &access.constant else {
+            return None;
+        };
+        let info = &self.enums[self.enum_of(access.class)?];
+        info.cases
+            .iter()
+            .find(|case| case.php_name == name.value)
+            .map(|case| (info.rust_name.clone(), case.rust_name.clone()))
+    }
+
+    /// `E::Case`, a case of an enum of the file, or `C::NAME`, a constant of a class or
+    /// enum of the file (P2R-112, P2R-156).
+    pub(super) fn class_constant(
         &mut self,
         access: &ClassConstantAccess<'_>,
         node: &Expression<'_>,
     ) -> Option<(RExpr, RustType)> {
-        let found = match (&access.constant, self.enum_of(access.class)) {
-            (ClassLikeConstantSelector::Identifier(name), Some(index)) => {
-                let info = &self.enums[index];
-                info.cases
-                    .iter()
-                    .find(|case| case.php_name == name.value)
-                    .map(|case| (info.rust_name.clone(), case.rust_name.clone()))
+        if let Some((enum_name, case_name)) = self.enum_case_of(access) {
+            return Some((
+                RExpr::Path(format!("{enum_name}::{case_name}")),
+                RustType::Enum(enum_name),
+            ));
+        }
+        if let Some(found) = self.constant_read(access) {
+            return Some(found);
+        }
+        let outside = self.current_class.is_none()
+            && matches!(access.class, Expression::Self_(_) | Expression::Static(_));
+        let message = match &access.constant {
+            _ if outside => "self:: and static:: work only inside a class or enum (P2R-153)",
+            ClassLikeConstantSelector::Identifier(name)
+                if name.value.eq_ignore_ascii_case(b"class") =>
+            {
+                "C::class is not supported (P2R-156)"
             }
-            _ => None,
+            _ => {
+                "only a case of an enum or a constant of a class or enum of this file can be read with :: (P2R-156)"
+            }
         };
-        let Some((enum_name, case_name)) = found else {
-            self.refuse(
-                node,
-                "only a case of an enum of this file can be read with :: (P2R-112)",
-            );
-            return None;
-        };
-        Some((
-            RExpr::Path(format!("{enum_name}::{case_name}")),
-            RustType::Enum(enum_name),
-        ))
+        self.refuse(node, message);
+        None
     }
 
     /// `$e->name` and `$e->value`, on the converted `object` of type `ty` (P2R-113).
@@ -412,9 +458,30 @@ impl Converter<'_> {
         }
     }
 
-    /// The Rust lines of the enum at `index` and of the methods the file uses, written once
-    /// every use is known (P2R-110, P2R-115).
-    pub(super) fn enum_item(&mut self, index: usize) -> Vec<String> {
+    /// The lines of the methods the enum `declaration` declares, in source order, each
+    /// converted as a method of its class-like entry (P2R-155).
+    pub(super) fn enum_methods(&mut self, declaration: &Enum<'_>) -> Vec<Vec<String>> {
+        let key = self.name_key(&declaration.name, declaration.name.value);
+        let Some(class) = self.classes.iter().position(|c| c.key == key) else {
+            return Vec::new();
+        };
+        let mut methods = Vec::new();
+        for member in declaration.members.iter() {
+            let ClassLikeMember::Method(method) = member else {
+                continue;
+            };
+            let Some(at) = self.method_index(class, method.name.value) else {
+                continue;
+            };
+            methods.extend(self.method(method, class, at));
+        }
+        methods
+    }
+
+    /// The Rust lines of the enum at `index`: the enum, then one `impl` block with its
+    /// constants, the helpers the file uses and its `methods`, written once every use is
+    /// known (P2R-110, P2R-115, P2R-157).
+    pub(super) fn enum_item(&mut self, index: usize, methods: Vec<Vec<String>>) -> Vec<String> {
         let info = &self.enums[index];
         let open = format!("pub enum {} {{", info.rust_name);
         let mut lines = vec!["#[derive(Clone, Copy, Debug, PartialEq, Eq)]".to_owned()];
@@ -430,48 +497,44 @@ impl Converter<'_> {
             );
             lines.push("}".to_owned());
         }
-        let methods = methods(info);
-        if !methods.is_empty() {
-            lines.push(String::new());
-            lines.push(format!("impl {} {{", info.rust_name));
-            for (at, method) in methods.into_iter().enumerate() {
-                if at > 0 {
-                    lines.push(String::new());
-                }
-                lines.extend(method);
-            }
-            lines.push("}".to_owned());
-        }
-        // rustfmt splits a longer line.
-        let span = info.span;
-        if lines.iter().any(|line| line.len() > printer::MAX_WIDTH) {
+        let helpers = helpers(info);
+        let (span, key) = (info.span, info.key.clone());
+        // rustfmt splits a longer line; the methods were measured as they converted.
+        if lines
+            .iter()
+            .chain(helpers.iter().flatten())
+            .any(|line| line.len() > printer::MAX_WIDTH)
+        {
             self.refuse(&span, "this enum has a line too long for one line (P2R-51)");
         }
+        let class = self.classes.iter().position(|c| c.key == key);
+        let constants = class.map(|c| self.constant_lines(c)).unwrap_or_default();
+        let functions: Vec<Vec<String>> = helpers.into_iter().chain(methods).collect();
+        if constants.is_empty() && functions.is_empty() {
+            return lines;
+        }
+        lines.push(String::new());
+        lines.push(format!("impl {} {{", self.enums[index].rust_name));
+        if functions.is_empty() {
+            // No blank line before the closing brace.
+            lines.extend(constants.iter().take(constants.len() - 1).cloned());
+        } else {
+            lines.extend(constants);
+        }
+        for (at, function) in functions.into_iter().enumerate() {
+            if at > 0 {
+                lines.push(String::new());
+            }
+            lines.extend(function);
+        }
+        lines.push("}".to_owned());
         lines
     }
 }
 
-/// The lowercase PHP name a class name in a use refers to, without a leading `\`, whatever
-/// its letter case (P2R-111, P2R-131).
-pub(super) fn class_key(class: &Expression<'_>) -> Option<Vec<u8>> {
-    let Expression::Identifier(identifier) = class else {
-        return None;
-    };
-    let name = match identifier {
-        Identifier::Local(local) => local.value,
-        Identifier::Qualified(qualified) => qualified.value,
-        Identifier::FullyQualified(full) => full.value,
-    };
-    Some(
-        name.strip_prefix(b"\\")
-            .unwrap_or(name)
-            .to_ascii_lowercase(),
-    )
-}
-
-/// The methods the file uses, in the order `name`, `value`, `from`, `try_from`, `cases`,
+/// The helpers the file uses, in the order `name`, `value`, `from`, `try_from`, `cases`,
 /// each as its lines (P2R-115).
-fn methods(info: &EnumInfo) -> Vec<Vec<String>> {
+fn helpers(info: &EnumInfo) -> Vec<Vec<String>> {
     let name = &info.rust_name;
     let path = |case: &Case| format!("{name}::{}", case.rust_name);
     let backing = info

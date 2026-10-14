@@ -4,7 +4,7 @@ use mago_span::HasSpan;
 use mago_syntax::cst::*;
 
 use super::variables::{self, changes_variable};
-use super::{Converter, Mode, ParameterSignature, lists, nulls, numbers, strings};
+use super::{Converter, Mode, ParameterSignature, lists, nulls, numbers};
 use crate::printer::{self, BinOp, RExpr};
 use crate::types::RustType;
 
@@ -51,16 +51,16 @@ impl Converter<'_> {
             Expression::CompositeString(CompositeString::Interpolated(_)) => {
                 self.joined_string(expression)
             }
-            Expression::Call(Call::Function(call)) if strings::calls(call, b"strlen") => {
+            Expression::Call(Call::Function(call)) if self.calls_built_in(call, b"strlen") => {
                 self.strlen(call, expression)
             }
-            Expression::Call(Call::Function(call)) if strings::calls(call, b"count") => {
+            Expression::Call(Call::Function(call)) if self.calls_built_in(call, b"count") => {
                 self.count(call, expression)
             }
-            Expression::Call(Call::Function(call)) if strings::calls(call, b"intdiv") => {
+            Expression::Call(Call::Function(call)) if self.calls_built_in(call, b"intdiv") => {
                 self.intdiv(call, expression)
             }
-            Expression::Call(Call::Function(call)) if strings::calls(call, b"fdiv") => {
+            Expression::Call(Call::Function(call)) if self.calls_built_in(call, b"fdiv") => {
                 self.fdiv(call, expression)
             }
             Expression::Call(Call::Function(call)) => match self.call(call, expression)? {
@@ -87,9 +87,19 @@ impl Converter<'_> {
             Expression::Literal(Literal::Float(float)) => {
                 Some((RExpr::Float(*float.value), RustType::F64))
             }
-            Expression::Access(Access::ClassConstant(access)) => self.enum_case(access, expression),
+            Expression::Access(Access::ClassConstant(access)) => {
+                self.class_constant(access, expression)
+            }
             Expression::Access(Access::Property(access)) => self.property(access, expression),
-            Expression::Call(Call::StaticMethod(call)) => self.static_call(call, expression),
+            Expression::Call(Call::StaticMethod(call)) => {
+                match self.static_call(call, expression)? {
+                    (call, Some(ty)) => Some((call, ty)),
+                    (_, None) => {
+                        self.refuse(expression, "a void method has no value (P2R-20)");
+                        None
+                    }
+                }
+            }
             Expression::Call(Call::Method(call)) => match self.method_call(call, expression)? {
                 (call, Some(ty)) => Some((call, ty)),
                 (_, None) => {
@@ -233,7 +243,7 @@ impl Converter<'_> {
         call: &FunctionCall<'_>,
         node: &Expression<'_>,
     ) -> Option<(RExpr, Option<RustType>)> {
-        let Expression::Identifier(Identifier::Local(name)) = call.function else {
+        let Expression::Identifier(name) = call.function else {
             self.record_refused(node);
             self.refuse(
                 node,
@@ -241,17 +251,18 @@ impl Converter<'_> {
             );
             return None;
         };
-        let Some(signature) = self
-            .functions
-            .get(&name.value.to_ascii_lowercase())
-            .cloned()
-        else {
-            let text = String::from_utf8_lossy(name.value).into_owned();
+        let key = self.identifier_key(name);
+        let Some(signature) = self.functions.get(&key).cloned() else {
+            let text = String::from_utf8_lossy(name.value()).into_owned();
             self.record_refused(node);
             self.refuse(node, format!("calls to {text} are not supported (P2R-48)"));
             return None;
         };
         let arguments = self.arguments(&call.argument_list, &signature.parameters, node)?;
+        // rustc counts a call of the function in its own body (P2R-50).
+        if self.current_function.as_ref() == Some(&key) {
+            self.self_calls.push(call.span());
+        }
         Some((
             RExpr::Call(signature.rust_name, arguments),
             signature.returns,

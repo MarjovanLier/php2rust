@@ -7,10 +7,10 @@ use heck::ToSnakeCase;
 use mago_span::{HasSpan, Span};
 use mago_syntax::cst::*;
 
-use super::enums::class_key;
 use super::recursion::{self, Target};
 use super::variables::THIS;
 use super::{Context, Converter, Mode, ParameterSignature, Signature, Variables, lists, nulls};
+use crate::names;
 use crate::printer::{self, RExpr};
 use crate::types::{self, RustType};
 
@@ -37,6 +37,36 @@ pub(super) struct ClassInfo {
     /// True for a changing type: a value of it is never copied (P2R-141, P2R-145).
     pub(super) changing: bool,
     pub(super) methods: Vec<MethodInfo>,
+    /// True for the methods and constants of an enum, which has no struct or `new`
+    /// (P2R-155).
+    pub(super) is_enum: bool,
+    pub(super) constants: Vec<ConstantInfo>,
+}
+
+impl ClassInfo {
+    pub(super) fn new(key: Vec<u8>, rust_name: String, is_enum: bool) -> Self {
+        Self {
+            key,
+            rust_name,
+            fields: Vec::new(),
+            declared: Vec::new(),
+            complete: true,
+            writable: false,
+            changing: false,
+            methods: Vec::new(),
+            is_enum,
+            constants: Vec::new(),
+        }
+    }
+
+    /// The type of `$this` in a method: the struct, or the enum (P2R-155).
+    pub(super) fn own_type(&self) -> RustType {
+        if self.is_enum {
+            RustType::Enum(self.rust_name.clone())
+        } else {
+            RustType::Class(self.rust_name.clone())
+        }
+    }
 }
 
 pub(super) struct MethodInfo {
@@ -46,6 +76,20 @@ pub(super) struct MethodInfo {
     pub(super) signature: Signature,
     /// `Mut` for a method that changes its object, `&mut self` (P2R-143).
     pub(super) self_mode: Mode,
+    /// A static method has no `self` (P2R-152).
+    pub(super) is_static: bool,
+}
+
+/// A constant of a class or enum (P2R-156).
+pub(super) struct ConstantInfo {
+    /// The PHP name: PHP constant names keep their letter case.
+    php_name: Vec<u8>,
+    rust_name: String,
+    ty: RustType,
+    /// The `pub const` line in the `impl` block.
+    line: String,
+    /// The value of an int constant, which P2R-50 knows as it knows a literal.
+    known: Option<i64>,
 }
 
 impl Converter<'_> {
@@ -70,19 +114,10 @@ impl Converter<'_> {
                 );
                 continue;
             }
-            let key = declaration.name.value.to_ascii_lowercase();
+            let key = self.name_key(&declaration.name, declaration.name.value);
             self.type_names
                 .insert(key.clone(), RustType::Class(rust_name.clone()));
-            self.classes.push(ClassInfo {
-                key,
-                rust_name,
-                fields: Vec::new(),
-                declared: Vec::new(),
-                complete: true,
-                writable: false,
-                changing: false,
-                methods: Vec::new(),
-            });
+            self.classes.push(ClassInfo::new(key, rust_name, false));
         }
     }
 
@@ -95,15 +130,26 @@ impl Converter<'_> {
             .map(|f| f.rust_name.clone())
             .collect();
         for statement in program.statements.iter() {
-            let Statement::Class(declaration) = statement else {
+            let (name, members) = match statement {
+                Statement::Class(declaration) => {
+                    if self.class_index(declaration).is_some() {
+                        self.class_shape(declaration);
+                    }
+                    (&declaration.name, &declaration.members)
+                }
+                Statement::Enum(declaration) => (&declaration.name, &declaration.members),
+                _ => continue,
+            };
+            let key = self.name_key(name, name.value);
+            let Some(index) = self.classes.iter().position(|c| c.key == key) else {
                 continue;
             };
-            if let Some(index) = self.class_index(declaration) {
-                self.class_shape(declaration);
+            if let Statement::Class(declaration) = statement {
                 self.fields(declaration, index);
                 self.declared_properties(declaration, index);
-                self.method_signatures(declaration, index, &taken);
             }
+            self.method_signatures(name, members, index, &taken);
+            self.constants(members, index);
         }
         for index in 0..self.classes.len() {
             self.check_containment(program, index);
@@ -119,8 +165,7 @@ impl Converter<'_> {
         for statement in program.statements.iter() {
             match statement {
                 Statement::Function(function) => {
-                    let key = function.name.value.to_ascii_lowercase();
-                    if let Some(signature) = self.functions.get(&key) {
+                    if let Some(signature) = self.functions.get(&self.function_key(function)) {
                         self.nullable_in(
                             &function.parameter_list,
                             function.return_type_hint.as_ref(),
@@ -269,7 +314,7 @@ impl Converter<'_> {
 
     /// The class a class declaration registered, when its name converts.
     pub(super) fn class_index(&self, declaration: &Class<'_>) -> Option<usize> {
-        let key = declaration.name.value.to_ascii_lowercase();
+        let key = self.name_key(&declaration.name, declaration.name.value);
         self.classes.iter().position(|c| c.key == key)
     }
 
@@ -318,41 +363,24 @@ impl Converter<'_> {
         for member in declaration.members.iter() {
             let method = match member {
                 ClassLikeMember::Method(method) => method,
+                ClassLikeMember::Constant(_) => continue,
                 ClassLikeMember::Property(_) if !readonly => continue,
                 _ if readonly => {
                     self.refuse(
                         member,
-                        "a readonly class may hold only a constructor and methods (P2R-130)",
+                        "a readonly class may hold only a constructor, methods and constants (P2R-130)",
                     );
                     continue;
                 }
                 _ => {
                     self.refuse(
                         member,
-                        "a class may hold only a constructor, methods and properties (P2R-140)",
+                        "a class may hold only a constructor, methods, properties and constants (P2R-140)",
                     );
                     continue;
                 }
             };
-            if let Some(attributes) = method.attribute_lists.first() {
-                self.refuse(attributes, "attributes are not supported (P2R-07)");
-            }
-            if let Some(modifier) = method
-                .modifiers
-                .iter()
-                .find(|m| matches!(m, Modifier::Static(_) | Modifier::Abstract(_)))
-            {
-                self.refuse(
-                    modifier,
-                    "a static or abstract method is not supported (P2R-135)",
-                );
-            }
-            if method.ampersand.is_some() {
-                self.refuse(
-                    &method.name,
-                    "a method that returns by reference is not supported (P2R-135)",
-                );
-            }
+            self.method_shape(method);
             if is_constructor(method) {
                 constructors += 1;
                 if constructors > 1 {
@@ -362,10 +390,52 @@ impl Converter<'_> {
                     );
                 }
                 self.constructor_shape(method);
-            } else if method.name.value.starts_with(b"__") {
+            }
+        }
+    }
+
+    /// Refuses a method form no class or enum of these slices may hold (P2R-130,
+    /// P2R-135, P2R-152, P2R-155).
+    pub(super) fn method_shape(&mut self, method: &Method<'_>) {
+        if let Some(attributes) = method.attribute_lists.first() {
+            self.refuse(attributes, "attributes are not supported (P2R-07)");
+        }
+        if let Some(modifier) = method
+            .modifiers
+            .iter()
+            .find(|m| matches!(m, Modifier::Abstract(_)))
+        {
+            self.refuse(modifier, "an abstract method is not supported (P2R-135)");
+        }
+        if method.ampersand.is_some() {
+            self.refuse(
+                &method.name,
+                "a method that returns by reference is not supported (P2R-135)",
+            );
+        }
+        if !is_constructor(method) && method.name.value.starts_with(b"__") {
+            self.refuse(
+                &method.name,
+                "a method whose name starts with __ is not supported (P2R-130)",
+            );
+        }
+        // PHP prints a warning for it when it compiles the file; Mago reports nothing.
+        if !is_constructor(method) && final_private(&method.modifiers) {
+            self.refuse(
+                &method.name,
+                "a private method cannot be final, and PHP warns about it (P2R-130)",
+            );
+        }
+        // PHP rejects a `static` parameter type; Mago's parser accepts it.
+        for parameter in method.parameter_list.parameters.iter() {
+            if parameter
+                .hint
+                .as_ref()
+                .is_some_and(|hint| names(hint, is_static))
+            {
                 self.refuse(
-                    &method.name,
-                    "a method whose name starts with __ is not supported (P2R-130)",
+                    parameter,
+                    "static can only be a return type, which PHP requires (P2R-154)",
                 );
             }
         }
@@ -441,8 +511,9 @@ impl Converter<'_> {
                 continue;
             }
             let codebase = self.codebase;
+            let class = self.name_key(&declaration.name, declaration.name.value);
             let declared = codebase
-                .get_property(declaration.name.value, parameter.variable.name)
+                .get_property(&class, parameter.variable.name)
                 .and_then(|p| p.type_metadata.as_ref())
                 .map(|t| &t.type_union);
             let Some(ty) = self.declared_type(parameter, declared) else {
@@ -543,8 +614,9 @@ impl Converter<'_> {
             return;
         }
         let codebase = self.codebase;
+        let class = self.name_key(&declaration.name, declaration.name.value);
         let declared = codebase
-            .get_property(declaration.name.value, item.variable.name)
+            .get_property(&class, item.variable.name)
             .and_then(|p| p.type_metadata.as_ref())
             .map(|t| &t.type_union);
         let Some(ty) = self.declared_type(&item.variable, declared) else {
@@ -634,15 +706,20 @@ impl Converter<'_> {
 
     /// The signature of every method of the class at `index`, other than the constructor
     /// (P2R-131, P2R-135).
-    fn method_signatures(
+    /// The signatures of the methods of the class or enum `name` at `index`, from its
+    /// `members` (P2R-131, P2R-135, P2R-152, P2R-155).
+    pub(super) fn method_signatures(
         &mut self,
-        declaration: &Class<'_>,
+        name: &LocalIdentifier<'_>,
+        members: &Sequence<'_, ClassLikeMember<'_>>,
         index: usize,
         taken: &HashSet<String>,
     ) {
         let codebase = self.codebase;
+        let class = self.name_key(name, name.value);
+        let is_enum = self.classes[index].is_enum;
         let mut methods: Vec<MethodInfo> = Vec::new();
-        for member in declaration.members.iter() {
+        for member in members.iter() {
             let ClassLikeMember::Method(method) = member else {
                 continue;
             };
@@ -661,15 +738,34 @@ impl Converter<'_> {
                 );
                 continue;
             }
-            if methods.iter().any(|m| m.signature.rust_name == rust_name) {
+            // The helpers of P2R-115 take these names, and PHP itself rejects `cases`,
+            // `from` and `tryFrom` in any letter case on a backed enum (P2R-155).
+            let helper = matches!(
+                rust_name.as_str(),
+                "name" | "value" | "from" | "try_from" | "cases"
+            ) || [&b"cases"[..], b"from", b"tryfrom"]
+                .contains(&method.name.value.to_ascii_lowercase().as_slice());
+            if is_enum && helper {
                 self.refuse(
                     &method.name,
-                    format!("{rust_name} is already the Rust name of another method (P2R-131)"),
+                    "an enum method may not take the name of name, value, from, tryFrom or cases (P2R-155)",
                 );
                 continue;
             }
-            let Some(metadata) = codebase.get_method(declaration.name.value, method.name.value)
-            else {
+            // PHP method names ignore letter case, so PHP rejects the second one, and Mago
+            // does not report it.
+            let key = method.name.value.to_ascii_lowercase();
+            if methods
+                .iter()
+                .any(|m| m.signature.rust_name == rust_name || m.key == key)
+            {
+                self.refuse(
+                    &method.name,
+                    format!("{rust_name} is already the name of another method (P2R-131)"),
+                );
+                continue;
+            }
+            let Some(metadata) = codebase.get_method(&class, method.name.value) else {
                 self.refuse(
                     &method.name,
                     "Mago has no signature for this method (P2R-23)",
@@ -692,11 +788,12 @@ impl Converter<'_> {
                     converted = false;
                     continue;
                 }
-                if parameter.hint.as_ref().is_some_and(names_own_class) {
-                    self.refuse(
-                        parameter,
-                        "the types self, static and parent are not supported yet (P2R-135)",
-                    );
+                if parameter
+                    .hint
+                    .as_ref()
+                    .is_some_and(|hint| names(hint, is_parent))
+                {
+                    self.refuse(parameter, "the type parent is not supported (P2R-154)");
                     converted = false;
                     continue;
                 }
@@ -707,12 +804,9 @@ impl Converter<'_> {
                 }
             }
             if let Some(hint) = &method.return_type_hint
-                && names_own_class(&hint.hint)
+                && names(&hint.hint, is_parent)
             {
-                self.refuse(
-                    hint,
-                    "the types self, static and parent are not supported yet (P2R-135)",
-                );
+                self.refuse(hint, "the type parent is not supported (P2R-154)");
                 continue;
             }
             let returns = self.return_type(
@@ -725,17 +819,223 @@ impl Converter<'_> {
             );
             if let (Some(returns), true) = (returns, converted) {
                 methods.push(MethodInfo {
-                    key: method.name.value.to_ascii_lowercase(),
+                    key,
                     signature: Signature {
                         rust_name,
                         parameters,
                         returns,
                     },
                     self_mode: Mode::Shared,
+                    is_static: method
+                        .modifiers
+                        .iter()
+                        .any(|m| matches!(m, Modifier::Static(_))),
                 });
             }
         }
         self.classes[index].methods = methods;
+    }
+
+    /// The constants of the class or enum at `index`, from its `members` (P2R-156).
+    fn constants(&mut self, members: &Sequence<'_, ClassLikeMember<'_>>, index: usize) {
+        let outer = self.current_class.replace(index);
+        let mut constants: Vec<ConstantInfo> = Vec::new();
+        for member in members.iter() {
+            let ClassLikeMember::Constant(constant) = member else {
+                continue;
+            };
+            if let Some(attributes) = constant.attribute_lists.first() {
+                self.refuse(attributes, "attributes are not supported (P2R-07)");
+                continue;
+            }
+            let mut items = constant.items.iter();
+            let (Some(item), None) = (items.next(), items.next()) else {
+                self.refuse(
+                    constant,
+                    "a const statement may declare one constant only (P2R-156)",
+                );
+                continue;
+            };
+            // PHP rejects both when it compiles the file; Mago reports neither.
+            if item.name.value.eq_ignore_ascii_case(b"class") {
+                self.refuse(&item.name, "PHP reserves the constant name class (P2R-156)");
+                continue;
+            }
+            if final_private(&constant.modifiers) {
+                self.refuse(
+                    constant,
+                    "a private constant cannot be final, which PHP rejects (P2R-156)",
+                );
+                continue;
+            }
+            let php = String::from_utf8_lossy(item.name.value);
+            let Some(rust_name) = names::constant_name(&php) else {
+                self.refuse(
+                    &item.name,
+                    format!("the constant name {php} has no Rust form (P2R-156)"),
+                );
+                continue;
+            };
+            let class = &self.classes[index];
+            // In Rust a case and a constant share the names of the type, and PHP rejects a
+            // constant with the name of a case, which Mago does not report. A method name
+            // always holds a lowercase letter, so it never takes a constant's name.
+            let taken = self.has_case(&class.key, item.name.value)
+                || constants.iter().any(|c| c.rust_name == rust_name)
+                || (class.is_enum
+                    && self
+                        .case_paths(&class.rust_name)
+                        .iter()
+                        .any(|path| path.rsplit("::").next() == Some(rust_name.as_str())));
+            if taken {
+                self.refuse(
+                    &item.name,
+                    format!("the constant {rust_name} takes the name of a case or constant of this type (P2R-156)"),
+                );
+                continue;
+            }
+            let Some((value, value_type)) = self.constant_value(item.value) else {
+                continue;
+            };
+            let ty = match &constant.hint {
+                None => value_type.clone(),
+                Some(hint) => match self.constant_type(hint) {
+                    Some(ty) => ty,
+                    None => {
+                        self.refuse(
+                            hint,
+                            "a constant's type must be int, float, bool, string or an enum of this file (P2R-156)",
+                        );
+                        continue;
+                    }
+                },
+            };
+            // PHP stores an int as a float in a float constant, so `-0` is `0.0` (P2R-25).
+            let value = match (&ty, &value_type, printer::literal_value(&value)) {
+                (RustType::F64, RustType::I64, Some(int)) => RExpr::Float(int as f64),
+                _ => value,
+            };
+            let text = match &value {
+                RExpr::Str(text) => printer::quote(text),
+                other => printer::expr(other, false).unwrap_or_default(),
+            };
+            let line = format!(
+                "    pub const {rust_name}: {} = {text};",
+                constant_rust_type(&ty)
+            );
+            // rustfmt splits a wider line (P2R-51).
+            if line.len() > printer::MAX_WIDTH {
+                self.refuse(
+                    &item.name,
+                    "this constant is too long for one line (P2R-51)",
+                );
+                continue;
+            }
+            let known = match ty {
+                RustType::I64 => printer::literal_value(&value),
+                _ => None,
+            };
+            constants.push(ConstantInfo {
+                php_name: item.name.value.to_vec(),
+                rust_name,
+                ty,
+                line,
+                known,
+            });
+        }
+        self.classes[index].constants = constants;
+        self.current_class = outer;
+    }
+
+    /// The `pub const` lines of the class or enum at `index`, then a blank line, first in
+    /// its `impl` block; nothing when it has none (P2R-157).
+    pub(super) fn constant_lines(&self, index: usize) -> Vec<String> {
+        let constants = &self.classes[index].constants;
+        let mut lines: Vec<String> = constants.iter().map(|c| c.line.clone()).collect();
+        if !lines.is_empty() {
+            lines.push(String::new());
+        }
+        lines
+    }
+
+    /// The value of a constant: an int or float literal, with or without unary minus, a
+    /// bool or string literal, or a case of an enum of the file (P2R-156).
+    fn constant_value(&mut self, value: &Expression<'_>) -> Option<(RExpr, RustType)> {
+        let number = |e: &Expression<'_>| {
+            matches!(
+                e,
+                Expression::Literal(Literal::Integer(_) | Literal::Float(_))
+            )
+        };
+        match value {
+            Expression::Literal(
+                Literal::Integer(_)
+                | Literal::Float(_)
+                | Literal::String(_)
+                | Literal::True(_)
+                | Literal::False(_),
+            ) => self.expression(value),
+            Expression::UnaryPrefix(unary)
+                if matches!(unary.operator, UnaryPrefixOperator::Negation(_))
+                    && number(unary.operand) =>
+            {
+                self.expression(value)
+            }
+            Expression::Access(Access::ClassConstant(access))
+                if self.enum_case_of(access).is_some() =>
+            {
+                self.expression(value)
+            }
+            _ => {
+                self.refuse(
+                    value,
+                    "a constant's value must be a literal or a case of an enum of this file (P2R-156)",
+                );
+                None
+            }
+        }
+    }
+
+    /// The Rust type of a constant's declared type (P2R-156).
+    fn constant_type(&self, hint: &Hint<'_>) -> Option<RustType> {
+        match hint {
+            Hint::Integer(_) => Some(RustType::I64),
+            Hint::Float(_) => Some(RustType::F64),
+            Hint::Bool(_) => Some(RustType::Bool),
+            Hint::String(_) => Some(RustType::String),
+            Hint::Self_(_) | Hint::Static(_) => {
+                let class = &self.classes[self.current_class?];
+                class.is_enum.then(|| class.own_type())
+            }
+            Hint::Identifier(identifier) => {
+                match self.type_names.get(&self.identifier_key(identifier)) {
+                    Some(ty @ RustType::Enum(_)) => Some(ty.clone()),
+                    _ => None,
+                }
+            }
+            _ => None,
+        }
+    }
+
+    /// `C::NAME`, `self::NAME` and `static::NAME` for a constant of a class or enum of the
+    /// file, with its declared type. An int constant is a known value, as a literal is
+    /// (P2R-50, P2R-156).
+    pub(super) fn constant_read(
+        &self,
+        access: &ClassConstantAccess<'_>,
+    ) -> Option<(RExpr, RustType)> {
+        let ClassLikeConstantSelector::Identifier(name) = &access.constant else {
+            return None;
+        };
+        let key = self.class_key(access.class)?;
+        let class = self.classes.iter().find(|c| c.key == key)?;
+        let constant = class.constants.iter().find(|c| c.php_name == name.value)?;
+        let path = format!("{}::{}", class.rust_name, constant.rust_name);
+        let read = match constant.known {
+            Some(value) => RExpr::Known(path, value),
+            None => RExpr::Path(path),
+        };
+        Some((read, constant.ty.clone()))
     }
 
     /// Refuses a class that holds itself by value, through its properties or those of
@@ -776,9 +1076,7 @@ impl Converter<'_> {
             .statements
             .iter()
             .find_map(|statement| match statement {
-                Statement::Class(declaration)
-                    if declaration.name.value.to_ascii_lowercase() == self.classes[index].key =>
-                {
+                Statement::Class(declaration) if self.class_index(declaration) == Some(index) => {
                     Some(declaration)
                 }
                 _ => None,
@@ -813,6 +1111,7 @@ impl Converter<'_> {
         }
         lines.push(String::new());
         lines.push(format!("impl {name} {{"));
+        lines.extend(self.constant_lines(index));
         let parameters: Vec<String> = fields
             .iter()
             .map(|f| format!("{}: {}", f.rust_name, f.mode.parameter(&f.ty)))
@@ -861,23 +1160,32 @@ impl Converter<'_> {
 
     /// The lines of a method, `pub fn name(&self, ...)` with its body, one level deep in
     /// the `impl` block (P2R-135).
-    fn method(&mut self, method: &Method<'_>, class: usize, at: usize) -> Option<Vec<String>> {
+    pub(super) fn method(
+        &mut self,
+        method: &Method<'_>,
+        class: usize,
+        at: usize,
+    ) -> Option<Vec<String>> {
         let MethodBody::Concrete(block) = &method.body else {
             return None;
         };
         let signature = self.classes[class].methods[at].signature.clone();
-        let this = ParameterSignature {
-            php_name: THIS.to_vec(),
-            rust_name: "self".to_owned(),
-            snake: "self".to_owned(),
-            ty: RustType::Class(self.classes[class].rust_name.clone()),
-            mode: self.classes[class].methods[at].self_mode,
-        };
-        let mut parameters = vec![this];
+        let mut parameters = Vec::new();
+        // A static method has no `self` (P2R-152).
+        if !self.classes[class].methods[at].is_static {
+            parameters.push(ParameterSignature {
+                php_name: THIS.to_vec(),
+                rust_name: "self".to_owned(),
+                snake: "self".to_owned(),
+                ty: self.classes[class].own_type(),
+                mode: self.classes[class].methods[at].self_mode,
+            });
+        }
         parameters.extend(signature.parameters.iter().cloned());
         // A method has its own variables, as a function does.
         let outer = std::mem::replace(&mut self.variables, Variables::with_parameters(&parameters));
         let outer_method = self.current_method.replace((class, at));
+        let outer_class = self.current_class.replace(class);
         let outer_calls = std::mem::take(&mut self.self_calls);
         let sites = self.site_types(block.statements.iter(), signature.returns.as_ref());
         self.variables.list_types = sites.lists;
@@ -899,7 +1207,6 @@ impl Converter<'_> {
         }
         let statements: Vec<&Statement<'_>> = block.statements.iter().collect();
         let target = Target {
-            name: None,
             self_calls: &self.self_calls,
             dropped: &self.dropped_defaults,
         };
@@ -912,6 +1219,7 @@ impl Converter<'_> {
         let parameters = self.finish_variables(&mut body);
         self.variables = outer;
         self.current_method = outer_method;
+        self.current_class = outer_class;
         self.self_calls = outer_calls;
         let returns = signature
             .returns
@@ -939,9 +1247,10 @@ impl Converter<'_> {
         instantiation: &Instantiation<'_>,
         node: &Expression<'_>,
     ) -> Option<(RExpr, RustType)> {
-        let index = class_key(instantiation.class)
+        let index = self
+            .class_key(instantiation.class)
             .and_then(|key| self.classes.iter().position(|c| c.key == key));
-        let Some(index) = index else {
+        let Some(index) = index.filter(|&index| !self.classes[index].is_enum) else {
             self.record_refused(node);
             self.refuse(
                 node,
@@ -1007,7 +1316,8 @@ impl Converter<'_> {
             self.record_refused_arguments(&call.argument_list);
             return None;
         };
-        let RustType::Class(class) = &ty else {
+        // An enum value has the methods of its enum (P2R-155).
+        let (RustType::Class(class) | RustType::Enum(class)) = &ty else {
             self.record_refused_arguments(&call.argument_list);
             let message = if matches!(ty, RustType::Option(_)) {
                 "a method call on a value that may be null is not supported (P2R-106)"
@@ -1038,6 +1348,14 @@ impl Converter<'_> {
             self.refuse(node, "this class has no method of that name (P2R-135)");
             return None;
         };
+        if self.classes[index].methods[at].is_static {
+            self.record_refused_arguments(&call.argument_list);
+            self.refuse(
+                node,
+                "a static method is called with ::, not through an object (P2R-153)",
+            );
+            return None;
+        }
         let signature = self.classes[index].methods[at].signature.clone();
         let arguments = self.arguments(&call.argument_list, &signature.parameters, node)?;
         // A `&mut self` method changes the object its receiver chain starts from (P2R-144).
@@ -1056,25 +1374,73 @@ impl Converter<'_> {
         ))
     }
 
-    /// `C::m()` and the other static forms on a class of the file stop; on an enum they
-    /// are the enum's methods (P2R-114, P2R-135).
+    /// `C::m(args)`, `self::m(args)` and `static::m(args)` for a static method of a class
+    /// or enum of the file, with its return type, `None` for `void`; on an enum, also
+    /// `from`, `tryFrom` and `cases` (P2R-114, P2R-153).
     pub(super) fn static_call(
         &mut self,
         call: &StaticMethodCall<'_>,
         node: &Expression<'_>,
-    ) -> Option<(RExpr, RustType)> {
-        let own =
-            class_key(call.class).is_some_and(|key| self.classes.iter().any(|c| c.key == key));
-        let relative = matches!(
-            call.class,
-            Expression::Self_(_) | Expression::Static(_) | Expression::Parent(_)
-        );
-        if own || relative {
-            self.record_refused(node);
-            self.refuse(node, "a static method call is not supported (P2R-135)");
+    ) -> Option<(RExpr, Option<RustType>)> {
+        let problem = match call.class {
+            Expression::Parent(_) => Some("parent:: is not supported (P2R-135)"),
+            Expression::Self_(_) | Expression::Static(_) if self.current_class.is_none() => {
+                Some("self:: and static:: work only inside a class or enum (P2R-153)")
+            }
+            _ => None,
+        };
+        if let Some(problem) = problem {
+            self.record_refused_arguments(&call.argument_list);
+            self.refuse(node, problem);
             return None;
         }
-        self.enum_call(call, node)
+        let index = self
+            .class_key(call.class)
+            .and_then(|key| self.classes.iter().position(|c| c.key == key));
+        let found = match (index, &call.method) {
+            (Some(index), ClassLikeMemberSelector::Identifier(name)) => {
+                Some((index, self.method_index(index, name.value)))
+            }
+            _ => None,
+        };
+        let (index, at) = match found {
+            Some((index, Some(at))) => (index, at),
+            // `from`, `tryFrom`, `cases`, and the problem of any other name (P2R-114).
+            Some((index, None)) if self.classes[index].is_enum => {
+                return self
+                    .enum_call(call, node)
+                    .map(|(call, ty)| (call, Some(ty)));
+            }
+            Some((_, None)) => {
+                self.record_refused_arguments(&call.argument_list);
+                self.refuse(node, "this class has no method of that name (P2R-153)");
+                return None;
+            }
+            None => {
+                self.record_refused_arguments(&call.argument_list);
+                self.refuse(
+                    node,
+                    "a static call needs a static method of a class or enum of this file (P2R-153)",
+                );
+                return None;
+            }
+        };
+        if !self.classes[index].methods[at].is_static {
+            self.record_refused_arguments(&call.argument_list);
+            self.refuse(
+                node,
+                "a method that is not static cannot be called with :: (P2R-153)",
+            );
+            return None;
+        }
+        let signature = self.classes[index].methods[at].signature.clone();
+        let arguments = self.arguments(&call.argument_list, &signature.parameters, node)?;
+        // rustc counts a call of the method in its own body (P2R-50, P2R-152).
+        if self.current_method == Some((index, at)) {
+            self.self_calls.push(call.span());
+        }
+        let path = format!("{}::{}", self.classes[index].rust_name, signature.rust_name);
+        Some((RExpr::Call(path, arguments), signature.returns))
     }
 
     fn record_refused_arguments(&mut self, list: &ArgumentList<'_>) {
@@ -1108,15 +1474,41 @@ fn is_constructor(method: &Method<'_>) -> bool {
     method.name.value.eq_ignore_ascii_case(b"__construct")
 }
 
-/// True when a hint names `self`, `static` or `parent`, also inside `?` or a union.
-fn names_own_class(hint: &Hint<'_>) -> bool {
-    match hint {
-        Hint::Self_(_) | Hint::Static(_) | Hint::Parent(_) => true,
-        Hint::Nullable(nullable) => names_own_class(nullable.hint),
-        Hint::Parenthesized(inner) => names_own_class(inner.hint),
-        Hint::Union(union) => names_own_class(union.left) || names_own_class(union.right),
-        _ => false,
+/// The Rust type of a constant: a string constant is a `&'static str` (P2R-156).
+fn constant_rust_type(ty: &RustType) -> String {
+    match ty {
+        RustType::String => "&str".to_owned(),
+        other => other.owned(),
     }
+}
+
+/// True when `hint`, or a hint inside `?` or a union, is one `found` accepts.
+pub(super) fn names(hint: &Hint<'_>, found: fn(&Hint<'_>) -> bool) -> bool {
+    match hint {
+        Hint::Nullable(nullable) => names(nullable.hint, found),
+        Hint::Parenthesized(inner) => names(inner.hint, found),
+        Hint::Union(union) => names(union.left, found) || names(union.right, found),
+        other => found(other),
+    }
+}
+
+fn is_parent(hint: &Hint<'_>) -> bool {
+    matches!(hint, Hint::Parent(_))
+}
+
+fn is_static(hint: &Hint<'_>) -> bool {
+    matches!(hint, Hint::Static(_))
+}
+
+/// `self` or `static`, which name the class whose body holds them (P2R-154).
+pub(super) fn is_own_class(hint: &Hint<'_>) -> bool {
+    matches!(hint, Hint::Self_(_) | Hint::Static(_))
+}
+
+/// True for `final` and `private` together (P2R-130, P2R-156).
+fn final_private(modifiers: &Sequence<'_, Modifier<'_>>) -> bool {
+    modifiers.iter().any(|m| matches!(m, Modifier::Final(_)))
+        && modifiers.iter().any(|m| matches!(m, Modifier::Private(_)))
 }
 
 /// How `new` stores a parameter in its field: a Copy value or a value it takes by value as

@@ -621,6 +621,16 @@ impl Converter<'_> {
 
     /// A read of a variable (P2R-34).
     pub(super) fn variable(&mut self, variable: &DirectVariable<'_>) -> Option<(RExpr, RustType)> {
+        let in_static = self
+            .current_method
+            .is_some_and(|(class, at)| self.classes[class].methods[at].is_static);
+        if in_static && variable.name == b"$this" {
+            self.refuse(
+                variable,
+                "$this does not exist in a static method, and PHP throws an Error (P2R-152)",
+            );
+            return None;
+        }
         let Some(var) = self.lookup(variable) else {
             let php_name = &variable.name[1..];
             // A foreach key or value is gone after its loop, where PHP keeps its last value
@@ -1743,10 +1753,11 @@ impl Converter<'_> {
                 // A method takes `&self`, read or not, or `&mut self` when it changes its
                 // object (P2R-135, P2R-143).
                 if entry.php_name == THIS {
-                    let this = if entry.mode == Mode::Mut {
-                        "&mut self"
-                    } else {
-                        "&self"
+                    // An enum value is Copy, so its methods take `self` (P2R-155).
+                    let this = match (&entry.ty, entry.mode) {
+                        (Some(RustType::Enum(_)), _) => "self",
+                        (_, Mode::Mut) => "&mut self",
+                        _ => "&self",
                     };
                     return Some(this.to_owned());
                 }

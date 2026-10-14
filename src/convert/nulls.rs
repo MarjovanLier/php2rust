@@ -350,6 +350,9 @@ impl Converter<'_> {
     pub(super) fn lends(&self, expr: &RExpr) -> bool {
         match expr {
             RExpr::Method(_, "name" | "value") => true,
+            // A string constant is a `&'static str`; any other path is a Copy enum case
+            // (P2R-156).
+            RExpr::Path(_) => true,
             RExpr::Unwrap { option, .. } => match &**option {
                 RExpr::Method(_, "as_deref") => true,
                 RExpr::Var(name) => self.variables.is_borrowed(name),

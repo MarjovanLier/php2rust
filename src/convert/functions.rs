@@ -7,7 +7,9 @@ use mago_codex::ttype::union::TUnion;
 use mago_span::HasSpan;
 use mago_syntax::cst::*;
 
-use super::{Context, Converter, Mode, ParameterSignature, Signature, Variables, recursion};
+use super::{
+    Context, Converter, Mode, ParameterSignature, Signature, Variables, classes, recursion,
+};
 use crate::names;
 use crate::types::{self, RustType};
 
@@ -37,7 +39,7 @@ impl Converter<'_> {
             {
                 self.refuse(
                     &function.name,
-                    "PHP has a built-in function of this name and rejects the file (P2R-31)",
+                    "a function may not take the name of a function PHP has built in (P2R-31)",
                 );
                 continue;
             }
@@ -54,7 +56,7 @@ impl Converter<'_> {
         for (function, rust_name) in named {
             if let Some(signature) = self.signature(function, rust_name, &taken) {
                 self.functions
-                    .insert(function.name.value.to_ascii_lowercase(), signature);
+                    .insert(self.function_key(function), signature);
             }
         }
     }
@@ -65,8 +67,23 @@ impl Converter<'_> {
         rust_name: String,
         taken: &HashSet<String>,
     ) -> Option<Signature> {
+        // PHP rejects `self` and `static` outside a class; Mago does not report it (P2R-154).
+        let own_class = function
+            .parameter_list
+            .parameters
+            .iter()
+            .filter_map(|p| p.hint.as_ref())
+            .chain(function.return_type_hint.as_ref().map(|r| &r.hint))
+            .find(|hint| classes::names(hint, classes::is_own_class));
+        if let Some(hint) = own_class {
+            self.refuse(
+                hint,
+                "self and static name a class, so a function outside one cannot use them (P2R-154)",
+            );
+            return None;
+        }
         let codebase = self.codebase;
-        let Some(metadata) = codebase.get_function(function.name.value) else {
+        let Some(metadata) = codebase.get_function(&self.function_key(function)) else {
             self.refuse(
                 &function.name,
                 "Mago has no signature for this function (P2R-23)",
@@ -227,15 +244,15 @@ impl Converter<'_> {
     }
 
     pub(super) fn function(&mut self, function: &Function<'_>) -> Option<Vec<String>> {
-        let signature = self
-            .functions
-            .get(&function.name.value.to_ascii_lowercase())?
-            .clone();
+        let key = self.function_key(function);
+        let signature = self.functions.get(&key)?.clone();
         // A function has its own variables; those of `fn main()` wait until it ends.
         let outer = std::mem::replace(
             &mut self.variables,
             Variables::with_parameters(&signature.parameters),
         );
+        let outer_function = self.current_function.replace(key);
+        let outer_calls = std::mem::take(&mut self.self_calls);
         let sites = self.site_types(function.body.statements.iter(), signature.returns.as_ref());
         self.variables.list_types = sites.lists;
         self.variables.null_types = sites.nulls;
@@ -257,8 +274,7 @@ impl Converter<'_> {
         }
         let statements: Vec<&Statement<'_>> = function.body.statements.iter().collect();
         let target = recursion::Target {
-            name: Some(function.name.value),
-            self_calls: &[],
+            self_calls: &self.self_calls,
             dropped: &self.dropped_defaults,
         };
         if recursion::always_recurses(&statements, &target) {
@@ -269,6 +285,8 @@ impl Converter<'_> {
         }
         let parameters = self.finish_variables(&mut body);
         self.variables = outer;
+        self.current_function = outer_function;
+        self.self_calls = outer_calls;
         let returns = signature
             .returns
             .as_ref()

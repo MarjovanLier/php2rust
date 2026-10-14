@@ -244,12 +244,6 @@ impl Converter<'_> {
     }
 }
 
-/// True for a call of the built-in `name` by its plain name, in any letter case (P2R-32).
-pub(super) fn calls(call: &FunctionCall<'_>, name: &[u8]) -> bool {
-    matches!(call.function, Expression::Identifier(Identifier::Local(local))
-        if local.value.eq_ignore_ascii_case(name))
-}
-
 /// The read of a string variable when a value is that read alone (`$s`, `"$s"`), so an
 /// assignment of it moves the variable (P2R-26).
 pub(super) fn sole_read(value: &Expression<'_>) -> Option<Span> {

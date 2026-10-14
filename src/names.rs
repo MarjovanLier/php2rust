@@ -1,6 +1,6 @@
 //! PHP names to Rust names (P2R-30, P2R-111).
 
-use heck::{ToSnakeCase, ToUpperCamelCase};
+use heck::{ToShoutySnakeCase, ToSnakeCase, ToUpperCamelCase};
 
 /// Rust 2024 strict and reserved keywords that a raw identifier can carry.
 const KEYWORDS: &[&str] = &[
@@ -32,6 +32,14 @@ pub fn rust_name(php: &str) -> Option<String> {
 pub fn type_name(php: &str) -> Option<String> {
     let camel = php.to_upper_camel_case();
     (camel != "Self" && ascii_identifier(&camel)).then_some(camel)
+}
+
+/// The Rust name for a PHP class or enum constant, in SCREAMING_SNAKE_CASE, because rustc
+/// warns on an associated constant that is not upper case; `None` when Rust cannot use it
+/// (P2R-156). No keyword is upper case.
+pub fn constant_name(php: &str) -> Option<String> {
+    let shouty = php.to_shouty_snake_case();
+    ascii_identifier(&shouty).then_some(shouty)
 }
 
 /// A letter or `_` first, then only ASCII letters, digits and `_`. heck turns `_2` into
@@ -81,6 +89,17 @@ mod tests {
         assert_eq!(type_name("_1"), None);
         assert_eq!(type_name("_"), None);
         assert_eq!(type_name("\u{410}rger"), None);
+    }
+
+    #[test]
+    fn constant_names_become_shouty_snake_case() {
+        assert_eq!(
+            constant_name("NON_DIGIT_REGEX").as_deref(),
+            Some("NON_DIGIT_REGEX")
+        );
+        assert_eq!(constant_name("maxSize").as_deref(), Some("MAX_SIZE"));
+        assert_eq!(constant_name("_"), None);
+        assert_eq!(constant_name("\u{e9}t\u{e9}"), None);
     }
 
     #[test]

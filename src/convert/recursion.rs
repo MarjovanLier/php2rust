@@ -44,10 +44,9 @@ pub(super) fn always_recurses(statements: &[&Statement<'_>], target: &Target<'_>
 /// What counts as a call of the body itself, and the left-out `default` arms, which
 /// never run (P2R-121).
 pub(super) struct Target<'t> {
-    /// A function's name: a call by that name, in any letter case, counts.
-    pub name: Option<&'t [u8]>,
-    /// A method's calls of itself, found when the body converted: rustc counts a call
-    /// through any object of the class, not only through `self`.
+    /// The body's calls of its own function or method, found when the body converted: a
+    /// call by any form of the name counts, and rustc counts a method call through any
+    /// object of the class, not only through `self` (P2R-151, P2R-152).
     pub self_calls: &'t [Span],
     pub dropped: &'t [Span],
 }
@@ -198,15 +197,18 @@ struct Calls<'c, 't>(&'c Target<'t>);
 
 impl<'ast, 'arena> Walker<'ast, 'arena, bool> for Calls<'_, '_> {
     fn walk_in_function_call(&self, call: &'ast FunctionCall<'arena>, found: &mut bool) {
-        if let (Expression::Identifier(Identifier::Local(local)), Some(name)) =
-            (call.function, self.0.name)
-            && local.value.eq_ignore_ascii_case(name)
-        {
+        if self.0.self_calls.contains(&call.span()) {
             *found = true;
         }
     }
 
     fn walk_in_method_call(&self, call: &'ast MethodCall<'arena>, found: &mut bool) {
+        if self.0.self_calls.contains(&call.span()) {
+            *found = true;
+        }
+    }
+
+    fn walk_in_static_method_call(&self, call: &'ast StaticMethodCall<'arena>, found: &mut bool) {
         if self.0.self_calls.contains(&call.span()) {
             *found = true;
         }

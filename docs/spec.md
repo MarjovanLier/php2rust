@@ -69,7 +69,9 @@ labelled blocks that rustc follows as PHP does, and added the flow rule of
 P2R-212, the catch-all, naming and nesting rules of P2R-214, the
 all-throw stop of P2R-215 and the exit rules of P2R-216. The final review
 of the build added the handler `break` stop, the plain block around the
-binding and the `getCode()` limits of P2R-214.
+binding and the `getCode()` limits of P2R-214. Section 23 (`ArrayAccess`
+classes) was written on 14 Oct 2026; it changes P2R-07, P2R-72, P2R-130,
+P2R-166, P2R-171 and the roadmap of section 10.
 
 php2rust converts typed PHP source into normal, readable Rust (`Vec`,
 `String`, `i64`), without AI. It reads PHP with the Mago crates, uses Mago's
@@ -112,8 +114,8 @@ requirement IDs.
 - **P2R-06** With the same rustfmt (P2R-190), the same input MUST always give
   the same stdout bytes, the same output file bytes and the same stderr
   bytes.
-- **P2R-07** Only the constructs that sections 3 to 5, 11 to 19, 21 and 22
-  list as converting may convert. Any other construct MUST stop the conversion,
+- **P2R-07** Only the constructs that sections 3 to 5, 11 to 19 and 21 to
+  23 list as converting may convert. Any other construct MUST stop the conversion,
   which means it is reported as a problem under P2R-03. Examples that stop
   in version 1 (section 16 converts `namespace`, `use` and class
   constants, and section 17 two casts):
@@ -398,7 +400,7 @@ requirement IDs.
   P2R-216 instead. A case without `fn main()` gets the checks of P2R-70
   and P2R-71 only. Review concern, not checked mechanically: each case's
   stdout depends on every construct the case covers, and every construct of
-  sections 3 to 5, 11 to 17, 19, 21 and 22 appears in at least one case with
+  sections 3 to 5, 11 to 17, 19 and 21 to 23 appears in at least one case with
   `fn main()`.
 - **P2R-73** Each stop folder `tests/stops/<id>-<slug>/` holds `input.php`
   and `expected.txt`. Run from inside the folder, once as
@@ -470,9 +472,10 @@ Each milestone gets its own requirements in this file when its work starts.
 - **Order after section 19**, set on 14 Oct 2026 under Marjo's direction of
   that day to take the recommended option without asking: layout by
   rustfmt (section 20); array shapes as structs and nullable object types
-  (section 21); exceptions as `Result` (section 22); interfaces and
-  inheritance, with `ArrayAccess` as
-  Rust's `Index`; maps and `preg_*`; closures; then the
+  (section 21); exceptions as `Result` (section 22); `ArrayAccess` classes
+  as plain methods (section 23, not Rust's `Index`, which cannot throw);
+  maps and a dynamic value type for `mixed` unions; `preg_*`; interfaces
+  and inheritance; closures; then the
   `StringManipulation` library, which `SouthAfricanIDValidator` calls.
   Three points are open:
   - PHP functions with no counterpart in Rust's standard library
@@ -747,7 +750,8 @@ Sections 3 to 9 apply to nullable values unless this section says otherwise.
   gets a `new` without parameters. PHP declares such a class before any
   statement runs, so it may come after the statements outside functions.
   These stop the conversion:
-  - `extends`, `implements`, `abstract`, a trait, a property that is not
+  - `extends`, `implements` (other than the `ArrayAccess` of P2R-220),
+    `abstract`, a trait, a property that is not
     promoted, a static property, a constructor parameter that is not
     promoted, a constructor with a body, and a parameter default value
     other than those of P2R-168 (section 16 converts constants and static
@@ -1247,11 +1251,13 @@ small helper function that copies PHP's rules.
   float. `(string) $n` with an int operand MUST convert to
   `n.to_string()`; an operand made only of literals gets `_i64` on its
   first literal (P2R-49), and a negative operand or an operator expression
-  gets parentheses (`(-5_i64).to_string()`, `(-x).to_string()`). `(int)`
+  gets parentheses (`(-5_i64).to_string()`, `(-x).to_string()`).
+  `(string) $s` with a string operand MUST convert to the operand itself,
+  copied where P2R-26 copies (section 23). `(int)`
   and `(string)` convert in any letter case and with spaces inside the
   parentheses. Every other cast still stops the conversion (P2R-07): of a
   float (PHP and Rust differ past the int range), of a bool, null, array
-  or object; `(int)` of an int and `(string)` of a string; `(bool)`,
+  or object; `(int)` of an int; `(bool)`,
   `(float)`, `(array)`, `(object)` and `(unset)`; and `(integer)` and
   `(binary)`, which PHP 8.5 deprecates with a message and Mago does not
   report.
@@ -1333,7 +1339,7 @@ Rust module. One input file still converts as sections 1 to 17 say.
   span rule of P2R-03 compares problems of one file only. Mago analyses
   every input file together, so a class, enum or function of one file is
   known in every other file. For a directory input, "the file" in sections
-  1 to 17, 19, 21 and 22 means every input file together (P2R-31, P2R-43, P2R-48,
+  1 to 17, 19 and 21 to 23 means every input file together (P2R-31, P2R-43, P2R-48,
   P2R-111, P2R-115, P2R-120, P2R-131, P2R-151, P2R-153, P2R-156, P2R-160,
   P2R-163, P2R-168, P2R-169 and others), except in P2R-12, P2R-13, P2R-110
   and P2R-150, which apply to each file alone (a `use` in one file may name
@@ -1884,6 +1890,47 @@ slice.
   stderr is not compared, because PHP's message names the input path and a
   stack trace. The README lists, under P2R-60, that a `catch (Throwable
   $e)` does not catch the errors that P2R-60 lists as panics.
+
+## 23. ArrayAccess classes (milestone 2, slice 13)
+
+A value object often implements `ArrayAccess` so old code can read it as
+an array (`$result['valid']`). The interface's methods take `mixed`, and a
+docblock `@implements ArrayAccess<K, V>` names the real key and value
+types. This section converts such a class when K and V have Rust types.
+Rust's `Index` trait is not used: `offsetGet` may throw (P2R-212), and
+`Index` cannot return a `Result`. Element access on such an object, user
+interfaces and inheritance are later slices.
+
+- **P2R-220** A class, readonly or not, whose only interface is
+  `ArrayAccess` (resolved as PHP resolves it, P2R-151) MUST convert as
+  sections 14 and 15 say when Mago gives the template arguments K and V of
+  its `@implements ArrayAccess<K, V>` docblock, and each maps to one Rust
+  type (P2R-20). Its methods `offsetExists`, `offsetGet`, `offsetSet` and
+  `offsetUnset`, which PHP requires, convert as other methods do, with
+  these types where the declaration says `mixed`: the first parameter of
+  each takes K, the second parameter of `offsetSet` takes V, and the return
+  of `offsetGet` takes V (`&str` and `String` for `string`, P2R-24). A read
+  of such a parameter in the body has that Rust type, also where Mago types
+  it `mixed`. These stop the conversion: `ArrayAccess` without template
+  arguments, or with a K or V that has no Rust type (P2R-22); another
+  interface beside it, and any other interface (a later slice); a `mixed`
+  type anywhere else; and `$o[k]` on an object of such a class, its write,
+  `isset`, `unset` and `??` (a later slice).
+- **P2R-221** The attribute `#[Override]` (any name PHP resolves to
+  `\Override`) MUST be left out on a method of a class that P2R-220
+  converts when the method implements a method of `ArrayAccess`: PHP checks
+  the attribute when it compiles the class, and the Rust output has nothing
+  left to check. Every other attribute stops the conversion (P2R-07).
+- **P2R-222** `is_scalar($v)` MUST convert to `true` when `$v` has Rust type
+  `i64`, `f64`, `bool` or `String`, and to `false` for a list, an enum, a
+  class or a shape. `gettype($v)` MUST convert to the string PHP gives:
+  `"integer"`, `"double"`, `"boolean"`, `"string"`, `"array"` for a list
+  or a shape, and `"object"` for an enum or a class. `$v` MUST be a
+  variable or parameter, whose type the tool knows; the call does not read
+  it, because the result does not depend on its value, so a parameter read
+  nowhere else gets the `_` of P2R-35. These stop the conversion: any other
+  argument (a call could have an effect), a value that may be null
+  (P2R-106), and a second argument.
 
 ## Spec checklist
 

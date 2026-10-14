@@ -201,14 +201,36 @@ fn laid_out(
     files: Vec<(String, String)>,
     root: &str,
 ) -> Result<Vec<(String, String)>, Failure> {
-    let dir = std::env::temp_dir().join(format!("php2rust-{}", std::process::id()));
-    // A directory left by an earlier process of the same id holds nothing of this run.
-    let _ = fs::remove_dir_all(&dir);
-    let result = format_in(&dir, files, root);
-    let _ = fs::remove_dir_all(&dir);
+    let result = private_dir().and_then(|dir| {
+        let result = format_in(&dir, files, root);
+        let _ = fs::remove_dir_all(&dir);
+        result
+    });
     result.map_err(|reason| {
         Failure::Invalid(format!("{shown}: cannot lay out the output: {reason}\n"))
     })
+}
+
+/// A new directory under the system's temporary directory that only this user can enter.
+/// It must not exist yet: on a shared temporary directory another user could have made
+/// a directory or a symbolic link of a guessed name.
+fn private_dir() -> Result<PathBuf, String> {
+    let base = std::env::temp_dir();
+    let stamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |time| time.as_nanos());
+    for attempt in 0..100 {
+        let dir = base.join(format!("php2rust-{}-{stamp}-{attempt}", std::process::id()));
+        let mut builder = fs::DirBuilder::new();
+        #[cfg(unix)]
+        std::os::unix::fs::DirBuilderExt::mode(&mut builder, 0o700);
+        match builder.create(&dir) {
+            Ok(()) => return Ok(dir),
+            Err(err) if err.kind() == std::io::ErrorKind::AlreadyExists => continue,
+            Err(err) => return Err(format!("cannot create a temporary directory: {err}")),
+        }
+    }
+    Err("cannot create a temporary directory".to_owned())
 }
 
 fn format_in(

@@ -169,6 +169,13 @@ converts:
   `gettype($v)` gives its answer from `$v`'s type, and so does `is_scalar($v)` for a
   scalar `$v`; for any other `$v`, Mago reports the check as impossible and the
   conversion stops.
+- declared union types (`int|string $id`, `bool|array{...}|string|null`): each becomes
+  a generated enum with one variant per member (`IntOrString { Int(i64), String(String)
+  }`), values go into it as `IntOrString::Int(5)`, and `is_scalar()`, `gettype()` and
+  `(string)` on a union value become a `match` over its variants. Other uses of a union
+  value (echo, maths, comparisons) stop.
+- `$o?->p` and `$o?->m($x)` on a nullable object become `o.as_ref().map(|o| ..)`,
+  and `??` works on the result.
 
 ## What stops the conversion
 
@@ -236,7 +243,14 @@ the others are findings of the Mago analyser. In short:
   a constant as a `match` condition. An enum method named `name`, `value`, `from`,
   `tryFrom` or `cases`.
 - Comparing, printing, cloning or testing an object (`==`, `===`, `echo`, `clone`,
-  `instanceof`, `if ($object)`), `?->`, and `??` on a property or a method call.
+  `instanceof`, `if ($object)`), and `??` on a property or a method call. `?->` on a
+  value that cannot be null, on a call result, in a chain (`$a?->b->c`), on a class that
+  changes its objects, on a void method or one that throws, and with an argument that is
+  more than a literal, a constant, a variable or a property read.
+- A union inside a list or a shape field, a union whose PHP type and docblock type
+  disagree on int and float, `(string)` of a union that may hold a float, a list, a shape
+  or an object (outside `is_scalar($v) ? (string) $v : ..`), and a union value passed
+  where another union type is needed.
 - A copy of an object whose class changes its objects: `$b = $a;` followed by a read of
   `$a`, `return $this;`, or a property or list element of such an object used as a value.
   A change through a call result, `??=` on a property, a write to a list element of a

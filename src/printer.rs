@@ -137,6 +137,9 @@ pub enum RExpr {
     Raised(Box<RExpr>, Raise),
     /// Rust text written as it is: a `throw` as an arm result (P2R-215).
     Raw(String),
+    /// `match` over the variants of a union value, as text; `true` when it gives a `&str`
+    /// that borrows only from literals and the matched variable (P2R-233).
+    Variants(String, bool),
 }
 
 /// Where the error of a call that throws goes (P2R-213).
@@ -415,6 +418,8 @@ fn render(expr: &RExpr, anchor: bool, min_precedence: u8) -> String {
             render(inner, false, POSTFIX)
         ),
         RExpr::Raw(text) => text.clone(),
+        RExpr::Variants(text, _) if min_precedence > 0 => format!("({text})"),
+        RExpr::Variants(text, _) => text.clone(),
     }
 }
 
@@ -476,6 +481,7 @@ pub fn anchored(expr: &RExpr) -> bool {
         RExpr::Contains(..) => true,
         RExpr::If(_, then, otherwise) => anchored(then) || anchored(otherwise),
         RExpr::Let(_) | RExpr::Struct(..) | RExpr::Raised(..) | RExpr::Raw(_) => true,
+        RExpr::Variants(..) => true,
     }
 }
 
@@ -517,7 +523,7 @@ pub fn literal_value(expr: &RExpr) -> Option<i64> {
         RExpr::None | RExpr::Some(_) | RExpr::MapOwned(_) | RExpr::Unwrap { .. } => None,
         RExpr::Path(_) | RExpr::Field(..) | RExpr::MethodCall(..) => None,
         RExpr::Contains(..) | RExpr::If(..) | RExpr::Let(_) | RExpr::Struct(..) => None,
-        RExpr::Raised(..) | RExpr::Raw(_) => None,
+        RExpr::Raised(..) | RExpr::Raw(_) | RExpr::Variants(..) => None,
     }
 }
 

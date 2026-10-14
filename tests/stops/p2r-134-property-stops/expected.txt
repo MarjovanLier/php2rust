@@ -2,6 +2,6 @@ input.php:16:16: a value that may be null cannot be joined into a string (P2R-10
 input.php:21:16: Cannot modify a readonly property after initialization. (invalid-property-write)
 input.php:28:5: the value assigned to $field is never read (P2R-35)
 input.php:29:10: a property name must be a plain identifier (P2R-134)
-input.php:30:10: ?-> is not supported (P2R-134)
+input.php:30:10: ?-> needs a value that may be null; write -> (P2R-234)
 input.php:31:10: ?? on a property read or a method call is not supported yet (P2R-134)
 input.php:32:13: only $name and {$name} can be interpolated into a string (P2R-45)

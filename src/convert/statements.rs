@@ -208,6 +208,13 @@ impl Converter<'_> {
                 self.refuse(value, "echo of an array shape is not supported (P2R-201)");
                 None
             }
+            _ if matches!(ty.inner(), RustType::Union(_)) => {
+                self.refuse(
+                    value,
+                    "echo of a value of a union type is not supported (P2R-232)",
+                );
+                None
+            }
             _ if matches!(ty, RustType::Option(_)) => {
                 self.refuse(
                     value,

@@ -1,0 +1,4 @@
+input.php:12:17: a value of a union type goes only into a place of the same union type (P2R-231)
+input.php:22:19: Possible argument type mismatch for argument #1 of `strlen`: expected `string`, but possibly received `int|string`. (possibly-invalid-argument)
+input.php:25:13: an int where a union type has float and no int is not supported (P2R-231)
+input.php:25:22: an array literal cannot go where a union type is needed (P2R-231)

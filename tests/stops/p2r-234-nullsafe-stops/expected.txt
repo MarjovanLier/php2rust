@@ -1,0 +1,8 @@
+input.php:35:12: ?-> needs a value that may be null; write -> (P2R-234)
+input.php:40:12: ?-> converts only on a variable, parameter or property read (P2R-234)
+input.php:45:12: an argument of ?-> must be a literal, a constant, a variable or a property read on one (P2R-234)
+input.php:48:19: a nullable or union type that holds objects whose class changes them is not supported (P2R-141)
+input.php:50:12: ?-> on a class that changes its objects is not supported (P2R-234)
+input.php:55:12: an argument of ?-> cannot read a variable of the name the closure binds (P2R-234)
+input.php:60:5: this expression statement is not supported (P2R-43)
+input.php:65:12: ?-> converts only on a variable, parameter or property read (P2R-234)

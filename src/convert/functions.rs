@@ -11,7 +11,7 @@ use mago_syntax::walker::Walker;
 use super::control::emit;
 use super::{
     Context, Converter, Mode, ParameterSignature, Signature, Variables, classes, helpers, lists,
-    recursion,
+    recursion, unions,
 };
 use crate::names;
 use crate::printer::RExpr;
@@ -170,7 +170,7 @@ impl Converter<'_> {
             self.refuse(&parameter.variable, helpers::HELPER_NAME);
             return None;
         }
-        let ty = self.declared_type(parameter, declared)?;
+        let ty = self.declared_type(parameter, declared, parameter.hint.as_ref())?;
         if types::nullable_object(&ty) {
             self.refuse(parameter, types::NULLABLE_OBJECT);
             return None;
@@ -311,7 +311,7 @@ impl Converter<'_> {
         if matches!(hint.hint, Hint::Void(_)) {
             return Some(None);
         }
-        let ty = self.declared_type(hint, declared)?;
+        let ty = self.declared_type(hint, declared, Some(&hint.hint))?;
         if types::nullable_object(&ty) {
             self.refuse(hint, types::NULLABLE_OBJECT);
             return None;
@@ -326,16 +326,23 @@ impl Converter<'_> {
         Some(Some(ty))
     }
 
+    /// The Rust type of a declared type, from Mago's type `declared` and the PHP type
+    /// `hint` (P2R-20, P2R-230). `None` means a problem was recorded.
     pub(super) fn declared_type(
         &mut self,
         node: &impl HasSpan,
         declared: Option<&TUnion>,
+        hint: Option<&Hint<'_>>,
     ) -> Option<RustType> {
         let Some(union) = declared else {
             self.refuse(node, "Mago found no type here (P2R-23)");
             return None;
         };
-        match types::rust_type(union, &self.type_names) {
+        if let Some(problem) = hint.and_then(|hint| unions::native_problem(hint, union)) {
+            self.refuse(node, problem);
+            return None;
+        }
+        match types::declared_type(union, &self.type_names) {
             Ok(ty) => Some(ty),
             Err(message) => {
                 self.refuse(node, message);

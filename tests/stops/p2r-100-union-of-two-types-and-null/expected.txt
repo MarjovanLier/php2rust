@@ -1,1 +1,1 @@
-input.php:5:12: the type int|null|string has no Rust type (P2R-22)
+input.php:5:12: the type int|null|object has no Rust type (P2R-22)

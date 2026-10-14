@@ -105,6 +105,9 @@ pub(super) fn refusal(
     if matches!(left, RustType::Shape(_)) || matches!(right, RustType::Shape(_)) {
         return Some("an array shape cannot be compared (P2R-201)");
     }
+    if matches!(left.inner(), RustType::Union(_)) || matches!(right.inner(), RustType::Union(_)) {
+        return Some(UNION_COMPARED);
+    }
     if left != right {
         return Some(if numbers(left) && numbers(right) {
             "a comparison that mixes int and float is not supported (P2R-44)"
@@ -138,8 +141,13 @@ pub(super) fn refusal(
         RustType::Enum(_) => None,
         RustType::Class(_) => Some("an object cannot be compared (P2R-136)"),
         RustType::Shape(_) => Some("an array shape cannot be compared (P2R-201)"),
+        RustType::Union(_) => Some(UNION_COMPARED),
     }
 }
+
+/// The problem of a comparison with a union value (P2R-232).
+const UNION_COMPARED: &str =
+    "a value of a union type compares only with the literal null (P2R-232)";
 
 /// True when rustc's unused_comparisons lint, an error under -D warnings, fires: the
 /// comparison holds for every i64 or for none (P2R-50). The lint looks at the left

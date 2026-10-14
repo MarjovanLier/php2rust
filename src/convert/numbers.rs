@@ -8,7 +8,7 @@ use mago_span::HasSpan;
 use mago_syntax::cst::*;
 
 use super::helpers::Helper;
-use super::{Converter, nulls};
+use super::{Converter, nulls, unions};
 use crate::printer::{self, BinOp, RExpr};
 use crate::types::RustType;
 
@@ -37,6 +37,31 @@ impl Converter<'_> {
             self.refuse(
                 node,
                 "a list of values that cannot be null where a list of values that may be null is declared is not supported (P2R-102)",
+            );
+            return None;
+        }
+        // Mago accepts a union value where each member fits, and PHP may convert a member
+        // there (P2R-231).
+        if let RustType::Union(found) = ty.inner()
+            && !matches!(declared.inner(), RustType::Union(wanted) if wanted == found)
+        {
+            self.refuse(
+                node,
+                "a value of a union type goes only into a place of the same union type (P2R-231)",
+            );
+            return None;
+        }
+        // PHP makes a float of the int for a native union type and keeps the int for a
+        // docblock one (P2R-231).
+        if let RustType::Union(name) = declared.inner()
+            && *ty.inner() == RustType::I64
+            && self.type_names.union(name).is_some_and(|members| {
+                members.contains(&RustType::F64) && !members.contains(&RustType::I64)
+            })
+        {
+            self.refuse(
+                node,
+                "an int where a union type has float and no int is not supported (P2R-231)",
             );
             return None;
         }
@@ -102,6 +127,10 @@ impl Converter<'_> {
             self.record_refused(unary.operand);
             self.refuse(unary, message);
             return None;
+        }
+        // `(string)` of a union value matches its variants (P2R-233).
+        if !int && self.union_operand(unary.operand) {
+            return self.union_test(unary.operand, unions::Test::Text);
         }
         let (operand, ty) = self.expression(unary.operand)?;
         match (int, &ty) {

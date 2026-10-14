@@ -44,12 +44,14 @@ mod lists;
 mod matching;
 mod modes;
 mod nulls;
+mod nullsafe;
 mod numbers;
 mod recursion;
 mod shapes;
 mod statements;
 mod strings;
 mod throws;
+mod unions;
 mod uses;
 mod variables;
 
@@ -496,6 +498,10 @@ struct Converter<'c> {
     /// The variables of the open `catch` clauses: PHP name with `$`, Rust name, and
     /// whether a handler read it (P2R-214).
     caught: Vec<(Vec<u8>, String, bool)>,
+    /// The PHP name, with `$`, of the variable that `is_scalar()` checks in the condition
+    /// of the `?:` whose first arm is converting, while that arm is `(string)` of it
+    /// (P2R-233).
+    scalar_guard: Option<Vec<u8>>,
 }
 
 impl<'c> Converter<'c> {
@@ -528,6 +534,7 @@ impl<'c> Converter<'c> {
             trying: 0,
             uses_exceptions: false,
             caught: Vec::new(),
+            scalar_guard: None,
         }
     }
 
@@ -785,7 +792,9 @@ impl<'c> Converter<'c> {
         }
         // Every body has converted, so every array shape the output uses is known; their
         // structs come first, in the crate root for a directory (P2R-200, P2R-172).
-        let shapes = self.shape_items();
+        let mut shapes = self.shape_items();
+        // The union enums follow the shape structs, in the same place (P2R-230).
+        shapes.extend(self.union_items());
         // The exception struct follows the shapes in the crate root, and the items of one
         // file (P2R-210).
         let exception = self.uses_exceptions.then(throws::exception_lines);

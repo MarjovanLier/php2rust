@@ -1,0 +1,8 @@
+input.php:7:12: a value of a union type compares only with the literal null (P2R-232)
+input.php:12:10: echo of a value of a union type is not supported (P2R-232)
+input.php:17:9: calls to is_string are not supported (P2R-48)
+input.php:25:19: a value of a union type cannot be joined into a string (P2R-232)
+input.php:30:9: a value that may be null cannot be a condition (P2R-106)
+input.php:38:12: arithmetic needs two int or two float operands (P2R-43)
+input.php:43:19: the subject of a match must be an int, bool, string or enum (P2R-120)
+input.php:51:12: (int) is supported only on a string (P2R-166)

@@ -9,7 +9,7 @@ use super::flow::Var;
 use super::variables::Part;
 use super::{Converter, booleans, lists, shapes};
 use crate::printer::{self, BinOp, RExpr, Raise};
-use crate::types::RustType;
+use crate::types::{self, RustType};
 
 /// The problem of a value that may be null as an element of a list of plain values
 /// (P2R-106).
@@ -27,12 +27,30 @@ pub(super) const NULL_JOINED: &str =
     "a value that may be null cannot be joined into a string (P2R-106)";
 
 /// `expr`, of type `ty`, where a value of type `target` is needed: a `T` value becomes
-/// `Some(..)` where an `Option<T>` is needed (P2R-102).
+/// `Some(..)` where an `Option<T>` is needed (P2R-102), and a value of a member of a union
+/// enum `U` becomes `U::V(..)`, or `.map(U::V)` for an `Option` (P2R-231).
 pub(super) fn wrapped(expr: RExpr, ty: &RustType, target: &RustType) -> RExpr {
+    let expr = match member_path(ty, target) {
+        Some(path) if matches!(ty, RustType::Option(_)) => {
+            return RExpr::MethodCall(Box::new(expr), "map".into(), vec![RExpr::Path(path)]);
+        }
+        Some(path) => RExpr::Call(path, vec![expr]),
+        None => expr,
+    };
     if matches!(target, RustType::Option(_)) && !matches!(ty, RustType::Option(_)) {
         RExpr::Some(Box::new(expr))
     } else {
         expr
+    }
+}
+
+/// `U::V`, the variant of the union enum `U` of `target` that holds a value of `ty`, when
+/// `ty` is a member type rather than the union itself (P2R-231).
+pub(super) fn member_path(ty: &RustType, target: &RustType) -> Option<String> {
+    match (target.inner(), ty.inner()) {
+        (RustType::Union(_), RustType::Union(_)) => None,
+        (RustType::Union(name), member) => Some(format!("{name}::{}", types::variant(member))),
+        _ => None,
     }
 }
 
@@ -270,7 +288,11 @@ impl Converter<'_> {
             && !matches!(
                 left_node,
                 Expression::Variable(Variable::Direct(_))
-                    | Expression::Call(Call::Function(_) | Call::StaticMethod(_))
+                    | Expression::Call(
+                        Call::Function(_) | Call::StaticMethod(_) | Call::NullSafeMethod(_)
+                    )
+                    // `?->` gives an owned `Option`, as a call does (P2R-234).
+                    | Expression::Access(Access::NullSafeProperty(_))
             )
         {
             self.record_refused(binary.lhs);
@@ -395,6 +417,8 @@ impl Converter<'_> {
     pub(super) fn lends(&self, expr: &RExpr) -> bool {
         match expr {
             RExpr::Method(_, "name" | "value") | RExpr::If(..) => true,
+            // A `match` over a union value that gives literals or borrowed text (P2R-233).
+            RExpr::Variants(_, lends) => *lends,
             // A string constant is a `&'static str`; any other path is a Copy enum case
             // (P2R-156).
             RExpr::Path(_) => true,

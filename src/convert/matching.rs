@@ -31,10 +31,14 @@ fn push_match(
 }
 
 /// True when an arm of type `ty` converts to `expected`: the same type, a value where an
-/// `Option` of it is needed, or an int where a float is (P2R-25, P2R-102).
+/// `Option` of it is needed, an int where a float is, or a member value where a union is
+/// (P2R-25, P2R-102, P2R-231).
 fn fits(ty: &RustType, expected: &RustType) -> bool {
     let inner = expected.inner();
-    ty == expected || ty == inner || (*ty.inner() == RustType::I64 && *inner == RustType::F64)
+    ty == expected
+        || ty == inner
+        || (*ty.inner() == RustType::I64 && *inner == RustType::F64)
+        || nulls::member_path(ty, expected).is_some()
 }
 
 /// An arm whose value has converted, before the `return` or assignment finishes it.
@@ -361,6 +365,7 @@ impl Converter<'_> {
         let (then, otherwise) = checked
             .as_ref()
             .map_or((then, node.r#else), |&(_, bound, other)| (bound, other));
+        let null_checked = checked.is_some();
         // The arms convert even when the condition does not, so their problems are reported.
         let mut binding = None;
         let condition = match checked {
@@ -375,6 +380,11 @@ impl Converter<'_> {
         let start = self.variables.flow.current();
         let join = self.variables.flow.block();
         let mut arms = Vec::new();
+        // `is_scalar($v) ? (string) $v : ..` holds only a scalar in its first arm, where
+        // nothing can assign `$v` (P2R-233).
+        let mut guard = self
+            .scalar_checked(node.condition, then)
+            .filter(|_| !null_checked);
         for arm in [then, otherwise] {
             let block = self.variables.flow.block();
             self.variables.flow.edge(start, block);
@@ -382,8 +392,11 @@ impl Converter<'_> {
             let bound = binding
                 .take()
                 .map(|(variable, inner)| self.bind_null(variable, inner));
+            self.scalar_guard = guard.take();
+            let converted = self.conditional_arm(arm, expected, node.span());
+            self.scalar_guard = None;
             // A string arm is lent while the binding it may read still holds (P2R-205).
-            let converted = match self.conditional_arm(arm, expected, node.span()) {
+            let converted = match converted {
                 Some((expr, RustType::String)) => self
                     .lent_arm(arm, expr)
                     .map(|expr| (expr, RustType::String)),
@@ -430,7 +443,9 @@ impl Converter<'_> {
         statement: Span,
     ) -> Option<(RExpr, RustType)> {
         let (expr, ty) = self.value(arm, expected)?;
-        let expr = if ty.inner().is_struct() {
+        // A member value goes into its variant owned (P2R-231).
+        let member = expected.is_some_and(|expected| nulls::member_path(&ty, expected).is_some());
+        let expr = if ty.inner().is_struct() || member {
             self.stored(arm, expr, &ty, statement)?
         } else {
             expr
@@ -476,6 +491,8 @@ impl Converter<'_> {
     fn outlives_arm(&self, expr: &RExpr) -> bool {
         match expr {
             RExpr::Str(_) | RExpr::Path(_) | RExpr::Method(_, "name" | "value") => true,
+            // It borrows only from literals and the variable it matches (P2R-233).
+            RExpr::Variants(_, lends) => *lends,
             RExpr::Var(name) => self.variables.is_borrowed(name),
             RExpr::Ref(inner) => variables::chain_root(inner).is_some(),
             RExpr::Unwrap {

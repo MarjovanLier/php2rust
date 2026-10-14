@@ -27,6 +27,8 @@ pub struct TypeNames {
     names: HashMap<Vec<u8>, RustType>,
     /// The fields of each array shape, by the Rust name of its struct.
     shapes: RefCell<BTreeMap<String, Vec<ShapeField>>>,
+    /// The members of each union enum in variant order, by its Rust name (P2R-230).
+    unions: RefCell<BTreeMap<String, Vec<RustType>>>,
     /// The Rust names of the enums without cases, which no shape may hold (P2R-200).
     empty: HashSet<String>,
 }
@@ -48,6 +50,20 @@ impl TypeNames {
             .borrow()
             .iter()
             .map(|(name, fields)| (name.clone(), fields.clone()))
+            .collect()
+    }
+
+    /// The members of the union enum `name`, in variant order (P2R-230).
+    pub fn union(&self, name: &str) -> Option<Vec<RustType>> {
+        self.unions.borrow().get(name).cloned()
+    }
+
+    /// Every union enum a type has mapped to, by name in byte order (P2R-230).
+    pub fn unions(&self) -> Vec<(String, Vec<RustType>)> {
+        self.unions
+            .borrow()
+            .iter()
+            .map(|(name, members)| (name.clone(), members.clone()))
             .collect()
     }
 }
@@ -90,6 +106,8 @@ pub enum RustType {
     Class(String),
     /// An array shape, as a struct, by its Rust name (P2R-200).
     Shape(String),
+    /// A declared union, as a generated enum, by its Rust name (P2R-230).
+    Union(String),
 }
 
 impl RustType {
@@ -102,26 +120,28 @@ impl RustType {
             Self::String => "String".into(),
             Self::Vec(element) => format!("Vec<{}>", element.owned()),
             Self::Option(inner) => format!("Option<{}>", inner.owned()),
-            Self::Enum(name) | Self::Class(name) | Self::Shape(name) => name.clone(),
+            Self::Enum(name) | Self::Class(name) | Self::Shape(name) | Self::Union(name) => {
+                name.clone()
+            }
         }
     }
 
-    /// The type of a function parameter: strings, lists, objects and shapes are borrowed,
-    /// also inside an `Option` (P2R-24, P2R-101, P2R-132, P2R-201).
+    /// The type of a function parameter: strings, lists, objects, shapes and unions are
+    /// borrowed, also inside an `Option` (P2R-24, P2R-101, P2R-132, P2R-201, P2R-232).
     pub fn parameter(&self) -> String {
         match self {
             Self::String => "&str".into(),
             Self::Vec(element) => format!("&[{}]", element.owned()),
-            Self::Class(name) | Self::Shape(name) => format!("&{name}"),
+            Self::Class(name) | Self::Shape(name) | Self::Union(name) => format!("&{name}"),
             Self::Option(inner) => format!("Option<{}>", inner.parameter()),
             other => other.owned(),
         }
     }
 
-    /// True for a struct: a class or an array shape, which copies with `.clone()` and is
-    /// borrowed as `&S` (P2R-132, P2R-201).
+    /// True for a struct: a class, an array shape or a union enum, which copies with
+    /// `.clone()` and is borrowed as `&S` (P2R-132, P2R-201, P2R-232).
     pub fn is_struct(&self) -> bool {
-        matches!(self, Self::Class(_) | Self::Shape(_))
+        matches!(self, Self::Class(_) | Self::Shape(_) | Self::Union(_))
     }
 
     /// The method that lends the value inside an owned `Option` of this inner type:
@@ -148,7 +168,7 @@ impl RustType {
     pub fn is_copy(&self) -> bool {
         match self {
             Self::I64 | Self::F64 | Self::Bool | Self::Enum(_) => true,
-            Self::String | Self::Vec(_) | Self::Class(_) | Self::Shape(_) => false,
+            Self::String | Self::Vec(_) | Self::Class(_) | Self::Shape(_) | Self::Union(_) => false,
             Self::Option(inner) => inner.is_copy(),
         }
     }
@@ -169,7 +189,7 @@ impl RustType {
 pub fn built(ty: &RustType) -> bool {
     match ty {
         RustType::I64 | RustType::F64 | RustType::Bool | RustType::String => true,
-        RustType::Enum(_) | RustType::Class(_) | RustType::Shape(_) => true,
+        RustType::Enum(_) | RustType::Class(_) | RustType::Shape(_) | RustType::Union(_) => true,
         RustType::Vec(element) => built(element),
         RustType::Option(inner) => !matches!(**inner, RustType::Option(_)) && built(inner),
     }
@@ -217,6 +237,102 @@ pub fn rust_type(union: &TUnion, enums: &TypeNames) -> Result<RustType, String> 
         Some(ty) if nullable => Ok(RustType::Option(Box::new(ty))),
         Some(ty) => Ok(ty),
         None => Err(unknown()),
+    }
+}
+
+/// The Rust type of a declared type (a parameter, a return value, a property, or K or V
+/// of `ArrayAccess`): `rust_type`, or a union enum gathered into `enums` for a union of
+/// members with different Rust types (P2R-230).
+pub fn declared_type(union: &TUnion, enums: &TypeNames) -> Result<RustType, String> {
+    let error = match rust_type(union, enums) {
+        Ok(ty) => return Ok(ty),
+        Err(error) => error,
+    };
+    let mut nullable = false;
+    let mut members: Vec<RustType> = Vec::new();
+    for atomic in union.types.iter() {
+        let found = match atomic {
+            TAtomic::Null => {
+                nullable = true;
+                continue;
+            }
+            TAtomic::Scalar(TScalar::Generic) => {
+                vec![
+                    RustType::Bool,
+                    RustType::F64,
+                    RustType::I64,
+                    RustType::String,
+                ]
+            }
+            TAtomic::Scalar(TScalar::ArrayKey) => vec![RustType::I64, RustType::String],
+            // A list of a union fails here, and a union stays out of lists (P2R-230).
+            _ => vec![
+                rust_type(&TUnion::from_vec(vec![atomic.clone()]), enums)
+                    .map_err(|_| error.clone())?,
+            ],
+        };
+        for ty in found {
+            if !members.contains(&ty) {
+                members.push(ty);
+            }
+        }
+    }
+    if members.len() < 2 {
+        return Err(error);
+    }
+    members.sort_by_key(variant);
+    if let Some(pair) = members
+        .windows(2)
+        .find(|pair| variant(&pair[0]) == variant(&pair[1]))
+    {
+        return Err(format!(
+            "two members of this union give the variant name {} (P2R-230)",
+            variant(&pair[0])
+        ));
+    }
+    let rust_name = members.iter().map(variant).collect::<Vec<_>>().join("Or");
+    if enums.shapes.borrow().contains_key(&rust_name)
+        || enums
+            .values()
+            .any(|ty| matches!(ty, RustType::Enum(n) | RustType::Class(n) if *n == rust_name))
+    {
+        return Err(format!(
+            "{rust_name}, the Rust name of this union, is the name of an enum, class or shape (P2R-230)"
+        ));
+    }
+    let mut unions = enums.unions.borrow_mut();
+    match unions.get(&rust_name) {
+        Some(known) if *known != members => {
+            return Err(format!(
+                "two different unions give the Rust name {rust_name} (P2R-230)"
+            ));
+        }
+        Some(_) => {}
+        None => {
+            unions.insert(rust_name.clone(), members);
+        }
+    }
+    let ty = RustType::Union(rust_name);
+    Ok(if nullable {
+        RustType::Option(Box::new(ty))
+    } else {
+        ty
+    })
+}
+
+/// The name of the variant that holds a member of a union enum (P2R-230).
+pub fn variant(ty: &RustType) -> String {
+    match ty {
+        RustType::I64 => "Int".to_owned(),
+        RustType::F64 => "Float".to_owned(),
+        RustType::Bool => "Bool".to_owned(),
+        RustType::String => "String".to_owned(),
+        RustType::Vec(_) => "List".to_owned(),
+        RustType::Enum(name)
+        | RustType::Class(name)
+        | RustType::Shape(name)
+        | RustType::Union(name) => name.clone(),
+        RustType::Option(inner) => variant(inner),
     }
 }
 

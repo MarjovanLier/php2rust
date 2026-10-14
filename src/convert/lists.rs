@@ -264,6 +264,13 @@ impl Converter<'_> {
         expected: Option<&RustType>,
     ) -> Option<(RExpr, RustType)> {
         match (unparenthesized(expression), expected) {
+            (Expression::Array(array), Some(ty)) if matches!(ty.inner(), RustType::Union(_)) => {
+                self.refuse(
+                    array,
+                    "an array literal cannot go where a union type is needed (P2R-231)",
+                );
+                None
+            }
             (Expression::Array(array), _) => self.list(array, expected),
             (Expression::Literal(Literal::Null(_)), Some(ty @ RustType::Option(_))) => {
                 Some((RExpr::None, ty.clone()))

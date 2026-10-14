@@ -312,6 +312,10 @@ impl Converter<'_> {
                 .class_named(name)
                 .is_some_and(|index| self.classes[index].changing),
             RustType::Vec(inner) | RustType::Option(inner) => self.is_changing(inner),
+            RustType::Union(name) => self
+                .type_names
+                .union(name)
+                .is_some_and(|members| members.iter().any(|member| self.is_changing(member))),
             _ => false,
         }
     }
@@ -323,6 +327,8 @@ impl Converter<'_> {
         match ty {
             RustType::Option(inner) => self.is_changing(inner),
             RustType::Vec(element) => self.nullable_changing(element),
+            // A union enum holds its member inline, as an `Option` does (P2R-230).
+            RustType::Union(_) => self.is_changing(ty),
             _ => false,
         }
     }
@@ -336,7 +342,7 @@ impl Converter<'_> {
     }
 
     /// Every property of the class at `index`, in struct order.
-    fn properties(&self, index: usize) -> impl Iterator<Item = &ParameterSignature> {
+    pub(super) fn properties(&self, index: usize) -> impl Iterator<Item = &ParameterSignature> {
         let class = &self.classes[index];
         class
             .fields
@@ -480,11 +486,18 @@ impl Converter<'_> {
             Some((argument(b"K")?, argument(b"V")?))
         });
         // A `mixed` slot keeps an int where P2R-25 would make a float of it, so a float K
-        // or V has no faithful form.
+        // or V, or a union with a float member, has no faithful form (P2R-230).
         let rust = |union: &TUnion| {
-            types::rust_type(union, &self.type_names)
+            types::declared_type(union, &self.type_names)
                 .ok()
-                .filter(|ty| *ty.inner() != RustType::F64)
+                .filter(|ty| match ty.inner() {
+                    RustType::F64 => false,
+                    RustType::Union(name) => self
+                        .type_names
+                        .union(name)
+                        .is_some_and(|members| !members.contains(&RustType::F64)),
+                    _ => true,
+                })
         };
         let typed = arguments.filter(|(key, value)| {
             !key.is_mixed() && !value.is_mixed() && rust(key).is_some() && rust(value).is_some()
@@ -664,7 +677,7 @@ impl Converter<'_> {
                 .get_property(&class, parameter.variable.name)
                 .and_then(|p| p.type_metadata.as_ref())
                 .map(|t| &t.type_union);
-            let Some(ty) = self.declared_type(parameter, declared) else {
+            let Some(ty) = self.declared_type(parameter, declared, parameter.hint.as_ref()) else {
                 continue;
             };
             if types::nullable_object(&ty) {
@@ -747,7 +760,7 @@ impl Converter<'_> {
             for item in plain.items.iter() {
                 match item {
                     PropertyItem::Concrete(item) if plain.hint.is_some() => {
-                        self.declared_property(declaration, index, item);
+                        self.declared_property(declaration, index, item, plain.hint.as_ref());
                     }
                     _ => self.refuse(item, NEEDS_DEFAULT),
                 }
@@ -762,6 +775,7 @@ impl Converter<'_> {
         declaration: &Class<'_>,
         index: usize,
         item: &PropertyConcreteItem<'_>,
+        hint: Option<&Hint<'_>>,
     ) {
         let php_name = &item.variable.name[1..];
         let Some(rust_name) = self.rust_name(php_name, &item.variable) else {
@@ -780,7 +794,7 @@ impl Converter<'_> {
             .get_property(&class, item.variable.name)
             .and_then(|p| p.type_metadata.as_ref())
             .map(|t| &t.type_union);
-        let Some(ty) = self.declared_type(&item.variable, declared) else {
+        let Some(ty) = self.declared_type(&item.variable, declared, hint) else {
             return;
         };
         if types::nullable_object(&ty) {
@@ -847,9 +861,14 @@ impl Converter<'_> {
             }
             other => self.expression(other)?,
         };
-        // An int literal fits a float property (P2R-25); every other value must have the
-        // property's type, or its inner type for a nullable one.
-        if found != *ty && found != *inner && !(found == RustType::I64 && *inner == RustType::F64) {
+        // An int literal fits a float property (P2R-25), and a member value a union one
+        // (P2R-231); every other value must have the property's type, or its inner type
+        // for a nullable one.
+        if found != *ty
+            && found != *inner
+            && !(found == RustType::I64 && *inner == RustType::F64)
+            && nulls::member_path(&found, ty).is_none()
+        {
             self.refuse(
                 value,
                 "a property default must have the property's type (P2R-140)",
@@ -1248,12 +1267,16 @@ impl Converter<'_> {
         let mut pending = vec![index];
         let mut problem = None;
         while let Some(at) = pending.pop() {
-            for field in self.properties(at) {
-                // `?C` holds its object inline too (P2R-204).
-                let ty = match &field.ty {
-                    RustType::Option(inner) if matches!(**inner, RustType::Class(_)) => inner,
-                    other => other,
-                };
+            // `?C` and a union enum hold their objects inline too (P2R-204, P2R-230).
+            let held: Vec<RustType> = self
+                .properties(at)
+                .flat_map(|field| match field.ty.inner() {
+                    RustType::Union(name) => self.type_names.union(name).unwrap_or_default(),
+                    RustType::Class(_) => vec![field.ty.inner().clone()],
+                    _ => vec![field.ty.clone()],
+                })
+                .collect();
+            for ty in &held {
                 match ty {
                     RustType::Class(name) => match self.class_named(name) {
                         Some(found) if found == index => {
@@ -1677,7 +1700,7 @@ impl Converter<'_> {
         ))
     }
 
-    fn record_refused_arguments(&mut self, list: &ArgumentList<'_>) {
+    pub(super) fn record_refused_arguments(&mut self, list: &ArgumentList<'_>) {
         for argument in list.arguments.iter() {
             let value = match argument {
                 Argument::Positional(positional) => positional.value,
@@ -1688,9 +1711,8 @@ impl Converter<'_> {
     }
 }
 
-/// The problem of a nullable type that holds a changing type (P2R-141).
-pub(super) const NULLABLE_CHANGING: &str =
-    "a nullable type that holds objects whose class changes them is not supported (P2R-141)";
+/// The problem of a nullable or union type that holds a changing type (P2R-141, P2R-230).
+pub(super) const NULLABLE_CHANGING: &str = "a nullable or union type that holds objects whose class changes them is not supported (P2R-141)";
 
 /// The problem of a declared property without a type or a default (P2R-140).
 const NEEDS_DEFAULT: &str = "a declared property needs a type and a default value (P2R-140)";

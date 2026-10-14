@@ -75,8 +75,14 @@ P2R-72, P2R-130, P2R-135, P2R-166, P2R-171, P2R-180, P2R-201 and the
 roadmap of section 10. The spec reviewer added the float stop and the
 declared-type rule of P2R-220, the single `#[Override]` of P2R-221 and
 the `&str`, `$this` and `while` rules of P2R-222. Section 24 (union types
-and `?->`) was written on 15 Oct 2026; it changes P2R-07, P2R-22, P2R-134,
-P2R-204, P2R-220, P2R-222 and the roadmap of section 10.
+and `?->`) was written on 15 Oct 2026; it changes P2R-07, P2R-22, P2R-25,
+P2R-105, P2R-134, P2R-174, P2R-204, P2R-210, P2R-220, P2R-222 and the
+roadmap of section 10. The two spec reviewers added the written-type
+stops of P2R-25 and P2R-230, the owned and lent forms and the
+other-union stop of P2R-231, the guarded `unreachable!()` of P2R-233
+(Mago's narrowed type alone proved unsound), the argument stop of
+P2R-234, the `use` line of P2R-174, and the `Result`, `Ok` and `Err`
+names of P2R-210.
 
 php2rust converts typed PHP source into normal, readable Rust (`Vec`,
 `String`, `i64`), without AI. It reads PHP with the Mago crates, uses Mago's
@@ -193,7 +199,12 @@ requirement IDs.
 - **P2R-25** An `int` value passed to a `float` parameter (declared or
   built-in) or returned from a function declared `float` MUST convert to
   `f64`: a literal as a float literal (`4` to `4.0`), any other value with
-  `as f64`.
+  `as f64`. PHP converts the int only where the written PHP type says
+  `float`, so these stop the conversion: a declared type whose Mago type
+  holds `float` while its written type does not (`@param float` on a
+  `mixed` parameter), or holds `float` and not `int` while its written type
+  holds `int` (`@param float` on `int|float`), because PHP keeps the int
+  there.
 - **P2R-26** Assigning a `string` or list value to a variable, appending it to
   a list, or returning it MUST behave as a copy, as in PHP: a later change to
   one variable MUST NOT show in the other. The output copies (`.clone()`, or
@@ -579,7 +590,7 @@ Sections 3 to 9 apply to nullable values unless this section says otherwise.
   binding can shadow the variable or not exist yet.
 - **P2R-105** `$a ?? $b` MUST convert when `$a` is a variable, parameter,
   function call, static method call (P2R-153), `E::tryFrom()` call
-  (P2R-114) or array shape element (P2R-203) of Rust type `Option<T>` and
+  (P2R-114), `?->` (P2R-234) or array shape element (P2R-203) of Rust type `Option<T>` and
   `$b` has the type `T`. `$b` MUST
   be evaluated only when `$a` is null, as in PHP, and P2R-26 applies to
   `$a`. These stop the conversion: `??` whose left side has a Rust type that
@@ -1426,8 +1437,9 @@ Rust module. One input file still converts as sections 1 to 17 say.
   case, method, field or constant whose Rust name equals an item's is not
   a use of it, and a name of the module's own items needs no line. A module
   other than the crate root whose Rust lines name the struct of an array
-  shape (P2R-200), as a type or as a struct literal (`S { .. }`), or the
-  exception struct of P2R-210, MUST hold `use crate::<Name>;` for it. rustfmt sorts the `use` lines (P2R-190).
+  shape (P2R-200), as a type or as a struct literal (`S { .. }`), a union
+  enum (P2R-230), or the exception struct of P2R-210, MUST hold
+  `use crate::<Name>;` for it. rustfmt sorts the `use` lines (P2R-190).
 - **P2R-175** A directory input converts to a library: a statement outside
   functions other than the P2R-12 `declare`, the P2R-150 `namespace` and
   `use` statements, and enum and class declarations stops the conversion,
@@ -1804,8 +1816,9 @@ slice.
   names a class of that namespace, stops. The struct comes after the
   enums, classes and functions and before the helpers (P2R-33, P2R-160),
   or for a directory input in `lib.rs` (P2R-172). An enum or class whose
-  Rust name is `PhpException` stops the conversion, as other names the
-  output uses do (P2R-111, P2R-131).
+  Rust name is `PhpException`, `Result`, `Ok` or `Err` stops the
+  conversion, as other names the output uses do (P2R-111, P2R-131),
+  because a struct of that name hides the type the output writes.
 - **P2R-211** A function, method, static method or enum method MUST throw
   when its body holds a `throw`, or a call of a function or method that
   throws, outside the body of a `try` with a catch-all clause (P2R-214); a
@@ -1988,9 +2001,10 @@ inside a list or a shape field waits for a later slice.
   property (P2R-140), and the K and V of P2R-220. Each member MUST be an
   int, float, bool or string, an enum, a readonly class (P2R-132), a shape
   (P2R-200) or a list of a built type; `scalar` counts as
-  `bool|float|int|string` and `array-key` as `int|string`. Each member
-  gives one variant, named `Int`, `Float`, `Bool`, `String`, `List`, or
-  the Rust name of its enum, class or shape, which holds the member's
+  `bool|float|int|string` and `array-key` as `int|string`. Members of one
+  Rust type after P2R-21 (`1|2`, `true|string`) give one variant. Each
+  variant is named `Int`, `Float`, `Bool`, `String`, `List`, or
+  the Rust name of its enum, class or shape, and holds the member's
   owned Rust type. The Rust name of the enum is the variant names in byte
   order, joined with `Or`: `int|string` gives `IntOrString`, and
   `bool|array{year: string, month: string, day: string}|string` gives
@@ -2001,63 +2015,90 @@ inside a list or a shape field waits for a later slice.
   input maps to, in byte order of their names, after the shape structs of
   P2R-200 and in the same place. These stop the conversion: a member with
   no Rust type (P2R-22), `mixed`, `numeric` and `object` included; two
-  members that give one variant name (`list<int>|list<string>`); a member
-  that is or holds a class that changes its objects (P2R-141); a union
-  enum whose name is the Rust name of an enum, class or shape of the input
-  (P2R-131, P2R-200); a class that holds itself through a union enum
-  (P2R-130), because rustc rejects a type of infinite size; and a union
-  type as a list element type, a shape field type or the member of another
-  union (a later slice).
+  members of different Rust types that give one variant name
+  (`list<int>|list<string>`); two union enums of one name with different
+  variants; a member that is or holds a class that changes its objects
+  (P2R-141); a union enum whose name is the Rust name of an enum, class or
+  shape of the input (P2R-131, P2R-200); a class that holds itself through
+  a union enum other than through a list (P2R-130), because rustc rejects
+  a type of infinite size; a union type as a list element type, a shape
+  field type or the member of another union (a later slice); a declared
+  type whose written PHP type holds `float` and not `int` while its Mago
+  type holds `int` (`@param int|string` on `float|string`), because PHP
+  stores the int as a float; the stops of P2R-25; and a written type that
+  PHP rejects and Mago does not report: a type written twice in any letter
+  case (`int|string|INT`), `true|false`, and `bool` beside `true` or
+  `false`. P2R-21 keeps converting the widened forms of these, so the last
+  stop applies to every declared type, not only to unions.
 - **P2R-231** A value MUST convert into a place of type `U` or `Option<U>`
   (a return value, an argument for a parameter, of `new` too, an
-  assignment to a property, an assignment to a variable of that type, and
-  an arm of a `match` or `?:` that stands in such a place) as follows. A
-  value of a member type `T`, in the owned form P2R-26 gives it
-  (`.to_string()`, `.clone()` or a move), becomes `U::V(value)`, with `V`
-  the variant of `T`, inside `Some(..)` for `Option<U>` (P2R-102); a value
-  of type `Option<T>` becomes `value.map(U::V)`; a `U` value becomes
-  `Some(value)` where `Option<U>` is needed; and `null` becomes `None`. As
-  an argument for a `&U` parameter the value is lent: `&U::V(value)`, or
-  `&u` for a `U` variable; for an `Option<&U>` parameter `Some(&U::V(..))`,
-  `Some(&u)`, or `u.as_ref()` for an owned `Option<U>` (P2R-204). A `&U`
-  or `Option<&U>` parameter passes on as it is. These stop the
-  conversion: an int value where `U` has a `Float` variant and no `Int`
-  variant, because PHP converts the int to a float for a native union type
-  and keeps it for a type that only a docblock gives (P2R-25); an array
-  literal where `U` or `Option<U>` is needed; and a value whose type is
-  not a member (Mago reports it, P2R-11).
+  assignment to a property, a property default (P2R-140), an assignment to
+  a new variable, and an arm of a `match` or `?:` that stands in such a
+  place) as follows. A value of a member type `T`, in the owned form
+  P2R-26 gives it (`.to_string()`, `.clone()` or a move), becomes
+  `U::V(value)`, with `V` the variant of `T`, inside `Some(..)` for
+  `Option<U>` (P2R-102). A value of type `Option<T>`, in the owned form
+  P2R-101 and P2R-204 give it (`.clone()` for a property or a variable
+  read again, `.map(ToOwned::to_owned)` for an `Option<&str>`,
+  `Option<&[T]>` or `Option<&S>` parameter, a move otherwise), becomes
+  `value.map(U::V)`. A `U` value becomes `Some(..)` of its owned form where
+  `Option<U>` is needed, and `null` becomes `None`. As an argument for a
+  `&U` parameter a member value is lent as `&U::V(value)`, and for an
+  `Option<&U>` parameter as `Some(&U::V(..))`, or `value.map(U::V).as_ref()`
+  for an `Option<T>` value; a `U` or `Option<U>` value is lent by P2R-201
+  and P2R-204 (`&u`, `u.as_ref()`), and a `&U` or `Option<&U>` parameter
+  passes on as it is. A `?:` in such a place gives an owned value in each
+  arm, wrapped as above, and the whole `if` is lent as P2R-205 lends a
+  shape: `&(if ..)` for `&U` and `(if ..).as_ref()` for `Option<&U>`.
+  These stop the conversion: an int value where `U` has a `Float` variant
+  and no `Int` variant (P2R-25, P2R-230); an array literal where `U` or
+  `Option<U>` is needed; and a value of another union type, or a union
+  value where a type that is not its union is needed, also where every
+  member fits, because Mago does not report it and PHP may convert a
+  member there.
 - **P2R-232** A value of type `U` MUST behave as a value of a shape type
   for copying and lending (P2R-201): a parameter becomes `&U` or
   `Option<&U>`, and P2R-26 copies with `.clone()`. A read of a variable,
   parameter or property of type `U` or `Option<U>` keeps that type also
-  where Mago narrows it to some of its members (after `is_scalar()`, or a
-  check against null) or types it `mixed` or `scalar` (P2R-220); a read
-  where Mago narrows it to one member type stops (a later slice). `$v ===
-  null` and `$v !== null` on `Option<U>` convert by P2R-103 and P2R-104,
-  whose binding has the type `&U`. A union value converts into a union
-  place (P2R-231) and in the calls of P2R-233. Every other use stops the
-  conversion: `echo`, interpolation and joining, arithmetic, every
-  comparison other than with the literal `null`, a condition, a cast other
-  than `(string)`, the argument of a built-in function other than those of
-  P2R-233, `??`, a `foreach`, an element read, a property read or method
+  where Mago narrows it to one or more of its members (after
+  `is_scalar()`, `is_string()` or a check against null) or types it
+  `mixed` or `scalar` (P2R-220), so a use of such a read as a member type
+  stops by the rules below. `$v === null` and `$v !== null` on `Option<U>`
+  convert by P2R-103 and P2R-104, whose binding has the type `&U`, and
+  `$v ?? $w` with `$w` of type `U` converts by P2R-105. A union value
+  converts into a place of its own union (P2R-231) and in the calls of
+  P2R-233. Every other use stops the conversion: `echo`, interpolation and
+  joining, arithmetic, every comparison other than with the literal
+  `null`, a condition, a cast other than `(string)`, the argument of a
+  built-in function other than those of P2R-233, `??` with a default of
+  another type, a `foreach`, an element read, a property read or method
   call, and the subject of a `match`.
 - **P2R-233** `is_scalar($v)`, `gettype($v)` and `(string) $v`, where `$v`
-  is a variable, parameter or property read of type `U` or `Option<U>`,
-  MUST convert to a `match` over its variants (`match &v { .. }`, or
-  `match v { .. }` for a `&U` or `Option<&U>` parameter), with `None` for
-  null. `is_scalar()` gives `true` for `Int`, `Float`, `Bool` and
-  `String`, and `false` for every other variant and `None`. `gettype()`
-  gives `"integer"`, `"double"`, `"boolean"`, `"string"`, `"array"` for
-  `List` and a shape, `"object"` for an enum or class, and `"NULL"` for
-  `None`. `(string)` gives `n.to_string()` for `Int`, `"1"` or `""` for
-  `Bool`, a copy for `String` and `String::new()` for `None`. An arm whose
-  variant Mago's type of `$v` at that place cannot hold (after
-  `is_scalar()`, Mago types `$v` as `scalar` or a union of scalars) is
-  `unreachable!()`. These stop the conversion: `(string)` where `$v` may
-  hold a float (P2R-46), a list, a shape, an enum or a class at that
-  place, because PHP prints a float its own way, warns for an array and
-  throws for an object; and these calls on any other value that may be
-  null (P2R-222).
+  is a variable or parameter of type `U` or `Option<U>`, MUST read `$v`
+  and convert over its variants, with `None` for null, matching `&v`, or
+  `v` itself for a `&U` or `Option<&U>` parameter and a binding of
+  P2R-104. `is_scalar()` gives `matches!(v, ..)` with the `Int`, `Float`,
+  `Bool` and `String` variants, so every other variant and `None` give
+  `false`. `gettype()` gives a `match` with `"integer"`, `"double"`,
+  `"boolean"`, `"string"`, `"array"` for `List` and a shape, `"object"`
+  for an enum or class, and `"NULL"` for `None`. `(string)` gives a
+  `match` with `x.to_string()` for `Int`, `"1"` or `""` for `Bool`, the
+  text for `String` and `""` for `None`; an arm that does not read its
+  value binds `_`. Where `U` has an `Int` variant the `(string)` result is
+  an owned `String`, which P2R-180 stops as the arm of a `?:`; otherwise
+  it is a `&str` that borrows `$v`, as `gettype()` gives literals, and
+  both may stand as an arm of a `?:`. `(string) $v` as the first arm of
+  `is_scalar($v) ? .. : ..`, the same variable or parameter in both, is
+  the one place that writes `unreachable!()`: for the `List`, shape, enum
+  and class variants and for `None`, which the check rules out and which
+  no code between the check and the cast can change. These stop the
+  conversion: `(string)` where `U` has a `Float` variant (P2R-46), because
+  PHP prints a float its own way; `(string)` where `U` has a `List`,
+  shape, enum or class variant anywhere else, because PHP warns for an
+  array and throws for an object; and these calls on a property read
+  (P2R-222) and on any other value that may be null (P2R-106). After
+  `is_scalar()`, Mago narrows a `scalar` member to `never` and reports
+  the read (P2R-11).
 - **P2R-234** `$o?->p` and `$o?->m(args)`, where `$o` is a variable,
   parameter or property read of type `Option<S>` for a class `S`, or
   `Option<E>` for an enum `E` with `->value` or `->name` (P2R-113), MUST
@@ -2069,14 +2110,21 @@ inside a list or a shape field waits for a later slice.
   `$o?->name` of a string property gives `.map(|o| o.name.clone())`. When
   the property or the return type is itself `Option<T>`, `and_then`
   replaces `map`. The result has the type `Option<T>` and converts as any
-  `Option` value. The arguments of `m` are evaluated inside the closure,
-  so they run only when `$o` is not null, as in PHP. These stop the
-  conversion: `?->` on a value that cannot be null; a chain that goes on
-  after `?->` (`$a?->b->c`, `$a?->b?->c`); `?->` on a class that changes
-  its objects (P2R-141); a call of a method that throws (P2R-211); an
-  argument that reads a variable of the closure's binding name; and `?->`
-  on the left of an assignment, in `isset`, `unset` or `empty`, or inside
-  an interpolated string (P2R-45).
+  `Option` value, `??` included (P2R-105). The arguments of `m` are
+  evaluated inside the closure, so they run only when `$o` is not null, as
+  in PHP. These stop the conversion: `?->` on a value that cannot be null;
+  a chain that goes on after `?->` (`$a?->b->c`, `$a?->b?->c`), whose
+  object is then a value that may be null (P2R-106) or not a variable,
+  parameter or property read; `?->` on a call result; `?->` on a class
+  that changes its objects (P2R-141); a call of a method that throws
+  (P2R-211), that changes its object (P2R-143), or that returns `void`,
+  also as a statement (P2R-43); an argument that is not a literal, a
+  constant, a variable or parameter, or a property read on one, because
+  inside the closure a call could borrow what the closure borrows and a
+  `?` would leave the closure instead of the function; an argument that
+  reads a variable of the closure's binding name; and `?->` on the left of
+  an assignment, in `isset`, `unset` or `empty`, or inside an interpolated
+  string (P2R-45).
 
 ## Spec checklist
 

@@ -4,7 +4,7 @@ use mago_span::HasSpan;
 use mago_syntax::cst::*;
 
 use super::variables::{self, changes_variable};
-use super::{Converter, Mode, ParameterSignature, lists, nulls, numbers, parameter_index};
+use super::{Converter, Mode, ParameterSignature, lists, nulls, numbers, parameter_index, unions};
 use crate::printer::{self, BinOp, RExpr};
 use crate::types::RustType;
 
@@ -162,11 +162,7 @@ impl Converter<'_> {
                 self.instantiation(instantiation, expression)
             }
             Expression::Access(Access::NullSafeProperty(_))
-            | Expression::Call(Call::NullSafeMethod(_)) => {
-                self.record_refused(expression);
-                self.refuse(expression, "?-> is not supported (P2R-134)");
-                None
-            }
+            | Expression::Call(Call::NullSafeMethod(_)) => self.nullsafe(expression),
             Expression::Clone(_) => {
                 self.record_refused(expression);
                 self.refuse(expression, "clone is not supported (P2R-136)");
@@ -322,6 +318,15 @@ impl Converter<'_> {
             );
             return None;
         };
+        // A union value holds one of its members, so the call reads it (P2R-233).
+        if matches!(ty.inner(), RustType::Union(_)) {
+            let test = if scalar {
+                unions::Test::Scalar
+            } else {
+                unions::Test::Type
+            };
+            return self.union_test(arguments[0], test);
+        }
         let name = match &ty {
             RustType::I64 => "integer",
             RustType::F64 => "double",
@@ -333,6 +338,8 @@ impl Converter<'_> {
                 self.refuse(arguments[0], nulls::NULL_BUILT_IN);
                 return None;
             }
+            // Converted above.
+            RustType::Union(_) => return None,
         };
         if scalar {
             let is = matches!(name, "integer" | "double" | "boolean" | "string");
@@ -483,6 +490,25 @@ impl Converter<'_> {
             return None;
         }
         let expr = self.declared_value(value, expr, &ty, declared)?;
+        // A member value goes into its variant owned, and the variant is lent (P2R-231).
+        if let Some(path) = nulls::member_path(&ty, declared) {
+            let owned = self.stored(value, expr, &ty, node.span())?;
+            return Some(match (parameter.mode, &ty, declared) {
+                (Mode::Shared, RustType::Option(_), _) => RExpr::Method(
+                    Box::new(RExpr::MethodCall(
+                        Box::new(owned),
+                        "map".into(),
+                        vec![RExpr::Path(path)],
+                    )),
+                    "as_ref",
+                ),
+                (Mode::Shared, _, RustType::Option(_)) => RExpr::Some(Box::new(RExpr::Ref(
+                    Box::new(RExpr::Call(path, vec![owned])),
+                ))),
+                (Mode::Shared, _, _) => RExpr::Ref(Box::new(RExpr::Call(path, vec![owned]))),
+                _ => nulls::wrapped(owned, &ty, declared),
+            });
+        }
         let passed = match parameter.mode {
             Mode::Shared => self.borrowed(expr, &ty),
             Mode::Mut => self.lent(value, expr)?,

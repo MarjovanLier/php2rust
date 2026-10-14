@@ -11,7 +11,8 @@ use crate::types::RustType;
 
 /// Type names the output itself uses, which an enum must not take (P2R-111). `None` and
 /// `Some` too: a `use` line of a type of that name would sit unused beside the `Option`
-/// values the output writes (P2R-174). `PhpException` is the exception struct (P2R-210).
+/// values the output writes (P2R-174). `PhpException` is the exception struct, and
+/// `Result`, `Ok` and `Err` carry it (P2R-210, P2R-211).
 const TAKEN: &[&str] = &[
     "Option",
     "String",
@@ -20,6 +21,9 @@ const TAKEN: &[&str] = &[
     "None",
     "Some",
     "PhpException",
+    "Result",
+    "Ok",
+    "Err",
 ];
 
 /// Names PHP reserves, its keywords and type names, which no enum may take; each one fails
@@ -375,6 +379,16 @@ impl Converter<'_> {
             ClassLikeMemberSelector::Identifier(property) => property.value,
             _ => b"",
         };
+        self.enum_member(property, node, (object, ty))
+    }
+
+    /// `->name` or `->value`, by `property`, of the enum value `object` (P2R-113).
+    pub(super) fn enum_member(
+        &mut self,
+        property: &[u8],
+        node: &Expression<'_>,
+        (object, ty): (RExpr, RustType),
+    ) -> Option<(RExpr, RustType)> {
         let index = match &ty {
             RustType::Enum(name) => self.enums.iter().position(|e| e.rust_name == *name),
             _ => None,

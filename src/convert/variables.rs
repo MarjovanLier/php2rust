@@ -1121,7 +1121,19 @@ impl Converter<'_> {
         assigned: Option<&RustType>,
     ) -> Option<(Var, bool)> {
         let empty = self.empty_list(node);
-        let found = self.site_type(node);
+        let found = match (self.site_type(node), assigned) {
+            // A union value gives a new variable its union type where Mago types the write
+            // as some of its members (P2R-232).
+            (Err(_), Some(value))
+                if matches!(value.inner(), RustType::Union(name)
+                if self.expression_type(node).is_some_and(|site| {
+                    self.within_union(site, name, matches!(value, RustType::Option(_)))
+                })) =>
+            {
+                Ok(value.clone())
+            }
+            (found, _) => found,
+        };
         let (var, declared) = self.record_write(variable);
         if self.refuse_borrowed_parameter(var, node) {
             return None;
@@ -1543,6 +1555,15 @@ impl Converter<'_> {
         }
         let entry = &self.variables.entries[var];
         let found = self.site_type(node);
+        // A union value keeps its type where Mago narrows it to some of its members, one
+        // included (P2R-232).
+        if let RustType::Union(name) = known.inner()
+            && self.expression_type(node).is_some_and(|site| {
+                self.within_union(site, name, matches!(known, RustType::Option(_)))
+            })
+        {
+            return Ok(known.clone());
+        }
         // A parameter that the `ArrayAccess` template types is `mixed` to Mago, or
         // `scalar` after `is_scalar()`; a read has the parameter's type (P2R-220).
         if found.is_err()

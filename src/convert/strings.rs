@@ -661,9 +661,17 @@ impl Converter<'_> {
         let Some((expr, ty)) = self.expression(value) else {
             return false;
         };
-        // Mago may type the value as a string where it knows more (P2R-104).
+        // Mago may type the value as a string where it knows more (P2R-104), and a union
+        // value keeps its enum where Mago narrows it (P2R-232).
         if matches!(ty, RustType::Option(_)) {
             self.refuse(value, nulls::NULL_JOINED);
+            return false;
+        }
+        if matches!(ty, RustType::Union(_)) {
+            self.refuse(
+                value,
+                "a value of a union type cannot be joined into a string (P2R-232)",
+            );
             return false;
         }
         pieces.push(match expr {

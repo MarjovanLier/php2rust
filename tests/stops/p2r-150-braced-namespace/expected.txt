@@ -1,0 +1,1 @@
+input.php:5:1: a file may hold one namespace statement, without braces, right after the declare (P2R-150)

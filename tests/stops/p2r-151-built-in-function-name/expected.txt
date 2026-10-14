@@ -1,0 +1,1 @@
+input.php:7:10: a function may not take the name of a function PHP has built in (P2R-31)

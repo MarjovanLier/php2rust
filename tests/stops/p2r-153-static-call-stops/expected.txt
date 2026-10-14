@@ -1,0 +1,5 @@
+input.php:21:16: a static method is called with ::, not through an object (P2R-153)
+input.php:21:36: a method that is not static cannot be called with :: (P2R-153)
+input.php:27:12: Cannot return value with type 'never' from this function. (never-return)
+input.php:32:12: Cannot return value with type 'never' from this function. (never-return)
+input.php:35:6: a method that is not static cannot be called with :: (P2R-153)

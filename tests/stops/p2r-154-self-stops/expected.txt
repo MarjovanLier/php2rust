@@ -1,0 +1,6 @@
+input.php:9:27: the type parent is not supported (P2R-154)
+input.php:14:26: only a constructor parameter can be promoted to a property (P2R-130)
+input.php:16:37: Attempting to access a property on a non-object type (`mixed`). (mixed-property-access)
+input.php:19:28: static can only be a return type, which PHP requires (P2R-154)
+input.php:25:20: self and static name a class, so a function outside one cannot use them (P2R-154)
+input.php:27:12: Invalid return type for function `origin`: expected `static`, but found `Point`. (invalid-return-statement)

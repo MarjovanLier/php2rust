@@ -1,0 +1,1 @@
+input.php:7:11: PHP reserves the constant name class (P2R-156)

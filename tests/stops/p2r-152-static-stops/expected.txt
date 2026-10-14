@@ -1,0 +1,3 @@
+input.php:7:12: a static, readonly or abstract declared property is not supported; PHP rejects a default on a readonly one (P2R-140)
+input.php:13:16: $this does not exist in a static method, and PHP throws an Error (P2R-152)
+input.php:16:28: this method calls itself on every path, and rustc rejects it (P2R-50)

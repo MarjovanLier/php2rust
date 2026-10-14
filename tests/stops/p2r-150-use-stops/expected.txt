@@ -1,0 +1,5 @@
+input.php:8:5: two imports of one kind may not share one name, which PHP rejects (P2R-150)
+input.php:9:5: an import may not take the name of a class, enum or function this file declares, which PHP rejects (P2R-150)
+input.php:10:14: an import may not take the name of a class, enum or function this file declares, which PHP rejects (P2R-150)
+input.php:11:5: PHP reserves the name of this import (P2R-150)
+input.php:25:6: calls to helper are not supported (P2R-48)

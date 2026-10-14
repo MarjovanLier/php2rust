@@ -95,20 +95,29 @@ fn missing_rustfmt_exits_2_and_writes_nothing() {
     std::fs::write(dir.join("in.php"), source).unwrap();
     std::fs::write(dir.join("src").join("a.php"), source).unwrap();
     std::fs::write(dir.join("stops.php"), "<?php\n\necho \"x\\n\";\n").unwrap();
+    let temporary = dir.join("tmp");
+    std::fs::create_dir_all(&temporary).unwrap();
     let run = |args: &[&str]| {
         Command::new(env!("CARGO_BIN_EXE_php2rust"))
             .args(args)
             .current_dir(&dir)
             .env("PATH", &empty)
+            .env("TMPDIR", &temporary)
             .output()
             .unwrap()
     };
-    for args in [&["in.php", "-o", "out.rs"][..], &["src", "-o", "crate"]] {
+    for (args, shown) in [
+        (&["in.php", "-o", "out.rs"][..], "in.php"),
+        (&["src", "-o", "crate"], "src"),
+    ] {
         let out = run(args);
         assert_eq!(out.status.code(), Some(2), "{args:?}");
         assert!(out.stdout.is_empty(), "{args:?}");
-        assert!(
-            String::from_utf8_lossy(&out.stderr).contains("rustfmt"),
+        assert_eq!(
+            String::from_utf8_lossy(&out.stderr),
+            format!(
+                "{shown}: cannot lay out the output: cannot run rustfmt, which must be on PATH\n"
+            ),
             "{args:?}"
         );
     }
@@ -121,6 +130,45 @@ fn missing_rustfmt_exits_2_and_writes_nothing() {
         assert!(!dir.join(left).exists(), "{left} exists");
     }
     assert_eq!(run(&["stops.php"]).status.code(), Some(1));
+    // The private directory of the layout is gone too (P2R-170).
+    assert_eq!(std::fs::read_dir(&temporary).unwrap().count(), 0);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// P2R-190: a `rustfmt.toml` in the working directory or a `.rustfmt.toml` in the home
+/// directory does not change the output, and the layout leaves nothing in the temporary
+/// directory.
+#[test]
+fn rustfmt_configuration_around_the_tool_is_ignored() {
+    let dir = scratch("rustfmt-config");
+    let home = dir.join("home");
+    let temporary = dir.join("tmp");
+    std::fs::create_dir_all(&home).unwrap();
+    std::fs::create_dir_all(&temporary).unwrap();
+    std::fs::write(
+        dir.join("in.php"),
+        "<?php\n\ndeclare(strict_types=1);\n\nfunction pick(int $n): int\n{\n    if ($n > 1) {\n        return 2;\n    }\n    return 1;\n}\n",
+    )
+    .unwrap();
+    let run = || {
+        Command::new(env!("CARGO_BIN_EXE_php2rust"))
+            .arg("in.php")
+            .current_dir(&dir)
+            .env("HOME", &home)
+            .env("TMPDIR", &temporary)
+            .output()
+            .unwrap()
+    };
+    let plain = run();
+    assert_eq!(plain.status.code(), Some(0));
+    let settings = "hard_tabs = true\nmax_width = 40\n";
+    std::fs::write(home.join(".rustfmt.toml"), settings).unwrap();
+    std::fs::write(dir.join("rustfmt.toml"), settings).unwrap();
+    let configured = run();
+    assert_eq!(configured.status.code(), Some(0));
+    assert_eq!(configured.stdout, plain.stdout);
+    assert!(!plain.stdout.contains(&b'\t'));
+    assert_eq!(std::fs::read_dir(&temporary).unwrap().count(), 0);
     let _ = std::fs::remove_dir_all(&dir);
 }
 
@@ -154,10 +202,13 @@ fn failing_rustfmt_exits_2_with_a_fixed_message() {
         let rustfmt = bin.join("rustfmt");
         std::fs::write(&rustfmt, script).unwrap();
         std::fs::set_permissions(&rustfmt, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let temporary = dir.join(format!("{name}-tmp"));
+        std::fs::create_dir_all(&temporary).unwrap();
         let out = Command::new(env!("CARGO_BIN_EXE_php2rust"))
             .args(["in.php", "-o", "out.rs"])
             .current_dir(&dir)
             .env("PATH", &bin)
+            .env("TMPDIR", &temporary)
             .output()
             .unwrap();
         assert_eq!(out.status.code(), Some(2), "{name}");
@@ -167,6 +218,7 @@ fn failing_rustfmt_exits_2_with_a_fixed_message() {
             "{name}"
         );
         assert!(!dir.join("out.rs").exists(), "{name}");
+        assert_eq!(std::fs::read_dir(&temporary).unwrap().count(), 0, "{name}");
     }
     let _ = std::fs::remove_dir_all(&dir);
 }

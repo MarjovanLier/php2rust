@@ -18,3 +18,14 @@ pub fn joined(n: i64, first: &str, second: &str) -> String {
         _ => String::from("short"),
     };
 }
+
+fn main() {
+    print!("{}", sentence(1));
+    print!(" ");
+    print!("{}", sentence(2));
+    print!("\n");
+    print!("{}", joined(1, "x", "y"));
+    print!(" ");
+    print!("{}", joined(2, "x", "y"));
+    print!("\n");
+}

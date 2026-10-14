@@ -69,7 +69,7 @@ fn check_toolchain() {
         "rustfmt is missing: {}",
         text(&rustfmt.stderr)
     );
-    // `rustc 1.99.0 (b940084d7e 2026-..)`: the expected files are this rustfmt's layout
+    // `rustc 1.99.0 (b940084d7 2026-09-28)`: the expected files are this rustfmt's layout
     // (P2R-83, P2R-190).
     let commit = rustc.split(['(', ' ']).nth(3).unwrap_or_default();
     let rustfmt = text(&rustfmt.stdout);

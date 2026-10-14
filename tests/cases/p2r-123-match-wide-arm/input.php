@@ -17,3 +17,6 @@ function joined(int $n, string $first, string $second): string
         default => 'short',
     };
 }
+
+echo sentence(1), ' ', sentence(2), "\n";
+echo joined(1, 'x', 'y'), ' ', joined(2, 'x', 'y'), "\n";

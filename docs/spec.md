@@ -15,7 +15,10 @@ change their objects) was written and built on 13 Oct 2026; the final
 review of the build added the nullable stop of P2R-141, the unread field
 write stop of P2R-142, the `&mut [C]` loop, the temporary list stop and
 the copy rule wording of P2R-146, and the borrow limit of form 1 and the
-list read limit of form 2 of P2R-147.
+list read limit of form 2 of P2R-147. Section 16 (namespaces, static
+methods and constants) was written on 14 Oct 2026; it changes P2R-07,
+P2R-31, P2R-72, P2R-110, P2R-111, P2R-114, P2R-123, P2R-130, P2R-133 and
+P2R-135.
 
 php2rust converts typed PHP source into normal, readable Rust (`Vec`,
 `String`, `i64`), without AI. It reads PHP with the Mago crates, uses Mago's
@@ -56,7 +59,7 @@ requirement IDs.
   leave a partial output file (review concern, not checked mechanically).
 - **P2R-06** The same input MUST always give the same stdout bytes, the same
   output file bytes and the same stderr bytes.
-- **P2R-07** Only the constructs that sections 3 to 5 and 11 to 15 list as
+- **P2R-07** Only the constructs that sections 3 to 5 and 11 to 16 list as
   converting may convert. Any other construct MUST stop the conversion,
   which means it is reported as a problem under P2R-03. Examples that stop
   in version 1:
@@ -146,7 +149,8 @@ requirement IDs.
   (`getTotal()` and `get_total()`); a variable whose Rust name equals the
   Rust name of a function in the file; a PHP function named `main`; and a
   function with the name of a function PHP has built in (`next`, `touch`),
-  which PHP rejects when it compiles the file and Mago does not report.
+  which PHP rejects when it compiles the file and Mago does not report (in
+  a namespace PHP accepts it, P2R-151).
 - **P2R-32** A call MUST use the declared or built-in function name,
   whatever the letter case of the call (PHP function names ignore case).
 - **P2R-33** Statements outside functions, other than enum and class
@@ -322,7 +326,7 @@ requirement IDs.
   stderr MUST be empty. A case without `fn main()` gets the checks of P2R-70
   and P2R-71 only. Review concern, not checked mechanically: each case's
   stdout depends on every construct the case covers, and every construct of
-  sections 3 to 5 and 11 to 15 appears in at least one case with
+  sections 3 to 5 and 11 to 16 appears in at least one case with
   `fn main()`.
 - **P2R-73** Each stop folder `tests/stops/<id>-<slug>/` holds `input.php`
   and `expected.txt`. Run from inside the folder, once as
@@ -378,7 +382,20 @@ Each milestone gets its own requirements in this file when its work starts.
   comments. Decided on 11 Oct 2026:
   objects become plain structs, and code that changes one object through two
   variables stops; maps use the `indexmap` crate, so output with a map needs
-  it; a `throw` becomes an `Err` of a `Result`.
+  it; a `throw` becomes an `Err` of a `Result`. On 14 Oct 2026 a trial on
+  two real libraries converted none of their files, so the order after
+  section 15 follows what real code needs: namespaces, static methods and
+  constants (section 16); several files converted together into one crate
+  with one module per namespace; built-in string, regex and array
+  functions; default parameter values and named arguments; maps and array
+  shapes; interfaces and inheritance; exceptions; closures. The goal is
+  code of the kind a Laravel application holds. Two points are open:
+  - PHP functions with no counterpart in Rust's standard library
+    (`preg_replace`, `DateTime::createFromFormat`) need either helper
+    functions written into the output or a support crate.
+  - Dynamic PHP (`mixed`, magic methods, facades, reflection, arrays with
+    values of mixed types) has no plain Rust form. Converting it needs a
+    dynamic value type, which no section specifies yet.
 - **Milestone 3:** test conversion, PHPUnit and Pest together, into Rust
   `#[test]` functions with the standard assert macros. Needs milestone 2
   (PHPUnit tests are classes, Pest tests are closures).
@@ -488,8 +505,9 @@ Sections 3 to 9 apply to nullable values unless this section says otherwise.
     P2R-12 `declare`, a function, enum or class declaration: PHP
     declares an enum only when execution reaches it, so an earlier use dies
     with `Class "E" not found`;
-  - an enum with a method, a constant, `implements` or `use`, or a backing
-    value of any other form (`1 + 1`, `PHP_INT_MAX`);
+  - an enum with `implements` or `use`, or a backing value of any other
+    form (`1 + 1`, `PHP_INT_MAX`); section 16 converts methods and
+    constants (P2R-155, P2R-156);
   - a case without a value in a backed enum, a case with a value in a pure
     enum, and a backing type other than `int` or `string`: PHP rejects all
     three when it compiles the file;
@@ -507,7 +525,8 @@ Sections 3 to 9 apply to nullable values unless this section says otherwise.
   and an enum with a name PHP reserves, a keyword or a type name (`list`,
   `readonly`, `match`, `bool`, `self` and the others; `enum` is allowed), or
   the name of a class, interface, enum or trait PHP has built in
-  (`Exception`, `Countable`), which PHP rejects. Mago's parser accepts a
+  (`Exception`, `Countable`), which PHP rejects; the check compares the
+  fully qualified name (P2R-151). Mago's parser accepts a
   keyword there, so the tool checks the name itself.
 - **P2R-112** An enum type `E` MUST map to the Rust enum `E` (P2R-20), passed
   and returned by value; `?E` maps to `Option<E>` (P2R-100) and `list<E>` to
@@ -530,7 +549,8 @@ Sections 3 to 9 apply to nullable values unless this section says otherwise.
   `i64`. `E::from()` with a value that no case has panics (P2R-60). These
   stop the conversion: `E::from()` on an enum without cases, which never
   returns, so rustc rejects the code after it (P2R-50); a named or spread
-  argument (P2R-07); and any other static call on an enum.
+  argument (P2R-07); and any other static call on an enum, other than a
+  call to a static method the enum declares (P2R-153).
 - **P2R-115** The output MUST hold, for each enum, only the methods the file
   uses, in one `impl E` block right after the enum, in the order `name`,
   `value`, `from`, `try_from`, `cases`, with one blank line between methods.
@@ -613,7 +633,8 @@ Sections 3 to 9 apply to nullable values unless this section says otherwise.
   `,`; and `};` closes the `match` at the level of the opening line, as
   rustfmt writes it. The opening line and each arm line follow the one-line
   rule of P2R-51: when rustfmt would split one of them, or an arm's pattern
-  or value, the conversion stops.
+  or value, the conversion stops, except for the pattern layout of
+  P2R-157.
 - **P2R-124** For P2R-34 and P2R-35, each arm MUST be its own path from the
   subject, and the paths join after the `match`.
 
@@ -632,9 +653,10 @@ Sections 3 to 9 apply to nullable values unless this section says otherwise.
   gets a `new` without parameters. PHP declares such a class before any
   statement runs, so it may come after the statements outside functions.
   These stop the conversion:
-  - `extends`, `implements`, `abstract`, a trait, a constant, a property that
-    is not promoted, a static member, a constructor parameter that is not
-    promoted, a constructor with a body, and a parameter default value;
+  - `extends`, `implements`, `abstract`, a trait, a property that is not
+    promoted, a static property, a constructor parameter that is not
+    promoted, a constructor with a body, and a parameter default value
+    (section 16 converts constants and static methods);
   - a promoted parameter without a type, with a property hook, by reference
     or variadic, which PHP rejects or makes fail and Mago does not report;
   - a method whose PHP name starts with `__`, other than the constructor,
@@ -675,14 +697,15 @@ Sections 3 to 9 apply to nullable values unless this section says otherwise.
   list.
 - **P2R-133** `new C(args)` MUST convert to `C::new(args)`, with the arguments
   converted as for a function whose parameters are the constructor's (P2R-24,
-  P2R-25). `C::new` takes `&str` for a string, `&[T]` for a list and `&D` for
+  P2R-25); `new self` and `new static` convert by P2R-154. `C::new` takes
+  `&str` for a string, `&[T]` for a list and `&D` for
   a class, and stores an owned copy of each: `name.to_string()`,
   `xs.to_vec()`, `d.clone()`, and `s.map(ToOwned::to_owned)` for an
   `Option<&str>` or `Option<&[T]>`; a Copy value is stored as it is. The
   store counts as a read of each parameter, so no constructor parameter gets
   the `_` of P2R-35. `new C` without parentheses converts as `new C()`. `new`
-  with any other class form (a variable, `static`, `self`, an anonymous
-  class) stops the conversion, and so does a call to `__construct` or to any
+  with any other class form (a variable, an anonymous class) stops the
+  conversion, and so does a call to `__construct` or to any
   other method whose name starts with `__`.
 - **P2R-134** A property read `$o->p` MUST convert to `o.p`, and `$this->p`
   inside a method to `self.p`. A property read has the Rust type of the
@@ -714,12 +737,12 @@ Sections 3 to 9 apply to nullable values unless this section says otherwise.
   method on every path, through any object of its class (`$this`, a
   parameter, a list element, a new object), stops the conversion, as a
   function that calls itself does (P2R-50): rustc matches the method, not
-  the object. These stop the conversion: a static method; `self::`,
-  `static::` and `parent::`; the native types `self`, `static` and `parent`
-  (a later slice; a docblock type that names `self`, such as `list<self>`,
-  is the class to Mago and converts); `$this` outside a method, a write to
-  `$this` and a parameter named `$this`, which PHP rejects and Mago does not
-  report; a by-reference parameter; and a call to a method the class does
+  the object. These stop the conversion: `parent::` and the native type
+  `parent` (section 16 converts static methods, `self::`, `static::` and
+  the types `self` and `static`; a docblock type that names `self`, such as
+  `list<self>`, is the class to Mago and converts); `$this` outside a
+  method, a write to `$this` and a parameter named `$this`, which PHP
+  rejects and Mago does not report; a by-reference parameter; and a call to a method the class does
   not declare (Mago reports it, P2R-11).
 - **P2R-136** These MUST stop the conversion: `===`, `!==`, `==`, `!=`, `<`,
   `>`, `<=`, `>=` and `<=>` with an object operand, because Rust has no
@@ -890,6 +913,116 @@ decided on 11 Oct 2026.
   `mut c: C`; a foreach value never is. A property write MUST be one
   statement on one line (P2R-51), and a declared property's default MUST
   follow the store layout of P2R-137 as `name: default`.
+
+## 16. Namespaces, static methods and constants (milestone 2, slice 6)
+
+Real libraries put every class in a namespace, call static methods and
+read class constants. This section converts those forms for one input
+file. Converting several files together is a later slice.
+
+- **P2R-150** A file MAY hold one `namespace` statement without braces
+  (`namespace Acme\Shop;`) as its first statement after the P2R-12
+  `declare`. The statements after it MUST convert as if they stood at the
+  top level (P2R-33 places them, P2R-110 orders them), and the namespace
+  gives no Rust: the output equals the output for the same file without
+  the namespace. A `use` statement at the top level (a class, function or
+  constant import, with or without `as`, grouped or not) MUST give no
+  Rust, and the names it imports resolve as PHP resolves them. These stop
+  the conversion: a namespace with braces; a second `namespace` statement;
+  a `namespace` statement in any other place, which PHP rejects and Mago's
+  parser accepts; and `__NAMESPACE__` (P2R-07).
+- **P2R-151** The tool MUST find every enum, class and function of the file
+  by its fully qualified name in lowercase (`acme\shop\size`), as Mago's
+  name resolution gives it; Mago's types hold the fully qualified name too
+  (`enum(Acme\Shop\Size)`). The Rust name stays the one that P2R-30,
+  P2R-111 and P2R-131 give the short name (`Size`, `helper`). The check of
+  P2R-111 and P2R-131 against the class-likes PHP has built in MUST use the
+  fully qualified name, so a class `Acme\Exception` converts. A call to a
+  function PHP has built in MUST convert the same way whether it is written
+  `strlen()`, `\strlen()`, or `strlen()` inside a namespace, where PHP falls
+  back to the global function. A function declared in a namespace with the
+  name of a built-in function stops the conversion (P2R-31), although PHP
+  accepts it there and calls it in place of the built-in.
+- **P2R-152** A method declared `static`, in a class of section 14 or 15 or
+  in an enum (P2R-155), MUST become `pub fn name(params) -> R` with no
+  `self` parameter. Its parameters, return type and body follow the rules
+  for functions (sections 3 to 5, 11 to 13 and 15): a parameter of a
+  changing type takes its form from P2R-143 as a function's parameter does.
+  A static method that calls itself on every path, through `self::`,
+  `static::` or its class name, stops the conversion (P2R-50). These stop
+  the conversion: `$this` in a static method (PHP throws an `Error`), and a
+  static property.
+- **P2R-153** `C::m(args)`, `self::m(args)` and `static::m(args)`, where `m`
+  is a static method, MUST convert to `C::m(args)` with the Rust name of
+  the class or enum `C` that declares `m`, also as a statement (P2R-43).
+  The arguments convert as for a function with the method's parameters
+  (P2R-24, P2R-25, P2R-102, P2R-144), and the call has the Rust type of the
+  declared return type (P2R-134). `self` and `static` name the class or
+  enum whose body holds the call; `static` names the same class as `self`,
+  because no class of the file can extend another (P2R-130). These stop
+  the conversion: `self::m()`, `static::m()` or `C::m()` where `m` is not
+  static (PHP throws an `Error`, or calls it on `$this` inside a method);
+  a static method called through an object (`$o->m()`, `$this->m()`);
+  `parent::`; a class given by a variable or an expression (`$c::m()`); a
+  first-class callable (`C::m(...)`); and `self::` or `static::` outside the
+  body of a class or enum.
+- **P2R-154** The type `self`, and the return type `static`, in a method's
+  signature or a promoted parameter, MUST mean the class or enum whose body
+  holds it: `self` in `Size` gives `Size`, and `?self` in an enum gives
+  `Option<Size>` (a nullable class type stops, P2R-132). Mago's type
+  `C&static`, which `new self` and `new static` have, widens to `C`
+  (P2R-21). `new self(args)` and `new static(args)` in the body of a class
+  MUST convert as `new C(args)` does (P2R-133). The type `parent` stops the
+  conversion.
+- **P2R-155** An enum MAY hold methods, static or not, and constants
+  (P2R-156) among its cases. A method that is not static MUST become
+  `pub fn name(self, params) -> R`: an enum value is Copy (P2R-112), so the
+  method takes `self` by value, and `$this` reads as `self`.
+  `$e->m(args)` MUST convert to `e.m(args)`, and `$this->m(args)` to
+  `self.m(args)`, as P2R-135 converts a method call, also as a statement.
+  These stop the conversion: a method whose Rust name is `name`, `value`,
+  `from`, `try_from` or `cases`, which the helpers of P2R-115 take (PHP
+  itself rejects `cases`, `from` and `tryFrom`, and Mago does not report
+  it); the method stops of P2R-130 and P2R-131 (a name that starts with
+  `__`, the Rust name `new` or `clone`, two methods with one Rust name); a
+  method that calls itself on every path (P2R-50, as in P2R-135); and a
+  method call on a value of Rust type `Option<E>` (P2R-106).
+- **P2R-156** A class of section 14 or 15 and an enum MAY declare
+  constants, one per `const` statement, with or without a visibility,
+  `final` and a type. The value MUST be an int or float literal, with or
+  without unary minus, a bool literal, a single- or double-quoted string
+  literal (P2R-49), or a case of an enum of the file (`self::Small`,
+  `Size::Small`). Each constant MUST become `pub const NAME: T = value;`,
+  where `T` is the Rust type of the declared type or, without one, of the
+  value: `i64`, `f64`, `bool`, `&str`, or the enum. An int literal for a
+  `float` constant gives a float literal, as PHP stores a float (P2R-25).
+  The Rust name is heck's `to_shouty_snake_case` of the PHP name, because
+  rustc warns on an associated constant that is not upper case, and it
+  follows the identifier rules of P2R-30. `C::NAME`, `self::NAME` and
+  `static::NAME` MUST convert to `C::NAME` with the Rust name of the
+  declaring class or enum, with the declared type, never Mago's literal
+  type (P2R-21). A string constant reads as a `&'static str`, which
+  follows P2R-24 and P2R-26 as a string parameter does (P2R-113). These
+  stop the conversion: a value of any other form (an expression, another
+  constant, a list, heredoc); a declared type other than `int`, `float`,
+  `bool`, `string` or an enum of the file; two constants in one `const`
+  statement; two constants of one class or enum with the same Rust name
+  (`X` and `x`); a constant and a method of one class or enum with the same
+  Rust name; a constant with the PHP name of a case of its enum (PHP
+  rejects it, and Mago does not report it); `C::class`; `$o::NAME`; and a
+  constant declared at the top level or with `define()` (P2R-07).
+- **P2R-157** The `impl` block of a class or enum MUST hold, in this order,
+  its constants in source order, one per line with no blank line between
+  them; then `new` for a class, or the helpers of P2R-115 for an enum; then
+  its methods, static or not, in source order. One blank line separates
+  the constants from what follows, and each function from the next. An
+  enum with no constants, no helpers in use and no methods has no `impl`
+  block, as before. In a `match` (section 13), an arm with two or more
+  conditions whose pattern ends after column 95 on one line (rustfmt keeps
+  five columns for ` => {`) MUST put one condition per line: the first at
+  the level of the arm, each further one at the same level after `| `, and
+  the last followed by ` => value,`. When one of these lines is wider than
+  100 columns, the conversion stops (P2R-123).
 
 ## Spec checklist
 

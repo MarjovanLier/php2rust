@@ -1,5 +1,5 @@
 //! `if`, `while`, `for`, `break` and `continue`, and the statements no path reaches
-//! (P2R-34, P2R-40, P2R-50, P2R-51).
+//! (P2R-34, P2R-40, P2R-50).
 //!
 //! Each statement adds its blocks and edges to the body's flow graph by the rules in
 //! flow.rs, writes a slot line before itself for the typed `let` lines of variables.rs,

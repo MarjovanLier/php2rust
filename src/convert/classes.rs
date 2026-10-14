@@ -18,10 +18,6 @@ use crate::names;
 use crate::printer::{self, RExpr};
 use crate::types::{self, RustType};
 
-/// rustfmt keeps a struct literal on one line when the text between its braces is at
-/// most this wide (P2R-137).
-const LITERAL_WIDTH: usize = 18;
-
 /// A class of the file (P2R-130, P2R-140).
 pub(super) struct ClassInfo {
     /// The lowercase PHP name, by which every use finds it (P2R-131).
@@ -1203,19 +1199,12 @@ impl Converter<'_> {
                     .map(|(f, default)| format!("{}: {default}", f.rust_name)),
             )
             .collect();
-        let inner = stores.join(", ");
-        if inner.is_empty() {
-            lines.push(format!("        {name} {{}}"));
-        } else if inner.len() <= LITERAL_WIDTH {
-            let line = format!("{name} {{ {inner} }}");
-            lines.push(emit(2, line));
+        let literal = if stores.is_empty() {
+            format!("{name} {{}}")
         } else {
-            lines.push(format!("        {name} {{"));
-            for store in stores {
-                lines.push(emit(3, format!("{store},")));
-            }
-            lines.push("        }".to_owned());
-        }
+            format!("{name} {{ {} }}", stores.join(", "))
+        };
+        lines.push(emit(2, literal));
         lines.push("    }".to_owned());
         for member in declaration.members.iter() {
             let ClassLikeMember::Method(method) = member else {

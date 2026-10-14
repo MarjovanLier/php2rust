@@ -8,8 +8,7 @@
 //!
 //! The list is read once, before the loop head. The head can exit at once, as for an
 //! empty list, and the key and the value are new variables written at the start of the
-//! body (flow.rs, variables.rs). rustfmt splits a `for` line only past 100 columns, even
-//! with `.zip()` in it, so the line is measured once its pattern is known (P2R-51).
+//! body (flow.rs, variables.rs).
 
 use mago_span::HasSpan;
 use mago_syntax::cst::*;

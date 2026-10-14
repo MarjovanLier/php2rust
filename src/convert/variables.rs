@@ -1049,7 +1049,6 @@ impl Converter<'_> {
         let (var, _) = self.write(list, list, None)?;
         let value = self.stored(source, value, &value_type, expression.span())?;
         let name = &self.variables.entries[var].rust_name;
-        // rustfmt lays out the arguments of a method call as those of a call (P2R-51).
         let push = RExpr::Call(format!("{name}.push"), vec![value]);
         Some(format!("{};", printer::expr(&push, false)))
     }

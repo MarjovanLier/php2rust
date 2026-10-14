@@ -1527,9 +1527,14 @@ impl Converter<'_> {
         {
             return Ok(known.clone());
         }
-        let php_name = &self.variables.entries[var].php_name;
-        self.site_type(node)
-            .and_then(|found| same_type(php_name, known, found))
+        let entry = &self.variables.entries[var];
+        let found = self.site_type(node);
+        // A parameter that the `ArrayAccess` template types is `mixed` to Mago, or
+        // `scalar` after `is_scalar()`; a read has the parameter's type (P2R-220).
+        if found.is_err() && entry.parameter.is_some() && !entry.copied {
+            return Ok(known.clone());
+        }
+        found.and_then(|found| same_type(&entry.php_name, known, found))
     }
 
     /// Gives a variable that holds `[]` the list type Mago finds at `node`, a later read or

@@ -167,7 +167,7 @@ impl Converter<'_> {
                 ClassLikeMember::EnumCase(case) => case,
                 // Section 16 converts methods and constants (P2R-155, P2R-156).
                 ClassLikeMember::Method(method) => {
-                    self.method_shape(method);
+                    self.method_shape(method, false);
                     // PHP rejects a constructor in an enum, and Mago does not report it.
                     if method.name.value.eq_ignore_ascii_case(b"__construct") {
                         self.refuse(

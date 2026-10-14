@@ -71,6 +71,12 @@ impl Converter<'_> {
             Expression::Call(Call::Function(call)) if self.calls_built_in(call, b"strlen") => {
                 self.strlen(call, expression)
             }
+            Expression::Call(Call::Function(call)) if self.calls_built_in(call, b"is_scalar") => {
+                self.type_test(call, expression, true)
+            }
+            Expression::Call(Call::Function(call)) if self.calls_built_in(call, b"gettype") => {
+                self.type_test(call, expression, false)
+            }
             Expression::Call(Call::Function(call)) if self.calls_built_in(call, b"count") => {
                 self.count(call, expression)
             }
@@ -285,6 +291,55 @@ impl Converter<'_> {
             return None;
         }
         Some((expr, RustType::I64))
+    }
+
+    /// `is_scalar($v)` (`scalar`) or `gettype($v)`, folded from the Rust type of the
+    /// variable or parameter `$v`; the call does not read it, because the result does not
+    /// depend on its value (P2R-222).
+    fn type_test(
+        &mut self,
+        call: &FunctionCall<'_>,
+        node: &Expression<'_>,
+        scalar: bool,
+    ) -> Option<(RExpr, RustType)> {
+        let arguments = self.built_in_arguments(
+            call,
+            node,
+            (1, 1),
+            "is_scalar() and gettype() take one argument (P2R-222)",
+        )?;
+        let ty = match lists::unparenthesized(arguments[0]) {
+            Expression::Variable(Variable::Direct(variable)) => self
+                .lookup(variable)
+                .and_then(|var| self.variables.ty(var).cloned()),
+            _ => None,
+        };
+        let Some(ty) = ty else {
+            self.record_refused(arguments[0]);
+            self.refuse(
+                arguments[0],
+                "is_scalar() and gettype() convert only on a variable or parameter whose type is known (P2R-222)",
+            );
+            return None;
+        };
+        let name = match &ty {
+            RustType::I64 => "integer",
+            RustType::F64 => "double",
+            RustType::Bool => "boolean",
+            RustType::String => "string",
+            RustType::Vec(_) | RustType::Shape(_) => "array",
+            RustType::Enum(_) | RustType::Class(_) => "object",
+            RustType::Option(_) => {
+                self.refuse(arguments[0], nulls::NULL_BUILT_IN);
+                return None;
+            }
+        };
+        if scalar {
+            let is = matches!(name, "integer" | "double" | "boolean" | "string");
+            Some((RExpr::Bool(is), RustType::Bool))
+        } else {
+            Some((RExpr::Str(name.to_owned()), RustType::String))
+        }
     }
 
     /// A call to a function declared in this file, with its return type (`None` for void).

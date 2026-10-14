@@ -138,7 +138,7 @@ converts:
   `||` and `!` on bools. `<<`, `>>`, `<<=` and `>>=` on ints, by a literal count from 0
   to 63.
 - the casts `(int)` of a string, which reads the number at its start as PHP does, and
-  `(string)` of an int.
+  `(string)` of an int or a string.
 - strings built with `.`, `.=` and interpolation of simple variables (`"Hi $name"`,
   `"Hi {$name}"`) from string and int values, and `echo` of string and int values.
 - lists: the literal `[a, b]`, the empty list `[]`, append (`$a[] = x`) and read
@@ -163,6 +163,10 @@ converts:
   blocks that test the class with PHP's class tree; `$e->getMessage()`,
   `$e->getCode()` and `throw $e` convert, and so do `default => throw ..` in a `match`
   and `$x ?? throw ..`. An uncaught exception in `fn main()` exits with code 255.
+- classes that implement `ArrayAccess` with a docblock `@implements ArrayAccess<K, V>`:
+  `offsetGet()` and the other three methods become plain methods whose `mixed`
+  parameters and return take K and V, and `#[Override]` on them is left out.
+  `is_scalar($v)` and `gettype($v)` give their answer from `$v`'s type.
 
 ## What stops the conversion
 
@@ -207,10 +211,15 @@ the others are findings of the Mago analyser. In short:
   names, a catch after `Exception` or `Throwable`, a catch variable the function
   already uses, a `match` whose every arm throws, a `throw` in a `?:` arm, and a call
   that throws in the default of `??`.
+- For `ArrayAccess`: a class without `@implements ArrayAccess<K, V>`, or with a K or V
+  that has no Rust type or is a float, another interface beside it, and `$o['k']` on
+  such an object (call `offsetGet()`). Any attribute other than one `#[Override]` on
+  those four methods.
 - A namespace with braces, a second namespace, or one after other code. Imports that PHP
   rejects (two imports with one name, an import named like a class or function of the
   file, `as self`) or warns about (`use Foo;` outside a namespace).
-- A class that is abstract, extends a class, implements an interface, uses a trait, or
+- A class that is abstract, extends a class, implements an interface other than
+  `ArrayAccess`, uses a trait, or
   holds a static property, a constructor with a body or a method whose name starts with
   `__`. A declared property without a type or a literal default, or that is static,
   readonly or hooked. A nullable type that holds objects whose class changes them

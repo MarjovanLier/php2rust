@@ -70,8 +70,11 @@ P2R-212, the catch-all, naming and nesting rules of P2R-214, the
 all-throw stop of P2R-215 and the exit rules of P2R-216. The final review
 of the build added the handler `break` stop, the plain block around the
 binding and the `getCode()` limits of P2R-214. Section 23 (`ArrayAccess`
-classes) was written on 14 Oct 2026; it changes P2R-07, P2R-72, P2R-130,
-P2R-166, P2R-171 and the roadmap of section 10.
+classes) was written on 14 Oct 2026; it changes P2R-07, P2R-22, P2R-48,
+P2R-72, P2R-130, P2R-135, P2R-166, P2R-171, P2R-180, P2R-201 and the
+roadmap of section 10. The spec reviewer added the float stop and the
+declared-type rule of P2R-220, the single `#[Override]` of P2R-221 and
+the `&str`, `$this` and `while` rules of P2R-222.
 
 php2rust converts typed PHP source into normal, readable Rust (`Vec`,
 `String`, `i64`), without AI. It reads PHP with the Mago crates, uses Mago's
@@ -168,7 +171,9 @@ requirement IDs.
   assignments and reads of the same variable, or from the declared parameter
   or return type it flows into (`return [];`, `f([])`); when no `T` is
   known, the conversion stops.
-- **P2R-22** Any other type (`mixed`, a union of different base types other
+- **P2R-22** Any other type (`mixed`, other than at the places of the
+  `ArrayAccess` methods that take K or V (P2R-220), a union of different
+  base types other
   than `T|null` (P2R-100), `array` without a list element type or a shape
   (P2R-200), the type
   `null` of a variable, parameter or return value (the literal `null`
@@ -302,7 +307,7 @@ requirement IDs.
 - **P2R-48** These built-in functions MUST convert: `count()` on a list
   (length as `i64`), `strlen()` (byte length as `i64`), `intdiv()` (integer
   division towards zero) and `fdiv()` (IEEE float division), and the
-  functions of sections 17 and 19. A call to any other function not
+  functions of sections 17, 19 and 23. A call to any other function not
   declared in the file stops the conversion.
 - **P2R-49** Literals MUST convert by their PHP value and type, never by
   copying their text:
@@ -759,7 +764,8 @@ Sections 3 to 9 apply to nullable values unless this section says otherwise.
   - a promoted parameter without a type, with a property hook, by reference
     or variadic, which PHP rejects or makes fail and Mago does not report;
   - a method whose PHP name starts with `__`, other than the constructor,
-    and an attribute on the class or a member (P2R-07);
+    and an attribute on the class or a member (P2R-07), other than the
+    `#[Override]` of P2R-221;
   - a class that is not `readonly` (section 15 converts it), and a class
     declared inside a function or another statement;
   - a property whose type does not convert (P2R-20, P2R-22; a nullable
@@ -843,7 +849,8 @@ Sections 3 to 9 apply to nullable values unless this section says otherwise.
   the types `self` and `static`; a docblock type that names `self`, such as
   `list<self>`, is the class to Mago and converts); `$this` outside a
   method, a write to `$this` and a parameter named `$this`, which PHP
-  rejects and Mago does not report; a by-reference parameter; a `final
+  rejects and Mago does not report; a by-reference parameter or return
+  (`function &offsetGet`); a `final
   private` method other than the constructor, for which PHP prints a
   warning and Mago reports nothing; two methods whose PHP names are equal
   ignoring letter case, which PHP rejects and Mago does not report; and a
@@ -1458,8 +1465,10 @@ converts those forms.
   P2R-49). String arms are lent as `&str` (a literal, a constant, a
   parameter, an enum's `name` or `value`, or `??` on a variable or parameter
   as it is; a `String` variable, or a property read, list element or shape
-  element (P2R-203) on a variable, parameter or `$this`, as `v.as_str()`),
-  so the `if` lends a
+  element (P2R-203) on a variable, parameter or `$this`, as `v.as_str()`;
+  a `(string)` cast of a string operand of one of these forms, lent as its
+  operand (P2R-166); and `gettype()`, a literal (P2R-222)), so the `if`
+  lends a
   `&str` as `??` does
   (P2R-105); where a `String` is needed (P2R-26) it is copied once:
   `(if c { "a" } else { "b" }).to_string()`. Each arm is its own path for
@@ -1650,7 +1659,8 @@ string}`), and keeps an object that may be missing in a nullable property
   loosely (`['a' => '1'] == ['a' => 1]` is true); `echo`, interpolation and
   string joining of a shape; a shape as a condition, as the operand of a
   cast, as the list of a `foreach` and as the argument of a built-in
-  function (`count`, `array_keys`); a write to an element (`$s['k'] = v`, a
+  function (`count`, `array_keys`) other than `is_scalar()` and `gettype()`
+  (P2R-222); a write to an element (`$s['k'] = v`, a
   compound assignment, `++`, `--`, `??=`), an append and `unset`; `isset`
   and `empty` of an element; and an assignment to a function's own shape
   parameter, as P2R-132 stops one for a class. Where a requirement of
@@ -1905,32 +1915,46 @@ interfaces and inheritance are later slices.
   `ArrayAccess` (resolved as PHP resolves it, P2R-151) MUST convert as
   sections 14 and 15 say when Mago gives the template arguments K and V of
   its `@implements ArrayAccess<K, V>` docblock, and each maps to one Rust
-  type (P2R-20). Its methods `offsetExists`, `offsetGet`, `offsetSet` and
-  `offsetUnset`, which PHP requires, convert as other methods do, with
-  these types where the declaration says `mixed`: the first parameter of
-  each takes K, the second parameter of `offsetSet` takes V, and the return
-  of `offsetGet` takes V (`&str` and `String` for `string`, P2R-24). A read
-  of such a parameter in the body has that Rust type, also where Mago types
-  it `mixed`. These stop the conversion: `ArrayAccess` without template
-  arguments, or with a K or V that has no Rust type (P2R-22); another
-  interface beside it, and any other interface (a later slice); a `mixed`
-  type anywhere else; and `$o[k]` on an object of such a class, its write,
-  `isset`, `unset` and `??` (a later slice).
+  type (P2R-20) other than `f64` or `Option<f64>`. Its methods
+  `offsetExists`, `offsetGet`, `offsetSet` and `offsetUnset`, which PHP
+  requires, convert as other methods do, with these types where the
+  declaration says `mixed`: the first parameter of each takes K, the second
+  parameter of `offsetSet` takes V, and the return of `offsetGet` takes V,
+  each in its parameter or owned form (`&str` and `String` for a string,
+  `&[T]` and `Vec<T>` for a list, `&C` and `C` for a class or shape;
+  P2R-24, P2R-132, P2R-201). A declared type other than `mixed` keeps its
+  own Rust type (P2R-20). A read of such a parameter in the body has its
+  Rust type, also where Mago types it `mixed`, or `scalar` after
+  `is_scalar()`, and P2R-24, P2R-34 and P2R-181 apply to it by that type.
+  A float K or V stops, because a `mixed` slot keeps an int that P2R-25
+  would turn into a float. These also stop the conversion: `ArrayAccess`
+  without template arguments, or with a K or V that has no Rust type
+  (P2R-22); another interface beside it, and any other interface (a later
+  slice); a `mixed` type anywhere else; and `$o[k]` on an object of such a
+  class, its write, `isset`, `unset` and `??` (a later slice; call
+  `offsetGet()` instead).
 - **P2R-221** The attribute `#[Override]` (any name PHP resolves to
-  `\Override`) MUST be left out on a method of a class that P2R-220
-  converts when the method implements a method of `ArrayAccess`: PHP checks
-  the attribute when it compiles the class, and the Rust output has nothing
-  left to check. Every other attribute stops the conversion (P2R-07).
-- **P2R-222** `is_scalar($v)` MUST convert to `true` when `$v` has Rust type
-  `i64`, `f64`, `bool` or `String`, and to `false` for a list, an enum, a
-  class or a shape. `gettype($v)` MUST convert to the string PHP gives:
-  `"integer"`, `"double"`, `"boolean"`, `"string"`, `"array"` for a list
-  or a shape, and `"object"` for an enum or a class. `$v` MUST be a
-  variable or parameter, whose type the tool knows; the call does not read
-  it, because the result does not depend on its value, so a parameter read
-  nowhere else gets the `_` of P2R-35. These stop the conversion: any other
-  argument (a call could have an effect), a value that may be null
-  (P2R-106), and a second argument.
+  `\Override`), written once and without arguments, MUST be left out on a
+  method of a class that P2R-220 converts when the method implements a
+  method of `ArrayAccess`: PHP checks the attribute when it compiles the
+  class, and the Rust output has nothing left to check. Every other
+  attribute stops the conversion (P2R-07), `#[Override]` on any other
+  method included, because no inheritance converts yet and PHP rejects an
+  `#[Override]` on a method that overrides nothing.
+- **P2R-222** `is_scalar($v)` MUST convert to `true` when `$v` has PHP type
+  int, float, bool or string (Rust `i64`, `f64`, `bool`, `String` or
+  `&str`), and to `false` for a list, an enum, a class or a shape.
+  `gettype($v)` MUST convert to the string literal PHP gives: `"integer"`,
+  `"double"`, `"boolean"`, `"string"`, `"array"` for a list or a shape, and
+  `"object"` for an enum or a class; it follows P2R-24 and P2R-26 as a
+  literal does. `$v` MUST be a variable, a parameter or `$this`, whose type
+  the tool knows; the call does not read it, because the result does not
+  depend on its value, so a parameter read nowhere else gets the `_` of
+  P2R-35, and a local read only there stops by P2R-35. A folded
+  `is_scalar()` is the literal `true` or `false` for every rule, so
+  `while (is_scalar($v))` becomes `loop` as `while (true)` does (P2R-40).
+  These stop the conversion: any other argument (a call could have an
+  effect), a value that may be null (P2R-106), and a second argument.
 
 ## Spec checklist
 

@@ -83,7 +83,7 @@ impl Converter<'_> {
     }
 
     /// `(int)` of a string, which reads the number at its start as PHP does, and
-    /// `(string)` of an int. Every other cast stops (P2R-07, P2R-166).
+    /// `(string)` of an int or a string. Every other cast stops (P2R-07, P2R-166).
     pub(super) fn cast(&mut self, unary: &UnaryPrefix<'_>) -> Option<(RExpr, RustType)> {
         let (int, problem) = match unary.operator {
             UnaryPrefixOperator::IntCast(..) => (true, None),
@@ -120,12 +120,17 @@ impl Converter<'_> {
                 RExpr::Method(Box::new(operand), "to_string"),
                 RustType::String,
             )),
+            // A string cast of a string is the string itself (P2R-166).
+            (false, RustType::String) => Some((operand, RustType::String)),
             (true, _) => {
                 self.refuse(unary, "(int) is supported only on a string (P2R-166)");
                 None
             }
             (false, _) => {
-                self.refuse(unary, "(string) is supported only on an int (P2R-166)");
+                self.refuse(
+                    unary,
+                    "(string) is supported only on an int or a string (P2R-166)",
+                );
                 None
             }
         }

@@ -1,0 +1,2 @@
+input.php:12:22: is_scalar() and gettype() convert only on a variable or parameter whose type is known (P2R-222)
+input.php:17:20: a value that may be null cannot go to a built-in function (P2R-106)

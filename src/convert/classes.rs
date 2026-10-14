@@ -4,6 +4,7 @@
 use std::collections::HashSet;
 
 use heck::ToSnakeCase;
+use mago_codex::ttype::union::TUnion;
 use mago_span::{HasSpan, Span};
 use mago_syntax::cst::*;
 
@@ -40,6 +41,9 @@ pub(super) struct ClassInfo {
     /// True for the methods and constants of an enum, which has no struct or `new`
     /// (P2R-155).
     pub(super) is_enum: bool,
+    /// The template arguments K and V of `ArrayAccess`, for a class that implements it
+    /// (P2R-220).
+    array_access: Option<(TUnion, TUnion)>,
     pub(super) constants: Vec<ConstantInfo>,
     /// The PHP names of the constants it declares that were refused, whose reads stop
     /// without a second problem.
@@ -58,6 +62,7 @@ impl ClassInfo {
             changing: false,
             methods: Vec::new(),
             is_enum,
+            array_access: None,
             constants: Vec::new(),
             refused_constants: Vec::new(),
         }
@@ -379,11 +384,11 @@ impl Converter<'_> {
             );
         }
         if let Some(implements) = &declaration.implements {
-            self.refuse(
-                implements,
-                "a class that implements an interface is not supported (P2R-130)",
-            );
+            self.implements(declaration, implements);
         }
+        let array_access = self
+            .class_index(declaration)
+            .is_some_and(|index| self.classes[index].array_access.is_some());
         let mut constructors = 0;
         for member in declaration.members.iter() {
             let method = match member {
@@ -405,7 +410,9 @@ impl Converter<'_> {
                     continue;
                 }
             };
-            self.method_shape(method);
+            let overrides =
+                array_access && ARRAY_ACCESS_METHODS.contains(&lowercase(method).as_slice());
+            self.method_shape(method, overrides);
             if is_constructor(method) {
                 constructors += 1;
                 if constructors > 1 {
@@ -419,10 +426,97 @@ impl Converter<'_> {
         }
     }
 
+    /// `implements ArrayAccess`, whose template arguments K and V the class records when
+    /// both have Rust types; any other interface stops (P2R-130, P2R-220).
+    fn implements(&mut self, declaration: &Class<'_>, implements: &Implements<'_>) {
+        let keys: Vec<Vec<u8>> = implements
+            .types
+            .iter()
+            .map(|identifier| self.identifier_key(identifier))
+            .collect();
+        if keys != [b"arrayaccess".to_vec()] {
+            self.refuse(
+                implements,
+                "a class that implements an interface other than ArrayAccess alone is not supported (P2R-220)",
+            );
+            return;
+        }
+        let Some(index) = self.class_index(declaration) else {
+            return;
+        };
+        let class = self.classes[index].key.clone();
+        let arguments = self.codebase.get_class_like(&class).and_then(|meta| {
+            let (_, found) = meta
+                .template_extended_parameters
+                .iter()
+                .find(|(interface, _)| interface.as_bytes() == b"arrayaccess")?;
+            let argument = |name: &[u8]| {
+                found
+                    .iter()
+                    .find(|(parameter, _)| parameter.as_bytes() == name)
+                    .map(|(_, ty)| ty.clone())
+            };
+            Some((argument(b"K")?, argument(b"V")?))
+        });
+        // A `mixed` slot keeps an int where P2R-25 would make a float of it, so a float K
+        // or V has no faithful form.
+        let rust = |union: &TUnion| {
+            types::rust_type(union, &self.type_names)
+                .ok()
+                .filter(|ty| *ty.inner() != RustType::F64)
+        };
+        let typed = arguments.filter(|(key, value)| {
+            !key.is_mixed() && !value.is_mixed() && rust(key).is_some() && rust(value).is_some()
+        });
+        match typed {
+            Some(arguments) => self.classes[index].array_access = Some(arguments),
+            None => self.refuse(
+                implements,
+                "ArrayAccess converts only with @implements ArrayAccess<K, V> whose K and V have Rust types other than float (P2R-220)",
+            ),
+        }
+    }
+
+    /// The type Mago declares for parameter `position` of `method`, or for its return when
+    /// `position` is `None`, with a `mixed` of an `ArrayAccess` method of the class at
+    /// `class` replaced by K or V (P2R-220).
+    fn templated<'u>(
+        &'u self,
+        class: usize,
+        method: &Method<'_>,
+        position: Option<usize>,
+        declared: Option<&'u TUnion>,
+    ) -> Option<&'u TUnion> {
+        let Some((key, value)) = &self.classes[class].array_access else {
+            return declared;
+        };
+        if !declared.is_some_and(TUnion::is_mixed) {
+            return declared;
+        }
+        let name = lowercase(method);
+        match (name.as_slice(), position) {
+            (b"offsetexists" | b"offsetget" | b"offsetset" | b"offsetunset", Some(0)) => Some(key),
+            (b"offsetset", Some(1)) | (b"offsetget", None) => Some(value),
+            _ => declared,
+        }
+    }
+
     /// Refuses a method form no class or enum of these slices may hold (P2R-130,
-    /// P2R-135, P2R-152, P2R-155).
-    pub(super) fn method_shape(&mut self, method: &Method<'_>) {
-        if let Some(attributes) = method.attribute_lists.first() {
+    /// P2R-135, P2R-152, P2R-155). `overrides` allows `#[Override]` on a method that
+    /// implements a method of `ArrayAccess` (P2R-221).
+    pub(super) fn method_shape(&mut self, method: &Method<'_>, overrides: bool) {
+        // PHP rejects a repeated `#[Override]`, and Mago does not report it.
+        let attributes: Vec<&Attribute<'_>> = method
+            .attribute_lists
+            .iter()
+            .flat_map(|list| list.attributes.iter())
+            .collect();
+        let only_override = attributes.len() == 1
+            && attributes[0].argument_list.is_none()
+            && self.identifier_key(&attributes[0].name) == b"override";
+        if let Some(attributes) = method.attribute_lists.first()
+            && !(overrides && only_override)
+        {
             self.refuse(attributes, "attributes are not supported (P2R-07)");
         }
         if let Some(modifier) = method
@@ -843,7 +937,10 @@ impl Converter<'_> {
                     continue;
                 }
                 let declared = meta.get_type_metadata().map(|t| &t.type_union);
-                match self.parameter(parameter, declared, taken, &parameters) {
+                let declared = self
+                    .templated(index, method, Some(parameters.len()), declared)
+                    .cloned();
+                match self.parameter(parameter, declared.as_ref(), taken, &parameters) {
                     Some(signature) => parameters.push(signature),
                     None => converted = false,
                 }
@@ -854,13 +951,15 @@ impl Converter<'_> {
                 self.refuse(hint, "the type parent is not supported (P2R-154)");
                 continue;
             }
+            let declared = metadata
+                .return_type_metadata
+                .as_ref()
+                .map(|t| &t.type_union);
+            let declared = self.templated(index, method, None, declared).cloned();
             let returns = self.return_type(
                 method.return_type_hint.as_ref(),
                 &method.name,
-                metadata
-                    .return_type_metadata
-                    .as_ref()
-                    .map(|t| &t.type_union),
+                declared.as_ref(),
             );
             if let (Some(returns), true) = (returns, converted) {
                 methods.push(MethodInfo {
@@ -1568,6 +1667,15 @@ fn is_readonly(declaration: &Class<'_>) -> bool {
 /// True for `__construct`, in any letter case.
 fn is_constructor(method: &Method<'_>) -> bool {
     method.name.value.eq_ignore_ascii_case(b"__construct")
+}
+
+/// The methods of `ArrayAccess`, lowercase (P2R-220).
+const ARRAY_ACCESS_METHODS: [&[u8]; 4] =
+    [b"offsetexists", b"offsetget", b"offsetset", b"offsetunset"];
+
+/// The lowercase name of `method`: PHP method names ignore letter case.
+fn lowercase(method: &Method<'_>) -> Vec<u8> {
+    method.name.value.to_ascii_lowercase()
 }
 
 /// The Rust type of a constant: a string constant is a `&'static str` (P2R-156).

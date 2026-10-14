@@ -1,0 +1,6 @@
+input.php:7:5: attributes are not supported (P2R-07)
+input.php:19:5: attributes are not supported (P2R-07)
+input.php:25:5: attributes are not supported (P2R-07)
+input.php:31:5: attributes are not supported (P2R-07)
+input.php:32:7: Attribute `Override` is not declared as repeatable and has already been used. (attribute-not-repeatable)
+input.php:37:5: attributes are not supported (P2R-07)

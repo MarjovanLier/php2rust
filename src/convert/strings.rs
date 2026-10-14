@@ -328,8 +328,7 @@ impl Converter<'_> {
         // Mago's type decides before the value converts, so the problem is the same
         // whether floats and bools convert or not.
         if let Some(Ok(ty)) = self
-            .artifacts
-            .get_expression_type(value)
+            .expression_type(value)
             .map(|union| types::rust_type(union, &self.type_names))
             && !matches!(ty, RustType::I64 | RustType::String)
         {

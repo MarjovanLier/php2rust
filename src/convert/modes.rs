@@ -969,8 +969,7 @@ impl<'ast, 'arena, 'x, 'c> Walker<'ast, 'arena, Locals<'x, 'c>> for LocalTypes {
         }
         let converter = locals.converter;
         let ty = converter
-            .artifacts
-            .get_expression_type(variable)
+            .expression_type(variable)
             .and_then(|union| types::rust_type(union, &converter.type_names).ok());
         if let Some(ty) = ty {
             locals.found.insert(variable.name.to_vec(), ty);

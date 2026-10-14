@@ -13,7 +13,8 @@ use mago_codex::metadata::CodebaseMetadata;
 use mago_codex::populator::populate_codebase;
 use mago_codex::reference::SymbolReferences;
 use mago_codex::scanner::scan_program;
-use mago_database::file::File;
+use mago_codex::ttype::union::TUnion;
+use mago_database::file::{File, FileId};
 use mago_names::ResolvedNames;
 use mago_names::resolver::NameResolver;
 use mago_php_version::PHPVersion;
@@ -147,7 +148,12 @@ pub fn convert(path: &str, source: Vec<u8>) -> Result<String, Failure> {
         .filter(|issue| reported(issue))
         .filter_map(mago_problem)
         .collect();
-    let mut converter = Converter::new(&codebase, &resolved, artifacts);
+    let analysed = Analysed {
+        file: file.id,
+        resolved: &resolved,
+        artifacts,
+    };
+    let mut converter = Converter::new(&codebase, vec![analysed]);
     converter.built_in_classes = built_in_classes;
     converter.built_in_functions = built_in_functions;
     let rust = converter.program(&flat);
@@ -345,12 +351,20 @@ enum Context<'t> {
     Function(Option<&'t RustType>),
 }
 
-struct Converter<'c> {
-    codebase: &'c CodebaseMetadata,
+/// What Mago found in one input file. Both maps are keyed by offsets only, so a lookup
+/// takes the file of its node (P2R-171).
+struct Analysed<'c> {
+    file: FileId,
     /// The fully qualified name of each name in the file, as PHP resolves it (P2R-151).
     resolved: &'c ResolvedNames<'c>,
     /// The type Mago found for each expression, keyed by its span (P2R-21).
     artifacts: AnalysisArtifacts,
+}
+
+struct Converter<'c> {
+    codebase: &'c CodebaseMetadata,
+    /// The input files as Mago analysed them.
+    files: Vec<Analysed<'c>>,
     problems: Vec<Problem>,
     /// Declared functions by lowercase PHP name, because PHP function names ignore case (P2R-32).
     functions: HashMap<Vec<u8>, Signature>,
@@ -385,15 +399,10 @@ struct Converter<'c> {
 }
 
 impl<'c> Converter<'c> {
-    fn new(
-        codebase: &'c CodebaseMetadata,
-        resolved: &'c ResolvedNames<'c>,
-        artifacts: AnalysisArtifacts,
-    ) -> Self {
+    fn new(codebase: &'c CodebaseMetadata, files: Vec<Analysed<'c>>) -> Self {
         Self {
             codebase,
-            resolved,
-            artifacts,
+            files,
             problems: Vec::new(),
             functions: HashMap::new(),
             enums: Vec::new(),
@@ -412,10 +421,28 @@ impl<'c> Converter<'c> {
         }
     }
 
+    /// What Mago found in the file of `node`.
+    fn analysed(&self, node: &impl HasSpan) -> &Analysed<'c> {
+        let file = node.span().file_id;
+        self.files
+            .iter()
+            .find(|analysed| analysed.file == file)
+            .expect("every node comes from an input file")
+    }
+
+    /// The type Mago found for the expression `node` (P2R-21).
+    fn expression_type(&self, node: &impl HasSpan) -> Option<&TUnion> {
+        self.analysed(node).artifacts.get_expression_type(node)
+    }
+
     /// The lowercase fully qualified name of the name at `node`, written `raw`: PHP class
     /// and function names ignore letter case (P2R-32, P2R-111, P2R-151).
     fn name_key(&self, node: &impl HasSpan, raw: &[u8]) -> Vec<u8> {
-        let full = self.resolved.resolve(&node.span().start).unwrap_or(raw);
+        let full = self
+            .analysed(node)
+            .resolved
+            .resolve(&node.span().start)
+            .unwrap_or(raw);
         full.strip_prefix(b"\\")
             .unwrap_or(full)
             .to_ascii_lowercase()
@@ -455,7 +482,10 @@ impl<'c> Converter<'c> {
         };
         let key = self.identifier_key(identifier);
         let falls_back = matches!(identifier, Identifier::Local(_))
-            && !self.resolved.is_imported(&identifier.span().start);
+            && !self
+                .analysed(identifier)
+                .resolved
+                .is_imported(&identifier.span().start);
         !self.functions.contains_key(&key)
             && (key == name || (falls_back && key.rsplit(|b| *b == b'\\').next() == Some(name)))
     }

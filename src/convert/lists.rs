@@ -5,7 +5,6 @@
 use std::borrow::Cow;
 use std::collections::{HashMap, HashSet};
 
-use mago_analyzer::artifacts::AnalysisArtifacts;
 use mago_codex::ttype::atomic::TAtomic;
 use mago_codex::ttype::union::TUnion;
 use mago_span::HasSpan;
@@ -71,9 +70,8 @@ pub(super) struct SiteTypes {
 /// What the reads and writes of one body say about the type of each variable name.
 struct Sites<'c> {
     /// Finds the function or static method a call runs, by its fully qualified name
-    /// (P2R-151, P2R-153).
+    /// (P2R-151, P2R-153), and the type Mago gives a node.
     converter: &'c Converter<'c>,
-    artifacts: &'c AnalysisArtifacts,
     enums: &'c types::TypeNames,
     /// The declared return type of a function body.
     returns: Option<&'c RustType>,
@@ -103,7 +101,7 @@ impl Sites<'_> {
 
     /// The type Mago gives `node`, unless it is only `[]`.
     fn type_at(&self, node: &impl HasSpan) -> Option<RustType> {
-        let union = self.artifacts.get_expression_type(node)?;
+        let union = self.converter.expression_type(node)?;
         types::rust_type(&without_empty(union), self.enums).ok()
     }
 
@@ -230,7 +228,6 @@ impl Converter<'_> {
     ) -> SiteTypes {
         let mut sites = Sites {
             converter: self,
-            artifacts: &self.artifacts,
             enums: &self.type_names,
             returns,
             found: HashMap::new(),
@@ -347,11 +344,7 @@ impl Converter<'_> {
     /// True when every element Mago finds in the list literal `array` is null, `element`
     /// or its inner type (P2R-102).
     fn elements_fit(&self, array: &Array<'_>, element: &RustType) -> bool {
-        let Some(elements) = self
-            .artifacts
-            .get_expression_type(array)
-            .and_then(types::list_elements)
-        else {
+        let Some(elements) = self.expression_type(array).and_then(types::list_elements) else {
             return false;
         };
         types::only_null(&elements)

@@ -1467,8 +1467,7 @@ impl Converter<'_> {
     /// The Rust type of the value Mago found at `node` (P2R-21, P2R-22).
     pub(super) fn site_type(&self, node: &impl HasSpan) -> Result<RustType, String> {
         let union = self
-            .artifacts
-            .get_expression_type(node)
+            .expression_type(node)
             .ok_or_else(|| "Mago found no type here (P2R-34)".to_owned())?;
         types::rust_type(&lists::without_empty(union), &self.type_names)
             .map_err(|name| format!("the type {name} has no Rust type (P2R-22)"))
@@ -1476,9 +1475,7 @@ impl Converter<'_> {
 
     /// True when Mago types `node` as `[]` only, which has no element type (P2R-21).
     pub(super) fn empty_list(&self, node: &impl HasSpan) -> bool {
-        self.artifacts
-            .get_expression_type(node)
-            .is_some_and(lists::only_empty)
+        self.expression_type(node).is_some_and(lists::only_empty)
     }
 
     /// The type of a later read or write of `var` at `node`, refused when it differs from
@@ -1496,16 +1493,13 @@ impl Converter<'_> {
         // `$e->name . $e->name` or `$xs[$i]->n + $xs[$i]->n` (the `$i` too), nor for `$this`
         // as the object of a property read; every write keeps the one type (P2R-34,
         // P2R-134).
-        if self.artifacts.get_expression_type(node).is_none() {
+        if self.expression_type(node).is_none() {
             return Ok(known.clone());
         }
         // A read or write of an `Option` variable has its type, also where Mago knows that
         // the value is null there, or that it is not (P2R-102, P2R-104).
         if let RustType::Option(inner) = known
-            && (self
-                .artifacts
-                .get_expression_type(node)
-                .is_some_and(types::only_null)
+            && (self.expression_type(node).is_some_and(types::only_null)
                 || self.site_type(node).is_ok_and(|found| found == **inner))
         {
             return Ok(known.clone());
@@ -1513,10 +1507,7 @@ impl Converter<'_> {
         // A list of `Option` after an append: every element fits (P2R-102).
         if let RustType::Vec(element) = known
             && matches!(**element, RustType::Option(_))
-            && let Some(elements) = self
-                .artifacts
-                .get_expression_type(node)
-                .and_then(types::list_elements)
+            && let Some(elements) = self.expression_type(node).and_then(types::list_elements)
             && (types::only_null(&elements)
                 || types::rust_type(&elements, &self.type_names)
                     .is_ok_and(|found| found == **element || found == *element.inner()))

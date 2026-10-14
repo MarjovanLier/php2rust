@@ -297,7 +297,7 @@ impl Converter<'_> {
             if !converted {
                 // The condition's problem is the one reported for this arm.
                 self.record_refused(result);
-            } else if self.artifacts.get_expression_type(result).is_none() {
+            } else if self.expression_type(result).is_none() {
                 self.record_refused(result);
                 self.refuse(
                     result,

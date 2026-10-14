@@ -46,7 +46,7 @@ use mago_span::{HasSpan, Span};
 use mago_syntax::cst::*;
 use mago_syntax::walker::Walker;
 
-use super::control::Loop;
+use super::control::{Loop, emit};
 use super::flow::{Flow, Var};
 use super::{
     Converter, Mode, ParameterSignature, classes, helpers, lists, nulls, numbers, strings,
@@ -94,15 +94,14 @@ enum Pending {
         /// The text after the pattern: ` in list {`.
         rest: String,
     },
-    /// The opening lines of an `if` or `elseif` whose condition checks variables against
-    /// null, laid out as rustfmt does (P2R-51, P2R-104).
+    /// The opening line of an `if` or `elseif` whose condition checks variables against
+    /// null (P2R-104).
     Condition {
         /// `if` or `} else if`.
         keyword: &'static str,
         parts: Vec<Part>,
         /// `{`, or `{}` for an empty body.
         open: &'static str,
-        span: Span,
     },
     /// The opening line of `if ($v === null)`: `let Some(v) = v else {` when its body
     /// always leaves and `binding` is read after it, otherwise `if v.is_none() {`
@@ -113,7 +112,6 @@ enum Pending {
         pattern: String,
         /// `v.is_none()`.
         test: String,
-        span: Span,
     },
     /// The closing line of a guard: `};` after a let-else, otherwise `}`.
     GuardEnd { guard: usize },
@@ -175,9 +173,8 @@ struct Binding {
 /// One operand of the top-level `&&` chain of a condition that checks a variable against
 /// null (P2R-104).
 pub(super) enum Part {
-    /// Any other operand, and whether rustfmt keeps it on the `if` line before a `let`: a
-    /// variable, `!` and a variable, `true` or `false` (P2R-51).
-    Plain { text: String, simple: bool },
+    /// Any other operand.
+    Plain(String),
     /// `$v !== null`: `pattern` (`let Some(v) = v`) when the binding is read, otherwise
     /// `test` (`v.is_some()`).
     Let {
@@ -340,13 +337,11 @@ impl Variables {
         depth: usize,
         pattern: String,
         test: String,
-        span: Span,
     ) -> (String, usize) {
         self.pending.push(Pending::Guard {
             binding: None,
             pattern,
             test,
-            span,
         });
         let index = self.pending.len() - 1;
         (format!("{}{MARK}{index}", "    ".repeat(depth)), index)
@@ -451,21 +446,19 @@ impl Variables {
         self.entries[var].mode = mode;
     }
 
-    /// The pending opening lines of an `if` or `elseif` that checks variables against
-    /// null, at `depth` (P2R-104).
+    /// The pending opening line of an `if` or `elseif` that checks variables against null,
+    /// at `depth` (P2R-104).
     pub(super) fn condition_line(
         &mut self,
         depth: usize,
         keyword: &'static str,
         parts: Vec<Part>,
         open: &'static str,
-        span: Span,
     ) -> String {
         self.pending.push(Pending::Condition {
             keyword,
             parts,
             open,
-            span,
         });
         format!("{}{MARK}{}", "    ".repeat(depth), self.pending.len() - 1)
     }
@@ -565,17 +558,9 @@ impl Converter<'_> {
         depth: usize,
         body: &mut Vec<String>,
     ) {
-        let Some(text) = self.change(expression) else {
-            return;
-        };
-        let line = if text.contains([MARK, COPY]) {
-            // A first write or a move is measured at the end of the body, once its `let`
-            // and its `.clone()` are known (P2R-51).
-            format!("{}{text}", "    ".repeat(depth))
-        } else {
-            self.emit(expression, depth, text)
-        };
-        body.push(line);
+        if let Some(text) = self.change(expression) {
+            body.push(emit(depth, text));
+        }
     }
 
     /// Writes the slot line where the typed `let` of a variable first written inside the
@@ -976,7 +961,7 @@ impl Converter<'_> {
         } else {
             (operator, expr)
         };
-        let rendered = self.render(expression, &expr, false)?;
+        let rendered = printer::expr(&expr, false);
         let name = &self.variables.entries[var].rust_name;
         if !declares {
             return Some(format!("{name} {operator} {rendered};"));
@@ -1066,7 +1051,7 @@ impl Converter<'_> {
         let name = &self.variables.entries[var].rust_name;
         // rustfmt lays out the arguments of a method call as those of a call (P2R-51).
         let push = RExpr::Call(format!("{name}.push"), vec![value]);
-        Some(format!("{};", self.render(expression, &push, false)?))
+        Some(format!("{};", printer::expr(&push, false)))
     }
 
     /// `$a[] = x` on a list of `Option`, whose elements are `element`: `null` is `None` and
@@ -1106,7 +1091,7 @@ impl Converter<'_> {
         let pushed = nulls::wrapped(stored, &value_type, &element);
         let name = &self.variables.entries[var].rust_name;
         let push = RExpr::Call(format!("{name}.push"), vec![pushed]);
-        Some(format!("{};", self.render(expression, &push, false)?))
+        Some(format!("{};", printer::expr(&push, false)))
     }
 
     /// Records a write of `variable` by `node` and checks the type Mago gives the write.
@@ -1641,8 +1626,7 @@ impl Converter<'_> {
         };
         let mut lines = Vec::with_capacity(body.len());
         for line in body.drain(..) {
-            // Each line, with the first write it declares, whose span a width problem uses.
-            let mut finished: Vec<(Option<Span>, String)> = Vec::new();
+            let mut finished: Vec<String> = Vec::new();
             let marked = line
                 .find(MARK)
                 .and_then(|at| Some((at, line[at + 1..].parse::<usize>().ok()?)));
@@ -1656,7 +1640,7 @@ impl Converter<'_> {
                             let name = &entry.rust_name;
                             let text =
                                 format!("{indent}{}{name}: {};", let_keyword(var), ty.owned());
-                            finished.push((entry.assigned, text));
+                            finished.push(text);
                         }
                     }
                 }
@@ -1687,7 +1671,7 @@ impl Converter<'_> {
                             let_keyword(*var)
                         ),
                     };
-                    finished.push((entry.assigned, text));
+                    finished.push(text);
                 }
                 Some((
                     at,
@@ -1701,7 +1685,7 @@ impl Converter<'_> {
                 )) => {
                     let pattern = for_pattern(&entries, &unused, *key, *value, *by_ref);
                     let text = format!("{}for {pattern}{rest}", &line[..at]);
-                    finished.push((entries[*value].assigned, text));
+                    finished.push(text);
                 }
                 Some((
                     at,
@@ -1710,15 +1694,10 @@ impl Converter<'_> {
                         keyword,
                         parts,
                         open,
-                        span,
                     },
-                )) => match condition_lines(&line[..at], keyword, parts, open, &unused) {
-                    Some(texts) => finished.extend(texts.into_iter().map(|text| (Some(*span), text))),
-                    None => self.refuse(
-                        span,
-                        "rustfmt lays out this check against null in a shape the tool does not write (P2R-51)",
-                    ),
-                },
+                )) => {
+                    finished.push(condition_line(&line[..at], keyword, parts, open, &unused));
+                }
                 Some((
                     at,
                     _,
@@ -1726,7 +1705,6 @@ impl Converter<'_> {
                         binding,
                         pattern,
                         test,
-                        span,
                     },
                 )) => {
                     let indent = &line[..at];
@@ -1735,26 +1713,21 @@ impl Converter<'_> {
                     } else {
                         format!("{indent}if {test} {{")
                     };
-                    finished.push((Some(*span), text));
+                    finished.push(text);
                 }
                 Some((at, _, Pending::GuardEnd { guard })) => {
                     let after_let = matches!(pending.get(*guard),
                         Some(Pending::Guard { binding, .. }) if let_else(*binding, &unused));
                     let end = if after_let { "};" } else { "}" };
-                    finished.push((None, format!("{}{end}", &line[..at])));
+                    finished.push(format!("{}{end}", &line[..at]));
                 }
-                None => finished.push((None, line)),
+                None => finished.push(line),
             }
-            for (declared, mut text) in finished {
+            for mut text in finished {
                 let mut copied = Vec::new();
-                let moved = resolve_copy(&mut text, &copies, &facts.read_again, &mut copied);
+                resolve_copy(&mut text, &copies, &facts.read_again, &mut copied);
                 for span in copied {
                     self.refuse(&span, NO_COPY);
-                }
-                if text.len() > printer::MAX_WIDTH
-                    && let Some(span) = declared.or(moved)
-                {
-                    self.refuse(&span, "this statement is too long for one line (P2R-51)");
                 }
                 lines.push(text);
             }
@@ -1870,28 +1843,28 @@ impl<'ast, 'arena> Walker<'ast, 'arena, Vec<&'ast DirectVariable<'arena>>> for W
 }
 
 /// Replaces each copy mark with `.clone()` when the variable it moves is read again, or
-/// with nothing, and gives the statement of the first mark (P2R-26). A list literal can
-/// move several variables on one line. A strict mark read again is pushed to `copied`
-/// instead, for its P2R-145 problem.
+/// with nothing (P2R-26). A list literal can move several variables on one line. A strict
+/// mark read again is pushed to `copied` instead, for its P2R-145 problem.
 fn resolve_copy(
     line: &mut String,
     copies: &[(Span, Span, bool)],
     read_again: &[(Var, Span)],
     copied: &mut Vec<Span>,
-) -> Option<Span> {
-    let mut first = None;
+) {
     while let Some(start) = line.find(COPY) {
-        let end = start + 1 + line[start + 1..].find(COPY)?;
-        let number = usize::from_str_radix(&line[start + 1..end], 16).ok()?;
-        let (read, statement, strict) = *copies.get(number)?;
+        let Some(end) = line[start + 1..].find(COPY).map(|end| start + 1 + end) else {
+            return;
+        };
+        let number = usize::from_str_radix(&line[start + 1..end], 16).ok();
+        let Some(&(read, _, strict)) = number.and_then(|number| copies.get(number)) else {
+            return;
+        };
         let again = read_again.iter().any(|&(_, span)| span == read);
         if again && strict {
             copied.push(read);
         }
         line.replace_range(start..=end, if again && !strict { ".clone()" } else { "" });
-        first.get_or_insert(statement);
     }
-    first
 }
 
 /// A variable that a refused expression reads or writes.
@@ -1988,54 +1961,25 @@ fn let_else(binding: Option<Var>, unused: &[bool]) -> bool {
     binding.is_some_and(|var| !unused[var])
 }
 
-/// The opening lines of an `if` or `elseif` that checks variables against null, at
+/// The opening line of an `if` or `elseif` that checks variables against null, at
 /// `indent`: each binding that is read becomes `let Some(v) = ..`, each other one
-/// `v.is_some()` (P2R-104). The layouts are rustfmt's (P2R-51); `None` for any other.
-fn condition_lines(
+/// `v.is_some()` (P2R-104).
+fn condition_line(
     indent: &str,
     keyword: &str,
     parts: &[Part],
     open: &str,
     unused: &[bool],
-) -> Option<Vec<String>> {
-    let operands: Vec<(bool, &str)> = parts
+) -> String {
+    let operands: Vec<&str> = parts
         .iter()
         .map(|part| match part {
-            Part::Plain { text, .. } => (false, text.as_str()),
-            Part::Let { binding, test, .. } if unused[*binding] => (false, test.as_str()),
-            Part::Let { pattern, .. } => (true, pattern.as_str()),
+            Part::Plain(text) => text.as_str(),
+            Part::Let { binding, test, .. } if unused[*binding] => test.as_str(),
+            Part::Let { pattern, .. } => pattern.as_str(),
         })
         .collect();
-    let lets = operands.iter().filter(|(is_let, _)| *is_let).count();
-    // No `let`, or the `let` alone: one line.
-    if lets == 0 || operands.len() == 1 {
-        let joined: Vec<&str> = operands.iter().map(|(_, text)| *text).collect();
-        return Some(vec![format!(
-            "{indent}{keyword} {} {open}",
-            joined.join(" && ")
-        )]);
-    }
-    // A variable, `!` and a variable, `true` or `false`, then the `let`: one line.
-    if let ([Part::Plain { simple: true, .. }, _], [(false, first), (true, second)]) =
-        (parts, operands.as_slice())
-    {
-        return Some(vec![format!(
-            "{indent}{keyword} {first} && {second} {open}"
-        )]);
-    }
-    // The `let` first: each further operand on its own line, then `{` alone.
-    if let [(true, first), rest @ ..] = operands.as_slice()
-        && open == "{"
-    {
-        let mut lines = vec![format!("{indent}{keyword} {first}")];
-        lines.extend(
-            rest.iter()
-                .map(|(_, text)| format!("{indent}    && {text}")),
-        );
-        lines.push(format!("{indent}{{"));
-        return Some(lines);
-    }
-    None
+    format!("{indent}{keyword} {} {open}", operands.join(" && "))
 }
 
 /// The pattern of a foreach: its value, or its key and value (P2R-41).

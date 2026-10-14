@@ -1,7 +1,6 @@
 //! Enums: declarations, cases, and the methods PHP code uses on them (P2R-110 to
 //! P2R-115).
 
-use mago_span::{HasSpan, Span};
 use mago_syntax::cst::*;
 
 use super::Converter;
@@ -34,7 +33,6 @@ pub(super) struct EnumInfo {
     /// The backing type: `i64`, `String`, or `None` for a pure enum.
     backing: Option<RustType>,
     cases: Vec<Case>,
-    span: Span,
     /// The methods the file uses, which the output holds (P2R-115).
     used: Used,
 }
@@ -227,7 +225,6 @@ impl Converter<'_> {
             rust_name,
             backing,
             cases,
-            span: declaration.span(),
             used: Used::default(),
         })
     }
@@ -517,15 +514,7 @@ impl Converter<'_> {
             lines.push("}".to_owned());
         }
         let helpers = helpers(info);
-        let (span, key) = (info.span, info.key.clone());
-        // rustfmt splits a longer line; the methods were measured as they converted.
-        if lines
-            .iter()
-            .chain(helpers.iter().flatten())
-            .any(|line| line.len() > printer::MAX_WIDTH)
-        {
-            self.refuse(&span, "this enum has a line too long for one line (P2R-51)");
-        }
+        let key = info.key.clone();
         let class = self.classes.iter().position(|c| c.key == key);
         let constants = class.map(|c| self.constant_lines(c)).unwrap_or_default();
         let functions: Vec<Vec<String>> = helpers.into_iter().chain(methods).collect();
@@ -608,53 +597,33 @@ fn helpers(info: &EnumInfo) -> Vec<Vec<String>> {
     }
     if info.used.cases {
         let paths: Vec<String> = info.cases.iter().map(path).collect();
-        let joined = paths.join(", ");
-        let mut lines = vec![format!("    pub fn cases() -> Vec<{name}> {{")];
-        if paths.is_empty() {
-            lines.push("        Vec::new()".to_owned());
-        } else if paths.len() == 1 || joined.len() <= printer::ARGS_WIDTH {
-            lines.push(format!("        vec![{joined}]"));
+        let value = if paths.is_empty() {
+            "Vec::new()".to_owned()
         } else {
-            // rustfmt's array width is 60: wider elements go one per line, but one element
-            // stays on the line.
-            lines.push("        vec![".to_owned());
-            lines.extend(paths.iter().map(|path| format!("            {path},")));
-            lines.push("        ]".to_owned());
-        }
-        lines.push("    }".to_owned());
-        methods.push(lines);
+            format!("vec![{}]", paths.join(", "))
+        };
+        methods.push(vec![
+            format!("    pub fn cases() -> Vec<{name}> {{"),
+            format!("        {value}"),
+            "    }".to_owned(),
+        ]);
     }
     methods
 }
 
 /// A method whose body is one `match` on `subject`, with one arm per pattern and value,
-/// then `last`. An arm wider than 100 columns takes rustfmt's block form (P2R-115).
+/// then `last` (P2R-115).
 fn matching(
     signature: &str,
     subject: &str,
-    arms: impl ExactSizeIterator<Item = (String, String)>,
+    arms: impl Iterator<Item = (String, String)>,
     last: Option<&str>,
 ) -> Vec<String> {
-    let mut lines = vec![format!("    pub fn {signature} {{")];
-    if arms.len() == 0 && last.is_none() {
-        // rustfmt writes a match without arms on one line.
-        lines.push(format!("        match {subject} {{}}"));
-        lines.push("    }".to_owned());
-        return lines;
-    }
-    lines.push(format!("        match {subject} {{"));
-    for (pattern, value) in arms {
-        let line = format!("            {pattern} => {value},");
-        // rustfmt counts columns, not bytes, so a non-ASCII line stays whole and the width
-        // check of enum_item refuses it.
-        if line.len() <= printer::MAX_WIDTH || !line.is_ascii() {
-            lines.push(line);
-        } else {
-            lines.push(format!("            {pattern} => {{"));
-            lines.push(format!("                {value}"));
-            lines.push("            }".to_owned());
-        }
-    }
+    let mut lines = vec![
+        format!("    pub fn {signature} {{"),
+        format!("        match {subject} {{"),
+    ];
+    lines.extend(arms.map(|(pattern, value)| format!("            {pattern} => {value},")));
     lines.extend(last.map(|last| format!("            {last}")));
     lines.push("        }".to_owned());
     lines.push("    }".to_owned());

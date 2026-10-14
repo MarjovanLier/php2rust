@@ -18,7 +18,7 @@ use super::control::{Loop, empty, indent, statements_of};
 use super::flow::Var;
 use super::lists::unparenthesized;
 use super::{Context, Converter, Mode, variables};
-use crate::printer::RExpr;
+use crate::printer::{self, RExpr};
 use crate::types::RustType;
 
 impl Converter<'_> {
@@ -139,7 +139,7 @@ impl Converter<'_> {
         );
         if field && self.loops.copied.contains(&statement.span()) {
             let copy = RExpr::Method(Box::new(expr), "clone");
-            let iter = self.render(list, &copy, true).unwrap_or_default();
+            let iter = printer::expr(&copy, true);
             return (Some((**element).clone()), false, iter);
         }
         let by_ref = (holder(list).is_some() || field) && element.is_copy();
@@ -151,7 +151,7 @@ impl Converter<'_> {
                 None => return (None, false, String::new()),
             }
         };
-        let iter = self.render(list, &expr, true).unwrap_or_default();
+        let iter = printer::expr(&expr, true);
         (Some((**element).clone()), by_ref, iter)
     }
 
@@ -181,7 +181,7 @@ impl Converter<'_> {
             (false, false) => RExpr::Ref(Box::new(expr)),
             (false, true) => RExpr::RefMut(Box::new(expr)),
         };
-        self.render(list, &iter, false)
+        Some(printer::expr(&iter, false))
     }
 
     /// Refuses a by-reference foreach, a key or value that is not a plain variable, and a

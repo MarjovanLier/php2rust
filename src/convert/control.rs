@@ -10,7 +10,7 @@ use mago_syntax::cst::*;
 
 use super::variables::changes_variable;
 use super::{Context, Converter};
-use crate::printer::RExpr;
+use crate::printer::{self, RExpr};
 
 /// The known value of every variable, by variable (P2R-50).
 type Values = Vec<Option<i64>>;
@@ -129,9 +129,7 @@ impl Converter<'_> {
                     if let Some((_, outer, inner)) = &guarded {
                         let test = self.condition_text(condition);
                         let pattern = self.pattern(*outer, inner);
-                        let (line, at) =
-                            self.variables
-                                .guard_line(depth, pattern, test, condition.span());
+                        let (line, at) = self.variables.guard_line(depth, pattern, test);
                         guard = Some(at);
                         line
                     } else {
@@ -142,7 +140,7 @@ impl Converter<'_> {
                             }
                             None => {
                                 let text = self.condition_text(condition);
-                                self.emit(*condition, depth, format!("{keyword} {text} {open}"))
+                                emit(depth, format!("{keyword} {text} {open}"))
                             }
                         }
                     }
@@ -280,7 +278,7 @@ impl Converter<'_> {
         let exit = frame.exit;
         let from = self.variables.flow.current();
         self.variables.flow.edge(from, exit);
-        let line = self.emit(statement, depth, "break;".to_owned());
+        let line = emit(depth, "break;".to_owned());
         body.push(line);
         self.leave("break");
     }
@@ -321,7 +319,7 @@ impl Converter<'_> {
             None => head,
         };
         self.variables.flow.edge(from, to);
-        let line = self.emit(statement, depth, "continue;".to_owned());
+        let line = emit(depth, "continue;".to_owned());
         body.push(line);
         self.leave("continue");
     }
@@ -347,8 +345,8 @@ impl Converter<'_> {
             .and_then(|condition| match self.condition(condition) {
                 Some(RExpr::Bool(true)) => None,
                 converted => {
-                    let text = converted.and_then(|expr| self.render(condition, &expr, false));
-                    Some((condition, text.unwrap_or_default()))
+                    let text = converted.map(|expr| printer::expr(&expr, false));
+                    Some(text.unwrap_or_default())
                 }
             });
         let exit = self.variables.flow.block();
@@ -361,7 +359,7 @@ impl Converter<'_> {
         let empty = empty(parts.statements) && parts.steps.is_empty();
         let open = if empty { "{}" } else { "{" };
         let opening = match &test {
-            Some((condition, text)) => self.emit(*condition, depth, format!("while {text} {open}")),
+            Some(text) => format!("{}while {text} {open}", indent(depth)),
             None => format!("{}loop {open}", indent(depth)),
         };
         body.push(opening);
@@ -442,7 +440,7 @@ impl Converter<'_> {
     /// then recorded.
     fn condition_text(&mut self, condition: &Expression<'_>) -> String {
         self.condition(condition)
-            .and_then(|expr| self.render(condition, &expr, false))
+            .map(|expr| printer::expr(&expr, false))
             .unwrap_or_default()
     }
 
@@ -535,6 +533,11 @@ pub(super) fn empty(statements: &[&Statement<'_>]) -> bool {
 
 pub(super) fn indent(depth: usize) -> String {
     "    ".repeat(depth)
+}
+
+/// One output line: `text` at `depth` levels of indentation.
+pub(super) fn emit(depth: usize, text: String) -> String {
+    format!("{}{text}", indent(depth))
 }
 
 /// A value stays known only when every path agrees on it (P2R-50).

@@ -1,8 +1,6 @@
-//! A directory as one crate: the module of each file, the duplicate stops, which items of
-//! other modules a module uses, and the order rustfmt gives its `pub mod` and `use` lines
-//! (P2R-172 to P2R-174).
+//! A directory as one crate: the module of each file, the duplicate stops, and which items
+//! of other modules a module uses (P2R-172 to P2R-174).
 
-use std::cmp::Ordering;
 use std::collections::{BTreeMap, BTreeSet};
 
 use mago_span::{HasSpan, Span};
@@ -246,7 +244,8 @@ impl Converter<'_> {
 
     /// The module files of the crate, each with its path in the crate: the P2R-52 line,
     /// the `pub mod` lines, the `use` lines, the items and the helpers, one blank line
-    /// before each group and each item (P2R-172, P2R-174).
+    /// before each group and each item and none inside a group, so rustfmt sorts the
+    /// `pub mod` and `use` lines (P2R-172, P2R-174).
     pub(super) fn crate_files(
         &self,
         items: Vec<Vec<Vec<String>>>,
@@ -255,13 +254,12 @@ impl Converter<'_> {
         let mut files = Vec::new();
         for (module, (path, items)) in self.module_paths.iter().zip(items).enumerate() {
             let mut groups: Vec<Vec<String>> = Vec::new();
-            let mut children: Vec<&String> = self
+            let children: Vec<&String> = self
                 .module_paths
                 .iter()
                 .filter(|other| other.len() == path.len() + 1 && other.starts_with(path))
                 .map(|other| &other[path.len()])
                 .collect();
-            children.sort_by(|a, b| module_order(a, b));
             if !children.is_empty() {
                 groups.push(children.iter().map(|c| format!("pub mod {c};")).collect());
             }
@@ -276,7 +274,7 @@ impl Converter<'_> {
                 .cloned()
                 .collect::<Vec<_>>()
                 .join("\n");
-            let mut uses: Vec<Vec<String>> = used_items(&text, &others)
+            let uses: Vec<Vec<String>> = used_items(&text, &others)
                 .into_iter()
                 .map(|name| {
                     let mut path = vec!["crate".to_owned()];
@@ -285,7 +283,6 @@ impl Converter<'_> {
                     path
                 })
                 .collect();
-            uses.sort_by(|a, b| use_order(a, b));
             if !uses.is_empty() {
                 groups.push(
                     uses.iter()
@@ -467,144 +464,9 @@ fn tokens(text: &str) -> Vec<&str> {
     tokens
 }
 
-/// The order of two `pub mod` names, as rustfmt sorts them: byte by byte without `r#`.
-pub(super) fn module_order(a: &str, b: &str) -> Ordering {
-    bare(a).cmp(bare(b))
-}
-
-/// The order of two `use` paths, segment by segment, as rustfmt sorts them: a path that
-/// ends first comes first, and segments compare by [`version_order`] (P2R-174).
-pub(super) fn use_order(a: &[String], b: &[String]) -> Ordering {
-    for (x, y) in a.iter().zip(b) {
-        let order = version_order(bare(x), bare(y));
-        if order != Ordering::Equal {
-            return order;
-        }
-    }
-    a.len().cmp(&b.len())
-}
-
-fn bare(name: &str) -> &str {
-    name.strip_prefix("r#").unwrap_or(name)
-}
-
-/// A run of one kind of character in a name, for [`version_order`].
-#[derive(PartialEq, Eq)]
-enum Chunk<'a> {
-    Underscore,
-    /// A run of digits: its value without leading zeros, and the number of zeros.
-    Number(&'a str, usize),
-    Text(&'a str),
-}
-
-fn chunks(name: &str) -> Vec<Chunk<'_>> {
-    let bytes = name.as_bytes();
-    let mut chunks = Vec::new();
-    let mut at = 0;
-    while at < bytes.len() {
-        let start = at;
-        if bytes[at] == b'_' {
-            at += 1;
-            chunks.push(Chunk::Underscore);
-        } else if bytes[at].is_ascii_digit() {
-            while at < bytes.len() && bytes[at].is_ascii_digit() {
-                at += 1;
-            }
-            let digits = &name[start..at];
-            let value = digits.trim_start_matches('0');
-            chunks.push(Chunk::Number(value, digits.len() - value.len()));
-        } else {
-            while at < bytes.len() && bytes[at] != b'_' && !bytes[at].is_ascii_digit() {
-                at += 1;
-            }
-            chunks.push(Chunk::Text(&name[start..at]));
-        }
-    }
-    chunks
-}
-
-/// rustfmt's version sorting of two names: `_` before every other character, text by its
-/// bytes (upper case before lower case), and a run of digits by its number; where two
-/// names differ only in leading zeros, the one with more zeros comes first.
-fn version_order(a: &str, b: &str) -> Ordering {
-    let (a, b) = (chunks(a), chunks(b));
-    let mut zeros = Ordering::Equal;
-    for (x, y) in a.iter().zip(&b) {
-        let order = match (x, y) {
-            (Chunk::Underscore, Chunk::Underscore) => Ordering::Equal,
-            (Chunk::Underscore, _) => Ordering::Less,
-            (_, Chunk::Underscore) => Ordering::Greater,
-            (Chunk::Number(x, x_zeros), Chunk::Number(y, y_zeros)) => {
-                let order = x.len().cmp(&y.len()).then_with(|| x.cmp(y));
-                if order == Ordering::Equal && zeros == Ordering::Equal {
-                    zeros = y_zeros.cmp(x_zeros);
-                }
-                order
-            }
-            // Digits sort before letters, as their bytes do.
-            (Chunk::Number(..), Chunk::Text(_)) => Ordering::Less,
-            (Chunk::Text(_), Chunk::Number(..)) => Ordering::Greater,
-            (Chunk::Text(x), Chunk::Text(y)) => x.cmp(y),
-        };
-        if order != Ordering::Equal {
-            return order;
-        }
-    }
-    a.len().cmp(&b.len()).then(zeros)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    /// The order rustfmt 1.10 gave these `use` lines (crate:: left out).
-    #[test]
-    fn use_lines_sort_as_rustfmt_sorts_them() {
-        let expected = [
-            "Root",
-            "a::Dto02",
-            "a::Dto2",
-            "a::Dto2X",
-            "a::Dto2a",
-            "a::Dto002b",
-            "a::Dto2x",
-            "a::Dto10",
-            "a::K_b",
-            "a::KB",
-            "a::Kb",
-            "a::Z",
-            "a::a_1",
-            "a::a_B",
-            "a::a_b",
-            "a::a1",
-            "a::aZ",
-            "a::ab",
-            "a::b::Y",
-            "a_b::X",
-            "a1::X",
-            "ab::X",
-            "en::X",
-            "r#enum::X",
-            "enum_x::X",
-            "root_fn",
-            "r#type::Y",
-        ];
-        let path = |text: &str| text.split("::").map(str::to_owned).collect::<Vec<_>>();
-        let mut paths: Vec<Vec<String>> = expected.iter().rev().map(|p| path(p)).collect();
-        paths.sort_by(|a, b| use_order(a, b));
-        let sorted: Vec<String> = paths.iter().map(|p| p.join("::")).collect();
-        assert_eq!(sorted, expected);
-    }
-
-    #[test]
-    fn module_lines_sort_by_bytes_without_raw_prefix() {
-        let mut names = vec!["r#enum", "ab", "a_1", "a2", "a10", "a1", "enum_x", "en"];
-        names.sort_by(|a, b| module_order(a, b));
-        assert_eq!(
-            names,
-            ["a1", "a10", "a2", "a_1", "ab", "en", "r#enum", "enum_x"]
-        );
-    }
 
     fn items() -> BTreeMap<String, ItemKind> {
         BTreeMap::from([

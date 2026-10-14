@@ -1,7 +1,5 @@
-//! Rust text: string literals, format strings and line width (P2R-45, P2R-49, P2R-51).
-
-/// rustfmt's `max_width`: a longer line is split, so php2rust refuses it (P2R-51).
-pub const MAX_WIDTH: usize = 100;
+//! Rust text: string literals, format strings and expressions on one line, which
+//! rustfmt then lays out (P2R-45, P2R-49, P2R-190).
 
 /// A Rust string literal holding `text`.
 pub fn quote(text: &str) -> String {
@@ -64,25 +62,9 @@ pub fn octal_overflow(raw: &[u8]) -> bool {
     false
 }
 
-/// rustfmt's `fn_call_width`: wider call arguments go one per line, so php2rust refuses
-/// them (P2R-51).
-pub const ARGS_WIDTH: usize = 60;
-
-/// rustfmt's `single_line_if_else_max_width`, which counts bytes: a wider `if` goes over
-/// several lines (P2R-180).
-pub const IF_WIDTH: usize = 50;
-
-/// rustfmt's `chain_width`: a chain of two or more method calls or field reads that is
-/// wider goes one element per line, so php2rust refuses it (P2R-51). One element on its own
-/// only has to fit the line.
-const CHAIN_WIDTH: usize = 60;
-
 /// Stands after a string or list variable that a statement moves, for its `.clone()` when
 /// the variable is read again (P2R-26). The mark is this character, six hex digits and
-/// this character: as wide as `.clone()`, so the widths checked here with the mark in
-/// place are never smaller than the final ones, and a chain counts it as the `.clone()`
-/// it may become. A line that holds a mark is measured at the end of the body, once the
-/// mark is resolved.
+/// this character, resolved at the end of the body.
 pub const COPY: char = '\u{2}';
 
 /// A Rust expression before layout.
@@ -215,10 +197,6 @@ impl BinOp {
     }
 }
 
-/// The expression does not fit on one line the way rustfmt lays it out (P2R-51).
-#[derive(Debug)]
-pub struct TooWide;
-
 /// `as` binds tighter than every binary operator, so `(i + 1) as usize` needs its
 /// parentheses and `n * a.len() as i64` needs none.
 const CAST: u8 = 7;
@@ -227,44 +205,39 @@ const UNARY: u8 = 8;
 /// A method call or an index binds tighter than everything else.
 const POSTFIX: u8 = 9;
 
-/// Lays out `expr` on one line with only the parentheses Rust needs (P2R-43). With
-/// `anchor`, an expression made only of literals gets `_i64` on its first literal, so Rust
-/// never falls back to `i32` (P2R-49).
-pub fn expr(expr: &RExpr, anchor: bool) -> Result<String, TooWide> {
+/// Writes `expr` on one line with only the parentheses Rust needs (P2R-43); rustfmt lays
+/// it out (P2R-190). With `anchor`, an expression made only of literals gets `_i64` on its
+/// first literal, so Rust never falls back to `i32` (P2R-49).
+pub fn expr(expr: &RExpr, anchor: bool) -> String {
     render(expr, anchor, 0)
 }
 
-fn render(expr: &RExpr, anchor: bool, min_precedence: u8) -> Result<String, TooWide> {
-    Ok(match expr {
+fn render(expr: &RExpr, anchor: bool, min_precedence: u8) -> String {
+    match expr {
         RExpr::Int(value) if anchor => format!("{value}_i64"),
         RExpr::Int(value) => value.to_string(),
         RExpr::Str(text) => quote(text),
         RExpr::Var(name) => name.clone(),
-        RExpr::Call(name, arguments) => format!("{name}({})", call_arguments(arguments)?),
-        RExpr::Field(object, field) => {
-            chained(expr, format!("{}.{field}", render(object, false, POSTFIX)?))?
-        }
-        RExpr::MethodCall(object, method, arguments) => chained(
-            expr,
-            format!(
-                "{}.{method}({})",
-                render(object, false, POSTFIX)?,
-                call_arguments(arguments)?
-            ),
-        )?,
+        RExpr::Call(name, arguments) => format!("{name}({})", call_arguments(arguments)),
+        RExpr::Field(object, field) => format!("{}.{field}", render(object, false, POSTFIX)),
+        RExpr::MethodCall(object, method, arguments) => format!(
+            "{}.{method}({})",
+            render(object, false, POSTFIX),
+            call_arguments(arguments)
+        ),
         // A method call binds tighter than a minus: `(-5_i64).to_string()` (P2R-166).
-        RExpr::Neg(_) if UNARY < min_precedence => format!("({})", render(expr, anchor, 0)?),
+        RExpr::Neg(_) if UNARY < min_precedence => format!("({})", render(expr, anchor, 0)),
         // `--x` trips rustc's double_negations lint, so the inner minus gets parentheses.
         RExpr::Neg(inner) if matches!(**inner, RExpr::Neg(_)) => {
-            format!("-({})", render(inner, anchor, 0)?)
+            format!("-({})", render(inner, anchor, 0))
         }
-        RExpr::Neg(inner) => format!("-{}", render(inner, anchor, UNARY)?),
+        RExpr::Neg(inner) => format!("-{}", render(inner, anchor, UNARY)),
         // Rust comparisons do not chain, so an operand that is a comparison gets
         // parentheses. Both operands share one type, which literals alone would make i32.
         RExpr::Binary(left, op, right) if op.compares() => {
             let precedence = op.precedence();
             let anchor = !anchored(left) && !anchored(right);
-            let mut left = render(left, anchor, precedence + 1)?;
+            let mut left = render(left, anchor, precedence + 1);
             // rustc reads `as i64 <` as the start of generic arguments, so a left operand
             // that ends in a cast gets parentheses.
             if *op == BinOp::Lt && (left.ends_with(" as i64") || left.ends_with(" as f64")) {
@@ -273,7 +246,7 @@ fn render(expr: &RExpr, anchor: bool, min_precedence: u8) -> Result<String, TooW
             let text = format!(
                 "{left} {} {}",
                 op.text(),
-                render(right, false, precedence + 1)?
+                render(right, false, precedence + 1)
             );
             if precedence < min_precedence {
                 format!("({text})")
@@ -283,12 +256,12 @@ fn render(expr: &RExpr, anchor: bool, min_precedence: u8) -> Result<String, TooW
         }
         RExpr::Binary(left, op, right) => {
             let precedence = op.precedence();
-            let mut left = render(left, anchor && !anchored(expr), precedence)?;
+            let mut left = render(left, anchor && !anchored(expr), precedence);
             // As for `<`, rustc reads `as i64 <<` as the start of generic arguments.
             if *op == BinOp::Shl && (left.ends_with(" as i64") || left.ends_with(" as f64")) {
                 left = format!("({left})");
             }
-            let right = render(right, false, precedence + 1)?;
+            let right = render(right, false, precedence + 1);
             let text = format!("{left} {} {right}", op.text());
             if precedence < min_precedence {
                 format!("({text})")
@@ -297,26 +270,24 @@ fn render(expr: &RExpr, anchor: bool, min_precedence: u8) -> Result<String, TooW
             }
         }
         RExpr::Known(name, _) => name.clone(),
-        RExpr::Format(text, values) => format!("format!({})", format_arguments(text, values)?),
+        RExpr::Format(text, values) => format!("format!({})", format_arguments(text, values)),
         // The parameter type fixes the element type, so a list literal needs no `vec!`.
         RExpr::Ref(inner) => match &**inner {
-            RExpr::List(items) => format!("&[{}]", elements(items, false)?),
-            other => format!("&{}", render(other, false, UNARY)?),
+            RExpr::List(items) => format!("&[{}]", elements(items, false)),
+            other => format!("&{}", render(other, false, UNARY)),
         },
         RExpr::RefMut(inner) => match &**inner {
             // The `[]` default of a `&mut [C]` parameter (P2R-168).
-            RExpr::List(items) => format!("&mut [{}]", elements(items, false)?),
-            other => format!("&mut {}", render(other, false, UNARY)?),
+            RExpr::List(items) => format!("&mut [{}]", elements(items, false)),
+            other => format!("&mut {}", render(other, false, UNARY)),
         },
         // The receiver fixes no type, so one made only of literals gets `_i64` (P2R-166).
-        RExpr::Method(inner, method) => chained(
-            expr,
-            format!("{}.{method}()", render(inner, !anchored(inner), POSTFIX)?),
-        )?,
+        RExpr::Method(inner, method) => {
+            format!("{}.{method}()", render(inner, !anchored(inner), POSTFIX))
+        }
         RExpr::Len(inner) => {
             // A length fixes no element type, so a list of literals gets `_i64` (P2R-49).
-            let call = chained(expr, format!("{}.len()", render(inner, true, POSTFIX)?))?;
-            let text = format!("{call} as i64");
+            let text = format!("{}.len() as i64", render(inner, true, POSTFIX));
             if CAST < min_precedence {
                 format!("({text})")
             } else {
@@ -324,15 +295,15 @@ fn render(expr: &RExpr, anchor: bool, min_precedence: u8) -> Result<String, TooW
             }
         }
         RExpr::Bool(value) => value.to_string(),
-        RExpr::Not(inner) => format!("!{}", render(inner, false, UNARY)?),
+        RExpr::Not(inner) => format!("!{}", render(inner, false, UNARY)),
         RExpr::List(items) if items.is_empty() => "Vec::new()".to_owned(),
-        RExpr::List(items) => format!("vec![{}]", elements(items, anchor && !anchored(expr))?),
+        RExpr::List(items) => format!("vec![{}]", elements(items, anchor && !anchored(expr))),
         RExpr::Index(list, index) => {
-            let list = render(list, anchor, POSTFIX)?;
+            let list = render(list, anchor, POSTFIX);
             match **index {
                 // Rust reads a literal index as `usize` without a conversion.
                 RExpr::Int(value) if value >= 0 => format!("{list}[{value}]"),
-                _ => format!("{list}[{} as usize]", render(index, true, CAST)?),
+                _ => format!("{list}[{} as usize]", render(index, true, CAST)),
             }
         }
         // Rust has no literal for infinity. Debug gives the shortest text that reads back
@@ -341,7 +312,7 @@ fn render(expr: &RExpr, anchor: bool, min_precedence: u8) -> Result<String, TooW
         RExpr::Float(value) => format!("{value:?}"),
         // The int inside is anchored, or literals alone would be i32.
         RExpr::ToFloat(inner) => {
-            let text = format!("{} as f64", render(inner, true, CAST)?);
+            let text = format!("{} as f64", render(inner, true, CAST));
             if CAST < min_precedence {
                 format!("({text})")
             } else {
@@ -349,7 +320,7 @@ fn render(expr: &RExpr, anchor: bool, min_precedence: u8) -> Result<String, TooW
             }
         }
         RExpr::ToUsize(inner) => {
-            let text = format!("{} as usize", render(inner, true, CAST)?);
+            let text = format!("{} as usize", render(inner, true, CAST));
             if CAST < min_precedence {
                 format!("({text})")
             } else {
@@ -357,14 +328,7 @@ fn render(expr: &RExpr, anchor: bool, min_precedence: u8) -> Result<String, TooW
             }
         }
         RExpr::None => "None".to_owned(),
-        // rustfmt lays out `Some(..)` as a call.
-        RExpr::Some(inner) => {
-            let text = render(inner, anchor, 0)?;
-            if text.len() > ARGS_WIDTH && !matches!(**inner, RExpr::Str(_)) {
-                return Err(TooWide);
-            }
-            format!("Some({text})")
-        }
+        RExpr::Some(inner) => format!("Some({})", render(inner, anchor, 0)),
         RExpr::Path(path) => path.clone(),
         // The elements fix no type, so a needle made only of literals makes the first one
         // `_i64` (P2R-49).
@@ -372,121 +336,68 @@ fn render(expr: &RExpr, anchor: bool, min_precedence: u8) -> Result<String, TooW
             let anchor = matches!(&**needle, RExpr::Ref(inner) if !anchored(inner));
             format!(
                 "[{}].contains({})",
-                elements(items, anchor)?,
-                call_arguments(std::slice::from_ref(needle))?
+                elements(items, anchor),
+                render(needle, false, 0)
             )
         }
-        RExpr::MapOwned(inner) => chained(
-            expr,
-            format!("{}.map(ToOwned::to_owned)", render(inner, false, POSTFIX)?),
-        )?,
+        RExpr::MapOwned(inner) => {
+            format!("{}.map(ToOwned::to_owned)", render(inner, false, POSTFIX))
+        }
         RExpr::Unwrap {
             option,
             default,
             lazy,
         } => {
-            let value = render(default, false, 0)?;
+            let value = render(default, false, 0);
             let (method, argument) = if *lazy {
                 ("unwrap_or_else", format!("|| {value}"))
             } else {
                 ("unwrap_or", value)
             };
-            // rustfmt keeps a single string literal argument on the line however wide it is.
-            if argument.len() > ARGS_WIDTH && !matches!(**default, RExpr::Str(_)) {
-                return Err(TooWide);
-            }
-            let option = render(option, false, POSTFIX)?;
-            chained(expr, format!("{option}.{method}({argument})"))?
+            format!("{}.{method}({argument})", render(option, false, POSTFIX))
         }
         RExpr::If(condition, then, otherwise) => {
             let text = format!(
                 "if {} {{ {} }} else {{ {} }}",
-                render(condition, false, 0)?,
-                render(then, anchor && !anchored(expr), 0)?,
-                render(otherwise, false, 0)?
+                render(condition, false, 0),
+                render(then, anchor && !anchored(expr), 0),
+                render(otherwise, false, 0)
             );
-            // The converter refuses a wider `if` with its own message; only the `_i64`
-            // that the place it stands in adds can make it wider here.
-            if text.len() > IF_WIDTH {
-                return Err(TooWide);
-            }
             if min_precedence > 0 {
                 format!("({text})")
             } else {
                 text
             }
         }
-    })
-}
-
-/// The arguments of a call or a method call on one line, refused when rustfmt would put
-/// them one per line (P2R-51).
-fn call_arguments(arguments: &[RExpr]) -> Result<String, TooWide> {
-    let parts = arguments
-        .iter()
-        .map(|a| render(a, false, 0))
-        .collect::<Result<Vec<_>, _>>()?;
-    let joined = parts.join(", ");
-    // rustfmt keeps a single string literal argument on the line however wide it is.
-    let single_literal = matches!(arguments, [RExpr::Str(_)]);
-    if joined.len() > ARGS_WIDTH && !single_literal {
-        return Err(TooWide);
-    }
-    Ok(joined)
-}
-
-/// The elements of the chain at the end of `expr`, counted from the outside in: method
-/// calls and field reads. An index ends the chain, as it does for rustfmt (P2R-134).
-fn calls(expr: &RExpr) -> usize {
-    match expr {
-        RExpr::Method(inner, _) | RExpr::Len(inner) | RExpr::MapOwned(inner) => 1 + calls(inner),
-        RExpr::Unwrap { option, .. } => 1 + calls(option),
-        RExpr::Field(object, _) | RExpr::MethodCall(object, ..) => 1 + calls(object),
-        // shortcut: a mark that resolves to nothing still counts, so a chain of 61 to 68
-        // columns may stop where rustfmt would keep it; resolve chains at the end of the
-        // body to lift this.
-        RExpr::Var(name) => usize::from(name.contains(COPY)),
-        _ => 0,
     }
 }
 
-/// `text`, the layout of the chain `expr`, refused when rustfmt would split it (P2R-51).
-fn chained(expr: &RExpr, text: String) -> Result<String, TooWide> {
-    if calls(expr) >= 2 && text.len() > CHAIN_WIDTH {
-        return Err(TooWide);
-    }
-    Ok(text)
+/// The arguments of a call or a method call.
+fn call_arguments(arguments: &[RExpr]) -> String {
+    let parts: Vec<String> = arguments.iter().map(|a| render(a, false, 0)).collect();
+    parts.join(", ")
 }
 
-/// The arguments of `format!` or `print!` for a joined string, refused when rustfmt would
-/// put them one per line (P2R-51).
-pub fn format_arguments(text: &str, values: &[RExpr]) -> Result<String, TooWide> {
+/// The arguments of `format!` or `print!` for a joined string.
+pub fn format_arguments(text: &str, values: &[RExpr]) -> String {
     let mut arguments = quote(text);
     for value in values {
         arguments.push_str(", ");
-        arguments.push_str(&render(value, true, 0)?);
+        arguments.push_str(&render(value, true, 0));
     }
-    if arguments.len() > ARGS_WIDTH {
-        return Err(TooWide);
-    }
-    Ok(arguments)
+    arguments
 }
 
-/// The elements of a list literal on one line, the first that can take it with `anchor`:
-/// `None` has no literal to suffix (P2R-49). rustfmt's `array_width` is 60 as well: wider
-/// elements go one per line (P2R-51).
-fn elements(items: &[RExpr], anchor: bool) -> Result<String, TooWide> {
+/// The elements of a list literal, the first that can take it with `anchor`: `None` has no
+/// literal to suffix (P2R-49).
+fn elements(items: &[RExpr], anchor: bool) -> String {
     let first = items.iter().position(|item| !matches!(item, RExpr::None));
-    let parts = items
+    let parts: Vec<String> = items
         .iter()
         .enumerate()
         .map(|(i, item)| render(item, anchor && Some(i) == first, 0))
-        .collect::<Result<Vec<_>, _>>()?;
-    let joined = parts.join(", ");
-    if joined.len() > ARGS_WIDTH {
-        return Err(TooWide);
-    }
-    Ok(joined)
+        .collect();
+    parts.join(", ")
 }
 
 /// True when a variable or a call fixes the expression's Rust type without its literals.
@@ -603,31 +514,31 @@ mod tests {
             BinOp::Sub,
             Box::new(RExpr::Binary(int(4), BinOp::Sub, int(1))),
         );
-        assert_eq!(expr(&e, false).unwrap(), "10 - (4 - 1)");
+        assert_eq!(expr(&e, false), "10 - (4 - 1)");
         // (1 + 2) * 3
         let e = RExpr::Binary(
             Box::new(RExpr::Binary(int(1), BinOp::Add, int(2))),
             BinOp::Mul,
             int(3),
         );
-        assert_eq!(expr(&e, false).unwrap(), "(1 + 2) * 3");
+        assert_eq!(expr(&e, false), "(1 + 2) * 3");
         // 1 + 2 * 3 needs none
         let e = RExpr::Binary(
             int(1),
             BinOp::Add,
             Box::new(RExpr::Binary(int(2), BinOp::Mul, int(3))),
         );
-        assert_eq!(expr(&e, false).unwrap(), "1 + 2 * 3");
+        assert_eq!(expr(&e, false), "1 + 2 * 3");
     }
 
     #[test]
     fn anchor_suffixes_the_first_literal_only_without_a_variable() {
         let literals = RExpr::Binary(int(2), BinOp::Add, int(3));
-        assert_eq!(expr(&literals, true).unwrap(), "2_i64 + 3");
+        assert_eq!(expr(&literals, true), "2_i64 + 3");
         let with_var = RExpr::Binary(int(2), BinOp::Add, Box::new(RExpr::Var("n".into())));
-        assert_eq!(expr(&with_var, true).unwrap(), "2 + n");
+        assert_eq!(expr(&with_var, true), "2 + n");
         assert_eq!(
-            expr(&RExpr::Neg(Box::new(RExpr::Neg(int(5)))), true).unwrap(),
+            expr(&RExpr::Neg(Box::new(RExpr::Neg(int(5)))), true),
             "-(-5_i64)"
         );
     }
@@ -659,7 +570,7 @@ mod tests {
             BinOp::Eq,
             binary(RExpr::Int(2), BinOp::Lt, n()),
         );
-        assert_eq!(expr(&e, false).unwrap(), "(n < 2) == (2 < n)");
+        assert_eq!(expr(&e, false), "(n < 2) == (2 < n)");
         // n * 2 + 1 > 3 && !(n >= 4) || true needs no parentheses but those of `!`.
         let sum = binary(
             binary(n(), BinOp::Mul, RExpr::Int(2)),
@@ -669,17 +580,14 @@ mod tests {
         let not = RExpr::Not(Box::new(binary(n(), BinOp::Ge, RExpr::Int(4))));
         let and = binary(binary(sum, BinOp::Gt, RExpr::Int(3)), BinOp::And, not);
         let e = binary(and.clone(), BinOp::Or, RExpr::Bool(true));
-        assert_eq!(
-            expr(&e, false).unwrap(),
-            "n * 2 + 1 > 3 && !(n >= 4) || true"
-        );
+        assert_eq!(expr(&e, false), "n * 2 + 1 > 3 && !(n >= 4) || true");
         // (a || b) && c keeps its parentheses.
         let e = binary(
             binary(RExpr::Bool(false), BinOp::Or, RExpr::Bool(true)),
             BinOp::And,
             RExpr::Var("c".into()),
         );
-        assert_eq!(expr(&e, false).unwrap(), "(false || true) && c");
+        assert_eq!(expr(&e, false), "(false || true) && c");
     }
 
     #[test]
@@ -687,29 +595,29 @@ mod tests {
         let len = || RExpr::Len(Box::new(RExpr::Var("a".into())));
         let n = || RExpr::Var("n".into());
         assert_eq!(
-            expr(&binary(n(), BinOp::Mul, len()), false).unwrap(),
+            expr(&binary(n(), BinOp::Mul, len()), false),
             "n * a.len() as i64"
         );
         assert_eq!(
-            expr(&RExpr::Neg(Box::new(len())), false).unwrap(),
+            expr(&RExpr::Neg(Box::new(len())), false),
             "-(a.len() as i64)"
         );
         // `as i64 <` would start generic arguments; `<=` and a cast on the right do not.
         assert_eq!(
-            expr(&binary(len(), BinOp::Lt, RExpr::Int(3)), false).unwrap(),
+            expr(&binary(len(), BinOp::Lt, RExpr::Int(3)), false),
             "(a.len() as i64) < 3"
         );
         let product = binary(n(), BinOp::Mul, len());
         assert_eq!(
-            expr(&binary(product, BinOp::Lt, RExpr::Int(3)), false).unwrap(),
+            expr(&binary(product, BinOp::Lt, RExpr::Int(3)), false),
             "(n * a.len() as i64) < 3"
         );
         assert_eq!(
-            expr(&binary(len(), BinOp::Le, RExpr::Int(3)), false).unwrap(),
+            expr(&binary(len(), BinOp::Le, RExpr::Int(3)), false),
             "a.len() as i64 <= 3"
         );
         assert_eq!(
-            expr(&binary(RExpr::Int(3), BinOp::Lt, len()), false).unwrap(),
+            expr(&binary(RExpr::Int(3), BinOp::Lt, len()), false),
             "3 < a.len() as i64"
         );
     }
@@ -717,53 +625,27 @@ mod tests {
     #[test]
     fn literal_only_comparisons_are_anchored_to_i64() {
         let e = binary(RExpr::Int(3_000_000_000), BinOp::Lt, RExpr::Int(1));
-        assert_eq!(expr(&e, false).unwrap(), "3000000000_i64 < 1");
+        assert_eq!(expr(&e, false), "3000000000_i64 < 1");
         let e = binary(RExpr::Int(1), BinOp::Lt, RExpr::Var("n".into()));
-        assert_eq!(expr(&e, false).unwrap(), "1 < n");
+        assert_eq!(expr(&e, false), "1 < n");
         assert!(anchored(&e));
-    }
-
-    #[test]
-    fn wide_call_arguments_are_too_wide() {
-        let wide = RExpr::Call("f".into(), vec![RExpr::Var("a".repeat(61))]);
-        assert!(expr(&wide, false).is_err());
-        let at_limit = RExpr::Call("f".into(), vec![RExpr::Var("a".repeat(60))]);
-        assert!(expr(&at_limit, false).is_ok());
-        let one_literal = RExpr::Call("f".into(), vec![RExpr::Str("s".repeat(80))]);
-        assert!(expr(&one_literal, false).is_ok());
-    }
-
-    #[test]
-    fn chains_of_two_calls_fit_in_sixty_columns() {
-        let method = |inner: RExpr, name| RExpr::Method(Box::new(inner), name);
-        let one = method(RExpr::Var("a".repeat(70)), "is_some");
-        assert!(expr(&one, false).is_ok());
-        let two = |name: &str| method(method(RExpr::Var(name.into()), "as_deref"), "is_some");
-        // `<name>.as_deref().is_some()` is 21 columns plus the name.
-        assert!(expr(&two(&"a".repeat(39)), false).is_ok());
-        assert!(expr(&two(&"a".repeat(40)), false).is_err());
-        let len = RExpr::Len(Box::new(method(RExpr::Var("a".repeat(48)), "as_deref")));
-        assert!(expr(&len, false).is_err());
     }
 
     #[test]
     fn some_and_none_leave_the_type_to_the_context() {
         let some = RExpr::Some(int(5));
-        assert_eq!(expr(&some, false).unwrap(), "Some(5)");
+        assert_eq!(expr(&some, false), "Some(5)");
         assert!(!anchored(&some));
         assert!(!anchored(&RExpr::None));
         assert!(anchored(&RExpr::Some(Box::new(RExpr::Var("n".into())))));
         // The first element that is not `None` takes the `_i64`.
         let list = RExpr::List(vec![RExpr::None, RExpr::Some(int(7)), RExpr::Some(int(8))]);
-        assert_eq!(
-            expr(&list, true).unwrap(),
-            "vec![None, Some(7_i64), Some(8)]"
-        );
+        assert_eq!(expr(&list, true), "vec![None, Some(7_i64), Some(8)]");
     }
 
     #[test]
     fn floats_are_written_by_value() {
-        let text = |value: f64| expr(&RExpr::Float(value), true).unwrap();
+        let text = |value: f64| expr(&RExpr::Float(value), true);
         assert_eq!(text(1.0), "1.0");
         assert_eq!(text(0.0), "0.0");
         assert_eq!(text(0.1), "0.1");
@@ -776,20 +658,17 @@ mod tests {
     fn casts_to_float_get_parentheses_only_where_rust_needs_them() {
         let cast = |inner: RExpr| RExpr::ToFloat(Box::new(inner));
         let n = || RExpr::Var("n".into());
-        assert_eq!(expr(&cast(n()), false).unwrap(), "n as f64");
+        assert_eq!(expr(&cast(n()), false), "n as f64");
         let quotient = binary(RExpr::Float(1.0), BinOp::Div, cast(n()));
-        assert_eq!(expr(&quotient, false).unwrap(), "1.0 / n as f64");
+        assert_eq!(expr(&quotient, false), "1.0 / n as f64");
         // `1.0 / n as f64 < x` does not parse: `<` reads as generic arguments of `f64`.
         let e = binary(quotient, BinOp::Lt, RExpr::Var("x".into()));
-        assert_eq!(expr(&e, false).unwrap(), "(1.0 / n as f64) < x");
-        assert_eq!(
-            expr(&RExpr::Neg(Box::new(cast(n()))), false).unwrap(),
-            "-(n as f64)"
-        );
+        assert_eq!(expr(&e, false), "(1.0 / n as f64) < x");
+        assert_eq!(expr(&RExpr::Neg(Box::new(cast(n()))), false), "-(n as f64)");
         let sum = cast(binary(RExpr::Int(2), BinOp::Add, RExpr::Int(3)));
-        assert_eq!(expr(&sum, false).unwrap(), "(2_i64 + 3) as f64");
+        assert_eq!(expr(&sum, false), "(2_i64 + 3) as f64");
         let negated = cast(RExpr::Neg(Box::new(n())));
-        assert_eq!(expr(&negated, false).unwrap(), "-n as f64");
+        assert_eq!(expr(&negated, false), "-n as f64");
     }
 
     #[test]
@@ -797,22 +676,22 @@ mod tests {
         let n = || RExpr::Var("n".into());
         let sum = binary(n(), BinOp::Add, RExpr::Int(1));
         assert_eq!(
-            expr(&binary(sum, BinOp::Shl, RExpr::Int(2)), false).unwrap(),
+            expr(&binary(sum, BinOp::Shl, RExpr::Int(2)), false),
             "n + 1 << 2"
         );
         let shift = binary(n(), BinOp::Shl, RExpr::Int(2));
         assert_eq!(
-            expr(&binary(shift, BinOp::Mul, RExpr::Int(3)), false).unwrap(),
+            expr(&binary(shift, BinOp::Mul, RExpr::Int(3)), false),
             "(n << 2) * 3"
         );
         // `as i64 <<` would start generic arguments, as `as i64 <` does.
         let len = RExpr::Len(Box::new(n()));
         assert_eq!(
-            expr(&binary(len, BinOp::Shl, RExpr::Int(2)), false).unwrap(),
+            expr(&binary(len, BinOp::Shl, RExpr::Int(2)), false),
             "(n.len() as i64) << 2"
         );
         let literals = binary(RExpr::Int(1), BinOp::Shl, RExpr::Int(63));
-        assert_eq!(expr(&literals, true).unwrap(), "1_i64 << 63");
+        assert_eq!(expr(&literals, true), "1_i64 << 63");
         assert_eq!(literal_value(&literals), Some(i64::MIN));
     }
 
@@ -820,15 +699,15 @@ mod tests {
     fn a_method_on_a_literal_or_an_operator_gets_i64_and_parentheses() {
         let to_string = |inner| RExpr::Method(Box::new(inner), "to_string");
         assert_eq!(
-            expr(&to_string(RExpr::Neg(int(5))), false).unwrap(),
+            expr(&to_string(RExpr::Neg(int(5))), false),
             "(-5_i64).to_string()"
         );
         assert_eq!(
-            expr(&to_string(RExpr::Int(3_000_000_000)), false).unwrap(),
+            expr(&to_string(RExpr::Int(3_000_000_000)), false),
             "3000000000_i64.to_string()"
         );
         let sum = binary(RExpr::Var("n".into()), BinOp::Add, RExpr::Int(1));
-        assert_eq!(expr(&to_string(sum), false).unwrap(), "(n + 1).to_string()");
+        assert_eq!(expr(&to_string(sum), false), "(n + 1).to_string()");
     }
 
     #[test]
@@ -836,10 +715,10 @@ mod tests {
         let list = || vec![RExpr::Int(1), RExpr::Int(2)];
         let needle = |inner| Box::new(RExpr::Ref(Box::new(inner)));
         let literal = RExpr::Contains(list(), needle(RExpr::Int(2)));
-        assert_eq!(expr(&literal, false).unwrap(), "[1_i64, 2].contains(&2)");
+        assert_eq!(expr(&literal, false), "[1_i64, 2].contains(&2)");
         let variable = RExpr::Contains(list(), needle(RExpr::Var("n".into())));
-        assert_eq!(expr(&variable, false).unwrap(), "[1, 2].contains(&n)");
+        assert_eq!(expr(&variable, false), "[1, 2].contains(&n)");
         let empty = RExpr::RefMut(Box::new(RExpr::List(Vec::new())));
-        assert_eq!(expr(&empty, false).unwrap(), "&mut []");
+        assert_eq!(expr(&empty, false), "&mut []");
     }
 }

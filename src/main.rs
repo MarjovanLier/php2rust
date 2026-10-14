@@ -6,7 +6,7 @@ mod types;
 
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::process::ExitCode;
+use std::process::{Command, ExitCode};
 
 use clap::{ColorChoice, Parser};
 
@@ -42,17 +42,26 @@ fn main() -> ExitCode {
     {
         return invalid(reason);
     }
-    match convert::convert(&path, source) {
-        Ok(rust) => match &cli.output {
-            None => {
-                print!("{rust}");
-                ExitCode::SUCCESS
+    let rust = match convert::convert(&path, source) {
+        Ok(rust) => laid_out(&path, vec![("out.rs".to_owned(), rust)], "out.rs"),
+        Err(failure) => Err(failure),
+    };
+    match rust {
+        Ok(files) => {
+            let rust = &files[0].1;
+            match &cli.output {
+                None => {
+                    print!("{rust}");
+                    ExitCode::SUCCESS
+                }
+                Some(output) => match write_atomically(output, rust) {
+                    Ok(()) => ExitCode::SUCCESS,
+                    Err(err) => {
+                        invalid(format!("{}: cannot write output: {err}", output.display()))
+                    }
+                },
             }
-            Some(output) => match write_atomically(output, &rust) {
-                Ok(()) => ExitCode::SUCCESS,
-                Err(err) => invalid(format!("{}: cannot write output: {err}", output.display())),
-            },
-        },
+        }
         Err(Failure::Refused(lines)) => {
             eprint!("{lines}");
             ExitCode::from(1)
@@ -120,7 +129,7 @@ fn convert_directory(input: &Path, output: Option<&Path>) -> ExitCode {
             source,
         });
     }
-    match convert::convert_crate(inputs) {
+    match convert::convert_crate(inputs).and_then(|files| laid_out(&shown, files, "lib.rs")) {
         Ok(files) => match write_crate(output, &files) {
             Ok(()) => ExitCode::SUCCESS,
             Err(err) => invalid(format!("{}: cannot write output: {err}", output.display())),
@@ -180,6 +189,75 @@ fn check_crate_output(input: &Path, output: &Path) -> Result<(), String> {
         ));
     }
     Ok(())
+}
+
+/// The output files, each a path in the crate and its text, laid out by rustfmt from
+/// `root`, the file that names the others (P2R-190). rustfmt runs in a new directory under
+/// the system's temporary directory, with an empty configuration file, so no
+/// `rustfmt.toml` near the output or in the user's configuration changes the layout; a
+/// second run with `--check` proves the layout settled.
+fn laid_out(
+    shown: &str,
+    files: Vec<(String, String)>,
+    root: &str,
+) -> Result<Vec<(String, String)>, Failure> {
+    let dir = std::env::temp_dir().join(format!("php2rust-{}", std::process::id()));
+    // A directory left by an earlier process of the same id holds nothing of this run.
+    let _ = fs::remove_dir_all(&dir);
+    let result = format_in(&dir, files, root);
+    let _ = fs::remove_dir_all(&dir);
+    result.map_err(|reason| {
+        Failure::Invalid(format!("{shown}: cannot lay out the output: {reason}\n"))
+    })
+}
+
+fn format_in(
+    dir: &Path,
+    files: Vec<(String, String)>,
+    root: &str,
+) -> Result<Vec<(String, String)>, String> {
+    let config = dir.join("rustfmt.toml");
+    let tree = dir.join("crate");
+    let io = |err: std::io::Error| format!("cannot write a temporary file: {err}");
+    fs::create_dir_all(&tree).map_err(io)?;
+    fs::write(&config, "").map_err(io)?;
+    for (path, text) in &files {
+        let target = tree.join(path);
+        if let Some(parent) = target.parent() {
+            fs::create_dir_all(parent).map_err(io)?;
+        }
+        fs::write(target, text).map_err(io)?;
+    }
+    // One fixed message for each failure, so stderr never holds a temporary path (P2R-06).
+    let rustfmt = |check: bool| {
+        let mut command = Command::new("rustfmt");
+        // A rustup proxy would otherwise download a missing toolchain.
+        command.env("RUSTUP_AUTO_INSTALL", "0");
+        command
+            .args(["--edition", "2024", "--config-path"])
+            .arg(&config);
+        if check {
+            command.arg("--check");
+        }
+        command
+            .arg(tree.join(root))
+            .output()
+            .map_err(|_| "cannot run rustfmt, which must be on PATH".to_owned())
+    };
+    if !rustfmt(false)?.status.success() {
+        return Err("rustfmt failed on the output".to_owned());
+    }
+    if !rustfmt(true)?.status.success() {
+        return Err("rustfmt changes its own layout when it runs again".to_owned());
+    }
+    files
+        .into_iter()
+        .map(|(path, _)| {
+            let text = fs::read_to_string(tree.join(&path))
+                .map_err(|err| format!("cannot read a temporary file: {err}"))?;
+            Ok((path, text))
+        })
+        .collect()
 }
 
 /// Writes the crate into a temporary directory beside `output` and renames it into place,

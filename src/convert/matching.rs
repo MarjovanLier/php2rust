@@ -4,15 +4,30 @@
 use mago_span::HasSpan;
 use mago_syntax::cst::*;
 
+use super::control::emit;
 use super::lists::unparenthesized;
-use super::variables::{self, COPY};
+use super::variables;
 use super::{Converter, nulls};
 use crate::printer::{self, RExpr};
 use crate::types::RustType;
 
-/// rustfmt keeps an arm's pattern on one line while it ends by this column, which leaves
-/// room for ` => {` (P2R-157).
-const PATTERN_WIDTH: usize = 95;
+/// Writes the opening line, one line per arm one level deeper (conditions joined with
+/// ` | `, P2R-157) and `};` (P2R-123).
+fn push_match(
+    open: String,
+    arms: Vec<(Vec<String>, String)>,
+    depth: usize,
+    body: &mut Vec<String>,
+) {
+    body.push(open);
+    for (pattern, value) in arms {
+        body.push(emit(
+            depth + 1,
+            format!("{} => {value},", pattern.join(" | ")),
+        ));
+    }
+    body.push(emit(depth, "};".to_owned()));
+}
 
 /// True when an arm of type `ty` converts to `expected`: the same type, a value where an
 /// `Option` of it is needed, or an int where a float is (P2R-25, P2R-102).
@@ -62,17 +77,15 @@ impl Converter<'_> {
             let rendered = self
                 .declared_value(arm.node, arm.expr, &arm.ty, returns)
                 .and_then(|expr| self.kept(arm.node, expr, &arm.ty))
-                .map(|expr| nulls::wrapped(expr, &arm.ty, returns))
-                .and_then(|expr| self.render(arm.node, &expr, false));
+                .map(|expr| printer::expr(&nulls::wrapped(expr, &arm.ty, returns), false));
             match rendered {
-                Some(text) => lines.push((arm.node, arm.pattern, text)),
+                Some(text) => lines.push((arm.pattern, text)),
                 None => fine = false,
             }
         }
         if fine {
-            let open = format!("return match {} {{", converted.subject);
-            let open = self.emit(node, depth, open);
-            self.push_match(open, lines, depth, body);
+            let open = emit(depth, format!("return match {} {{", converted.subject));
+            push_match(open, lines, depth, body);
         }
     }
 
@@ -155,80 +168,18 @@ impl Converter<'_> {
                 None => stored,
             };
             anchored |= printer::anchored(&expr);
-            let Some(text) = self.render(arm.node, &expr, false) else {
-                return true;
-            };
-            lines.push((arm.node, arm.pattern, text));
+            lines.push((arm.pattern, printer::expr(&expr, false)));
         }
         let open = format!("match {} {{", converted.subject);
         let open = if declares {
             // No arm fixes the type, so the `let` names it, as for a literal (P2R-49).
             let pending = self.first_write(var, !anchored, open, true);
-            format!("{}{pending}", "    ".repeat(depth))
+            emit(depth, pending)
         } else {
-            let line = format!("{} = {open}", self.variables.name_of(var));
-            self.emit(expression, depth, line)
+            emit(depth, format!("{} = {open}", self.variables.name_of(var)))
         };
-        self.push_match(open, lines, depth, body);
+        push_match(open, lines, depth, body);
         true
-    }
-
-    /// Writes the opening line, the arms one level deeper and `};` (P2R-123). An arm that
-    /// holds a copy mark is measured at the end of the body, once the mark is resolved. A
-    /// pattern of several conditions that ends after column 95 goes one condition per line,
-    /// as rustfmt writes it (P2R-157).
-    fn push_match(
-        &mut self,
-        open: String,
-        arms: Vec<(&Expression<'_>, Vec<String>, String)>,
-        depth: usize,
-        body: &mut Vec<String>,
-    ) {
-        body.push(open);
-        let indent = "    ".repeat(depth + 1);
-        for (node, pattern, value) in arms {
-            let joined = pattern.join(" | ");
-            let wide = indent.len() + joined.len() > PATTERN_WIDTH;
-            if wide && !joined.is_ascii() {
-                // rustfmt counts columns and the tool counts bytes, so the layout rustfmt
-                // picks is not known.
-                self.refuse(
-                    node,
-                    "a match pattern with non-ASCII text longer than 95 bytes is not supported (P2R-157)",
-                );
-                continue;
-            }
-            // rustfmt packs a long pattern of short literals, each at most 20 columns,
-            // several to a line, a layout the tool does not write.
-            if wide && pattern.iter().all(|p| p.len() <= 20 && !p.contains("::")) {
-                self.refuse(
-                    node,
-                    "a long match pattern of short literals is not supported (P2R-157)",
-                );
-                continue;
-            }
-            let (last, earlier) = match pattern.split_last() {
-                Some((last, earlier)) if wide && !earlier.is_empty() => (last.clone(), earlier),
-                _ => (joined, &[][..]),
-            };
-            for (at, condition) in earlier.iter().enumerate() {
-                let line = if at == 0 {
-                    condition.clone()
-                } else {
-                    format!("| {condition}")
-                };
-                body.push(self.emit(node, depth + 1, line));
-            }
-            let lead = if earlier.is_empty() { "" } else { "| " };
-            let line = format!("{lead}{last} => {value},");
-            let line = if line.contains(COPY) {
-                format!("{indent}{line}")
-            } else {
-                self.emit(node, depth + 1, line)
-            };
-            body.push(line);
-        }
-        body.push(format!("{}}};", "    ".repeat(depth)));
     }
 
     /// Converts the subject and the arms, with `expected` as the type of a `null` or `[]`
@@ -310,13 +261,6 @@ impl Converter<'_> {
                 self.refuse(
                     result,
                     "Mago finds this arm unreachable and gives its value no type (P2R-120)",
-                );
-                fine = false;
-            } else if matches!(unparenthesized(result), Expression::Conditional(_)) {
-                self.record_refused(result);
-                self.refuse(
-                    result,
-                    "a ?: as the result of a match arm is not supported, because rustfmt writes it as a block (P2R-180)",
                 );
                 fine = false;
             } else if let Some((expr, ty)) = self.value(result, expected) {
@@ -410,15 +354,6 @@ impl Converter<'_> {
             Box::new(then_expr?),
             Box::new(else_expr?),
         );
-        // Measured as printed where the place fixes the type; the printer refuses the `_i64`
-        // that another place adds when it makes the `if` too wide.
-        if !printer::expr(&expr, false).is_ok_and(|text| text.len() <= printer::IF_WIDTH) {
-            self.refuse(
-                node,
-                "an if wider than 50 bytes is not supported, because rustfmt splits it over several lines (P2R-180)",
-            );
-            return None;
-        }
         Some((expr, ty))
     }
 
@@ -512,8 +447,7 @@ impl Converter<'_> {
         // Nothing else types an int subject of literals only, which Rust makes `i32`
         // (P2R-49).
         let anchor = ty == RustType::I64 && !printer::anchored(&expr);
-        let text = self.render(subject, &expr, anchor)?;
-        Some((text, ty))
+        Some((printer::expr(&expr, anchor), ty))
     }
 
     /// The Rust pattern of a condition on a subject of type `subject`: a literal of that

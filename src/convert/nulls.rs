@@ -8,7 +8,7 @@ use mago_syntax::cst::*;
 use super::flow::Var;
 use super::variables::Part;
 use super::{Converter, booleans, lists};
-use crate::printer::{BinOp, RExpr};
+use crate::printer::{self, BinOp, RExpr};
 use crate::types::RustType;
 
 /// The problem of a value that may be null as an element of a list of plain values
@@ -195,25 +195,17 @@ impl Converter<'_> {
                 converted = false;
                 continue;
             };
-            let simple = match &expr {
-                RExpr::Var(_) | RExpr::Bool(_) => true,
-                RExpr::Not(inner) => matches!(**inner, RExpr::Var(_)),
-                _ => false,
+            let text = printer::expr(&expr, false);
+            let text = if matches!(expr, RExpr::Binary(_, BinOp::Or, _)) {
+                format!("({text})")
+            } else {
+                text
             };
-            let or = matches!(expr, RExpr::Binary(_, BinOp::Or, _));
-            match self.render(operand, &expr, false) {
-                Some(text) if or => parts.push(Part::Plain {
-                    text: format!("({text})"),
-                    simple,
-                }),
-                Some(text) => parts.push(Part::Plain { text, simple }),
-                None => converted = false,
-            }
+            parts.push(Part::Plain(text));
         }
         // A problem is recorded for every operand that did not convert.
         let line = if converted {
-            self.variables
-                .condition_line(depth, keyword, parts, open, condition.span())
+            self.variables.condition_line(depth, keyword, parts, open)
         } else {
             String::new()
         };

@@ -7,10 +7,12 @@ use heck::ToSnakeCase;
 use mago_span::{HasSpan, Span};
 use mago_syntax::cst::*;
 
+use super::control::emit;
 use super::recursion::{self, Target};
 use super::variables::THIS;
 use super::{
-    Context, Converter, Mode, ParameterSignature, Signature, Variables, helpers, lists, nulls,
+    Context, Converter, Mode, ParameterSignature, Signature, Variables, functions, helpers, lists,
+    nulls,
 };
 use crate::names;
 use crate::printer::{self, RExpr};
@@ -742,16 +744,7 @@ impl Converter<'_> {
         }
         let expr = self.declared_value(value, expr, &found, ty)?;
         let expr = nulls::wrapped(self.owned(expr, &found), &found, ty);
-        match printer::expr(&expr, false) {
-            Ok(text) => Some(text),
-            Err(_) => {
-                self.refuse(
-                    value,
-                    "this property default is too wide for one line (P2R-140)",
-                );
-                None
-            }
-        }
+        Some(printer::expr(&expr, false))
     }
 
     /// The signature of every method of the class at `index`, other than the constructor
@@ -972,22 +965,11 @@ impl Converter<'_> {
                 (RustType::F64, RustType::I64, Some(int)) => RExpr::Float(int as f64),
                 _ => value,
             };
-            let text = match &value {
-                RExpr::Str(text) => printer::quote(text),
-                other => printer::expr(other, false).unwrap_or_default(),
-            };
             let line = format!(
-                "    pub const {rust_name}: {} = {text};",
-                constant_rust_type(&ty)
+                "    pub const {rust_name}: {} = {};",
+                constant_rust_type(&ty),
+                printer::expr(&value, false)
             );
-            // rustfmt splits a wider line (P2R-51).
-            if line.len() > printer::MAX_WIDTH {
-                self.refuse(
-                    &item.name,
-                    "this constant is too long for one line (P2R-51)",
-                );
-                continue;
-            }
             let known = match ty {
                 RustType::I64 => printer::literal_value(&value),
                 _ => None,
@@ -1198,7 +1180,7 @@ impl Converter<'_> {
             lines.push(format!("pub struct {name} {{"));
             for field in &properties {
                 let line = format!("pub {}: {},", field.rust_name, field.ty.owned());
-                lines.push(self.emit(&declaration.name, 1, line));
+                lines.push(emit(1, line));
             }
             lines.push("}".to_owned());
         }
@@ -1210,7 +1192,7 @@ impl Converter<'_> {
             .map(|f| format!("{}: {}", f.rust_name, f.mode.parameter(&f.ty)))
             .collect();
         let open = format!("pub fn new({}) -> {name} {{", parameters.join(", "));
-        lines.push(self.emit(&declaration.name, 1, open));
+        lines.push(emit(1, open));
         let stores: Vec<String> = fields
             .iter()
             .map(store)
@@ -1226,11 +1208,11 @@ impl Converter<'_> {
             lines.push(format!("        {name} {{}}"));
         } else if inner.len() <= LITERAL_WIDTH {
             let line = format!("{name} {{ {inner} }}");
-            lines.push(self.emit(&declaration.name, 2, line));
+            lines.push(emit(2, line));
         } else {
             lines.push(format!("        {name} {{"));
             for store in stores {
-                lines.push(self.emit(&declaration.name, 3, format!("{store},")));
+                lines.push(emit(3, format!("{store},")));
             }
             lines.push("        }".to_owned());
         }
@@ -1315,8 +1297,10 @@ impl Converter<'_> {
             );
         }
         let parameters = self.finish_variables(&mut body);
-        let copies = self.copy_lines(&method.parameter_list, &signature.parameters, &copied, 2);
-        body.splice(0..0, copies);
+        body.splice(
+            0..0,
+            functions::copy_lines(&signature.parameters, &copied, 2),
+        );
         self.variables = outer;
         self.current_method = outer_method;
         self.current_class = outer_class;
@@ -1333,9 +1317,9 @@ impl Converter<'_> {
         );
         if body.is_empty() {
             // rustfmt writes an empty body as `{}` on the same line.
-            return Some(vec![self.emit(&method.name, 1, format!("{open}}}"))]);
+            return Some(vec![emit(1, format!("{open}}}"))]);
         }
-        let mut lines = vec![self.emit(&method.name, 1, open)];
+        let mut lines = vec![emit(1, open)];
         lines.extend(body);
         lines.push("    }".to_owned());
         Some(lines)

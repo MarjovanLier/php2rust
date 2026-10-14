@@ -3,6 +3,7 @@
 
 use mago_syntax::cst::*;
 
+use super::control::emit;
 use super::lists::unparenthesized;
 use super::variables::changes_variable;
 use super::{Context, Converter, nulls, statement_kind};
@@ -107,10 +108,7 @@ impl Converter<'_> {
                     return;
                 };
                 let expr = nulls::wrapped(expr, &ty, returns);
-                let Some(rendered) = self.render(value, &expr, false) else {
-                    return;
-                };
-                format!("return {rendered};")
+                format!("return {};", printer::expr(&expr, false))
             }
             _ => {
                 self.refuse(
@@ -120,8 +118,7 @@ impl Converter<'_> {
                 return;
             }
         };
-        let line = self.emit(ret, depth, text);
-        body.push(line);
+        body.push(emit(depth, text));
     }
 
     /// A function or method call as a statement, or as a `for` initialisation or step
@@ -145,21 +142,15 @@ impl Converter<'_> {
                 return;
             }
         };
-        let Some((expr, _)) = converted else {
-            return;
-        };
-        let Some(rendered) = self.render(expression, &expr, false) else {
-            return;
-        };
-        let line = self.emit(expression, depth, format!("{rendered};"));
-        body.push(line);
+        if let Some((expr, _)) = converted {
+            body.push(emit(depth, format!("{};", printer::expr(&expr, false))));
+        }
     }
 
     pub(super) fn echo(&mut self, echo: &Echo<'_>, depth: usize, body: &mut Vec<String>) {
         for &value in echo.values.iter() {
             if let Some(text) = self.print_statement(value) {
-                let line = self.emit(value, depth, text);
-                body.push(line);
+                body.push(emit(depth, text));
             }
         }
     }
@@ -172,20 +163,12 @@ impl Converter<'_> {
             // PHP and Rust print an int the same way, so a literal goes into the format string.
             RExpr::Int(value) => Some(format!("print!(\"{value}\");")),
             // A joined string prints with its own format text, not through `format!`.
-            RExpr::Format(text, values) => match printer::format_arguments(&text, &values) {
-                Ok(arguments) => Some(format!("print!({arguments});")),
-                Err(_) => {
-                    self.refuse(value, "this statement is too long for one line (P2R-51)");
-                    None
-                }
-            },
+            RExpr::Format(text, values) => Some(format!(
+                "print!({});",
+                printer::format_arguments(&text, &values)
+            )),
             expr if matches!(ty, RustType::I64 | RustType::String) => {
-                let arguments = format!("\"{{}}\", {}", self.render(value, &expr, true)?);
-                if arguments.len() > printer::ARGS_WIDTH {
-                    self.refuse(value, "this statement is too long for one line (P2R-51)");
-                    return None;
-                }
-                Some(format!("print!({arguments});"))
+                Some(format!("print!(\"{{}}\", {});", printer::expr(&expr, true)))
             }
             _ if matches!(ty, RustType::Vec(_)) => {
                 self.refuse(value, "echo of a list is not supported (P2R-46)");

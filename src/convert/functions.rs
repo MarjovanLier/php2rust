@@ -8,6 +8,7 @@ use mago_span::HasSpan;
 use mago_syntax::cst::*;
 use mago_syntax::walker::Walker;
 
+use super::control::emit;
 use super::{
     Context, Converter, Mode, ParameterSignature, Signature, Variables, classes, helpers, lists,
     recursion,
@@ -395,8 +396,7 @@ impl Converter<'_> {
             );
         }
         let parameters = self.finish_variables(&mut body);
-        let copies = self.copy_lines(&function.parameter_list, &signature.parameters, &copied, 1);
-        body.splice(0..0, copies);
+        body.splice(0..0, copy_lines(&signature.parameters, &copied, 1));
         self.variables = outer;
         self.current_function = outer_function;
         self.self_calls = outer_calls;
@@ -412,9 +412,9 @@ impl Converter<'_> {
         );
         if body.is_empty() {
             // rustfmt writes an empty body as `{}` on the same line.
-            return Some(vec![self.emit(&function.name, 0, format!("{open}}}"))]);
+            return Some(vec![emit(0, format!("{open}}}"))]);
         }
-        let mut lines = vec![self.emit(&function.name, 0, open)];
+        let mut lines = vec![emit(0, open)];
         lines.extend(body);
         lines.push("}".to_owned());
         Some(lines)
@@ -445,37 +445,27 @@ impl Converter<'_> {
             .map(|parameter| parameter.php_name.clone())
             .collect()
     }
+}
 
-    /// The copy line of each parameter in `copied`, in parameter order, at `depth`
-    /// (P2R-181). A line too long for one line stops at its parameter (P2R-51).
-    pub(super) fn copy_lines(
-        &mut self,
-        list: &FunctionLikeParameterList<'_>,
-        parameters: &[ParameterSignature],
-        copied: &HashSet<Vec<u8>>,
-        depth: usize,
-    ) -> Vec<String> {
-        let mut lines = Vec::new();
-        for parameter in parameters {
-            if !copied.contains(&parameter.php_name) {
-                continue;
-            }
+/// The copy line of each parameter in `copied`, in parameter order, at `depth` (P2R-181).
+pub(super) fn copy_lines(
+    parameters: &[ParameterSignature],
+    copied: &HashSet<Vec<u8>>,
+    depth: usize,
+) -> Vec<String> {
+    parameters
+        .iter()
+        .filter(|parameter| copied.contains(&parameter.php_name))
+        .map(|parameter| {
             let name = &parameter.rust_name;
             let copy = match &parameter.ty {
                 RustType::Option(_) => "map(ToOwned::to_owned)",
                 RustType::Vec(_) => "to_vec()",
                 _ => "to_string()",
             };
-            let span = list
-                .parameters
-                .iter()
-                .find(|node| node.variable.name.get(1..) == Some(parameter.php_name.as_slice()))
-                .map_or(list.span(), |node| node.variable.span());
-            let line = format!("let mut {name} = {name}.{copy};");
-            lines.push(self.emit(&span, depth, line));
-        }
-        lines
-    }
+            emit(depth, format!("let mut {name} = {name}.{copy};"))
+        })
+        .collect()
 }
 
 /// Collects the PHP names, without `$`, of the variables that an assignment or an append

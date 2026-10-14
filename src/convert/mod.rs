@@ -24,7 +24,7 @@ use mago_span::{HasSpan, Span};
 use mago_syntax::cst::*;
 use mago_syntax::parser::parse_file;
 
-use crate::printer::{self, RExpr, TooWide};
+use crate::printer::RExpr;
 use crate::problem::{self, Origin, Problem};
 use crate::types::{RustType, TypeNames};
 use variables::Variables;
@@ -582,27 +582,6 @@ impl<'c> Converter<'c> {
     fn refuse(&mut self, node: &impl HasSpan, message: impl Into<String>) {
         self.problems
             .push(spanned(node, Origin::Tool, message.into()));
-    }
-
-    /// One output line at `depth` levels of indentation, refused when rustfmt would split
-    /// it (P2R-51). A line that holds a copy mark is measured at the end of the body.
-    fn emit(&mut self, node: &impl HasSpan, depth: usize, text: String) -> String {
-        let line = format!("{}{text}", "    ".repeat(depth));
-        if line.len() > printer::MAX_WIDTH && !line.contains(variables::COPY) {
-            self.refuse(node, "this statement is too long for one line (P2R-51)");
-        }
-        line
-    }
-
-    /// Lays out an expression on one line, refused when rustfmt would split it (P2R-51).
-    fn render(&mut self, node: &impl HasSpan, expr: &RExpr, anchor: bool) -> Option<String> {
-        match printer::expr(expr, anchor) {
-            Ok(text) => Some(text),
-            Err(TooWide) => {
-                self.refuse(node, "this statement is too long for one line (P2R-51)");
-                None
-            }
-        }
     }
 
     /// Converts the input files: one file to its output file, or the files of a directory

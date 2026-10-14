@@ -11,7 +11,7 @@ use mago_syntax::cst::*;
 use super::lists::unparenthesized;
 use super::variables::{chain_root, operation};
 use super::{Converter, nulls, numbers};
-use crate::printer::RExpr;
+use crate::printer::{self, RExpr};
 use crate::types::RustType;
 
 impl Converter<'_> {
@@ -140,8 +140,8 @@ impl Converter<'_> {
                 (other, expr)
             }
         };
-        let target = self.render(expression, &target, false)?;
-        let value = self.render(expression, &expr, false)?;
+        let target = printer::expr(&target, false);
+        let value = printer::expr(&expr, false);
         Some(format!("{target} {operator} {value};"))
     }
 
@@ -172,7 +172,7 @@ impl Converter<'_> {
         let stored = self.stored(value, expr, &value_type, expression.span())?;
         let pushed = nulls::wrapped(stored, &value_type, element);
         let push = RExpr::MethodCall(Box::new(target), "push".to_owned(), vec![pushed]);
-        Some(format!("{};", self.render(expression, &push, false)?))
+        Some(format!("{};", printer::expr(&push, false)))
     }
 
     /// The Rust type of a chain, from the types of its root and of the properties and

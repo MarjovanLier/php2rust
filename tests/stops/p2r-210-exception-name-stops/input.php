@@ -18,3 +18,12 @@ function local(int $n): int
     }
     return $n;
 }
+
+final readonly class Result {}
+
+final readonly class Ok {}
+
+enum Err
+{
+    case Failed;
+}

@@ -1527,6 +1527,10 @@ impl Converter<'_> {
         node: &Expression<'_>,
     ) -> Option<(RExpr, RustType)> {
         let object = self.expression(access.object)?;
+        if matches!(object.1.inner(), RustType::Union(_)) {
+            self.refuse(node, UNION_MEMBER);
+            return None;
+        }
         if matches!(&object.1, RustType::Option(inner) if matches!(**inner, RustType::Class(_))) {
             self.refuse(
                 node,
@@ -1569,7 +1573,9 @@ impl Converter<'_> {
         // An enum value has the methods of its enum (P2R-155).
         let (RustType::Class(class) | RustType::Enum(class)) = &ty else {
             self.record_refused_arguments(&call.argument_list);
-            let message = if matches!(ty, RustType::Option(_)) {
+            let message = if matches!(ty.inner(), RustType::Union(_)) {
+                UNION_MEMBER
+            } else if matches!(ty, RustType::Option(_)) {
                 "a method call on a value that may be null is not supported (P2R-106)"
             } else {
                 "a method call needs an object of a class of this file (P2R-135)"
@@ -1710,6 +1716,10 @@ impl Converter<'_> {
         }
     }
 }
+
+/// The problem of a property read or method call on a union value (P2R-232).
+const UNION_MEMBER: &str =
+    "a property read or method call on a value of a union type is not supported (P2R-232)";
 
 /// The problem of a nullable or union type that holds a changing type (P2R-141, P2R-230).
 pub(super) const NULLABLE_CHANGING: &str = "a nullable or union type that holds objects whose class changes them is not supported (P2R-141)";

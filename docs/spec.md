@@ -2018,8 +2018,9 @@ inside a list or a shape field waits for a later slice.
   members of different Rust types that give one variant name
   (`list<int>|list<string>`); two union enums of one name with different
   variants; a member that is or holds a class that changes its objects
-  (P2R-141); a union enum whose name is the Rust name of an enum, class or
-  shape of the input (P2R-131, P2R-200); a class that holds itself through
+  (P2R-141); a member that is a list of a nullable struct type (P2R-204);
+  a union enum whose name is the Rust name of an enum, class or shape of
+  the input, whichever the tool meets first (P2R-131, P2R-200); a class that holds itself through
   a union enum other than through a list (P2R-130), because rustc rejects
   a type of infinite size; a union type as a list element type, a shape
   field type or the member of another union (a later slice); a declared
@@ -2027,14 +2028,15 @@ inside a list or a shape field waits for a later slice.
   type holds `int` (`@param int|string` on `float|string`), because PHP
   stores the int as a float; the stops of P2R-25; and a written type that
   PHP rejects and Mago does not report: a type written twice in any letter
-  case (`int|string|INT`), `true|false`, and `bool` beside `true` or
-  `false`. P2R-21 keeps converting the widened forms of these, so the last
+  case (`int|string|INT`), where a class name counts by the name PHP
+  resolves (`Card|\Card`, an alias) and `self` as the class that holds it;
+  `true|false`; and `bool` beside `true` or `false`. P2R-21 keeps converting the widened forms of these, so the last
   stop applies to every declared type, not only to unions.
 - **P2R-231** A value MUST convert into a place of type `U` or `Option<U>`
-  (a return value, an argument for a parameter, of `new` too, an
-  assignment to a property, a property default (P2R-140), an assignment to
-  a new variable, and an arm of a `match` or `?:` that stands in such a
-  place) as follows. A value of a member type `T`, in the owned form
+  (a return value, an argument for a parameter, of `new` too, a parameter
+  default that a call leaves out (P2R-168), an assignment to a property, a
+  property default (P2R-140), an assignment to a new variable, and an arm
+  of a `match` or `?:` that stands in such a place) as follows. A value of a member type `T`, in the owned form
   P2R-26 gives it (`.to_string()`, `.clone()` or a move), becomes
   `U::V(value)`, with `V` the variant of `T`, inside `Some(..)` for
   `Option<U>` (P2R-102). A value of type `Option<T>`, in the owned form
@@ -2100,7 +2102,8 @@ inside a list or a shape field waits for a later slice.
   `is_scalar()`, Mago narrows a `scalar` member to `never` and reports
   the read (P2R-11).
 - **P2R-234** `$o?->p` and `$o?->m(args)`, where `$o` is a variable,
-  parameter or property read of type `Option<S>` for a class `S`, or
+  parameter, property read or array shape element (P2R-203) of type
+  `Option<S>` for a class `S`, or
   `Option<E>` for an enum `E` with `->value` or `->name` (P2R-113), MUST
   convert to a `map` over the lent value, whose closure binds the snake_case
   name of `$o`, or of its last property: `self.date_components.as_ref()

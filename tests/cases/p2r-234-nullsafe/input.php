@@ -42,6 +42,12 @@ function nickOf(?Boss $boss): string
     return $boss?->nick ?? 'none';
 }
 
+/** @param array{level: ?Level} $s */
+function levelOf(array $s): string
+{
+    return $s['level']?->name ?? 'none';
+}
+
 $big = new Boss('bb', 'Big', Level::High);
 $team = new Team($big);
 $empty = new Team(null);
@@ -57,3 +63,4 @@ $level = $b?->level;
 echo $level?->value ?? 0, ' ', $level?->name ?? 'none', "\n";
 $name = $empty->boss?->name ?? 'nobody';
 echo $name, "\n";
+echo levelOf(['level' => Level::Low]), ' ', levelOf(['level' => null]), "\n";

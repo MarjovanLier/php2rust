@@ -63,6 +63,62 @@ function pointKind(array $v): string
     return gettype($v);
 }
 
+/** @param array-key $k */
+function keyType(int|string $k): string
+{
+    return gettype($k);
+}
+
+/** @param 1|2|'a' $x */
+function literal(int|string $x): string
+{
+    return gettype($x);
+}
+
+function flag(true|string $x): string
+{
+    return gettype($x);
+}
+
+function defaulted(int|string $v = 5): string
+{
+    return gettype($v);
+}
+
+/**
+ * @implements ArrayAccess<int|string, string>
+ */
+final readonly class Lookup implements ArrayAccess
+{
+    public function offsetExists(mixed $offset): bool
+    {
+        return true;
+    }
+
+    public function offsetGet(mixed $offset): string
+    {
+        return gettype($offset);
+    }
+
+    public function offsetSet(mixed $offset, mixed $value): void {}
+
+    public function offsetUnset(mixed $offset): void {}
+}
+
+final readonly class Tree
+{
+    /**
+     * @param list<Tree>|int $kids
+     */
+    public function __construct(public array|int $kids) {}
+
+    public function kind(): string
+    {
+        $kids = $this->kids;
+        return gettype($kids);
+    }
+}
+
 function suited(Card $card): string
 {
     $suit = $card->suit;
@@ -78,3 +134,9 @@ $card = new Card('Q', Suit::Hearts);
 $joker = new Card(0, false);
 echo describe($card->rank()), ' ', describe($joker->rank()), "\n";
 echo suited($card), ' ', suited($joker), ' ', suited(new Card(2, null)), "\n";
+echo keyType(1), ' ', literal('a'), ' ', flag(true), ' ', flag('t'), "\n";
+echo defaulted(), ' ', defaulted('x'), "\n";
+$lookup = new Lookup();
+echo $lookup->offsetGet(3), ' ', $lookup->offsetGet('k'), "\n";
+$leaves = [new Tree(2)];
+echo (new Tree(1))->kind(), ' ', (new Tree($leaves))->kind(), "\n";

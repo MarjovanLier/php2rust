@@ -6,3 +6,8 @@ input.php:50:12: ?-> on a class that changes its objects is not supported (P2R-2
 input.php:55:12: an argument of ?-> cannot read a variable of the name the closure binds (P2R-234)
 input.php:60:5: this expression statement is not supported (P2R-43)
 input.php:65:12: ?-> converts only on a variable, parameter or property read (P2R-234)
+input.php:85:12: ?-> on a method that throws is not supported (P2R-234)
+input.php:90:12: a property read on a value that may be null is not supported (P2R-106)
+input.php:95:12: this expression is not supported in version 1 (P2R-07)
+input.php:95:35: this expression is not supported in version 1 (P2R-07)
+input.php:100:19: only $name and {$name} can be interpolated into a string (P2R-45)

@@ -291,7 +291,7 @@ impl Converter<'_> {
 
     /// `is_scalar($v)` (`scalar`) or `gettype($v)`, folded from the Rust type of the
     /// variable or parameter `$v`; the call does not read it, because the result does not
-    /// depend on its value (P2R-222).
+    /// depend on its value (P2R-222). A union value is read and matched (P2R-233).
     fn type_test(
         &mut self,
         call: &FunctionCall<'_>,
@@ -523,6 +523,18 @@ impl Converter<'_> {
     fn default_argument(&self, parameter: &ParameterSignature) -> Option<RExpr> {
         let (expr, ty) = parameter.default.clone()?;
         let declared = &parameter.ty;
+        // A member literal goes into its variant owned, and the variant is lent (P2R-231).
+        if let Some(path) = nulls::member_path(&ty, declared) {
+            let variant = RExpr::Call(path, vec![self.owned(expr, &ty)]);
+            return Some(match (parameter.mode, declared) {
+                (Mode::Shared, RustType::Option(_)) => {
+                    RExpr::Some(Box::new(RExpr::Ref(Box::new(variant))))
+                }
+                (Mode::Shared, _) => RExpr::Ref(Box::new(variant)),
+                (_, RustType::Option(_)) => RExpr::Some(Box::new(variant)),
+                _ => variant,
+            });
+        }
         Some(match parameter.mode {
             Mode::Shared => nulls::wrapped(self.borrowed(expr, &ty), &ty, declared),
             Mode::Mut => RExpr::RefMut(Box::new(nulls::wrapped(expr, &ty, declared))),

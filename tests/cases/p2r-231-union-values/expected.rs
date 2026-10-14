@@ -99,6 +99,54 @@ impl Config {
     }
 }
 
+#[derive(Debug)]
+pub struct Slot {
+    pub v: IntOrString,
+}
+
+impl Slot {
+    pub fn new() -> Slot {
+        Slot {
+            v: IntOrString::Int(0),
+        }
+    }
+
+    pub fn set(&mut self, n: &str) {
+        self.v = IntOrString::String(n.to_string());
+    }
+
+    pub fn kind(&self) -> String {
+        let v = self.v.clone();
+        return (match &v {
+            IntOrString::Int(_) => "integer",
+            IntOrString::String(_) => "string",
+        })
+        .to_string();
+    }
+}
+
+pub fn describe(v: &IntOrString) -> String {
+    return (match v {
+        IntOrString::Int(_) => "integer",
+        IntOrString::String(_) => "string",
+    })
+    .to_string();
+}
+
+pub fn describe_either(c: bool, s: &str, n: i64) -> String {
+    return describe(
+        &(if c {
+            IntOrString::String(s.to_string())
+        } else {
+            IntOrString::Int(n)
+        }),
+    );
+}
+
+pub fn nick(s: Option<&str>) -> String {
+    return show(s.map(ToOwned::to_owned).map(IntOrString::String).as_ref());
+}
+
 pub fn either(a: Option<&IntOrString>, b: &IntOrString) -> IntOrString {
     return a.map(ToOwned::to_owned).unwrap_or(b.clone());
 }
@@ -182,5 +230,19 @@ fn main() {
     print!("{}", bound(Some(&IntOrString::Int(3))));
     print!(" ");
     print!("{}", bound(None));
+    print!("\n");
+    let mut slot = Slot::new();
+    print!("{}", slot.kind());
+    print!(" ");
+    slot.set("x");
+    print!("{}", slot.kind());
+    print!("\n");
+    print!("{}", describe_either(true, "s", 1));
+    print!(" ");
+    print!("{}", describe_either(false, "s", 1));
+    print!(" ");
+    print!("{}", nick(Some("n")));
+    print!(" ");
+    print!("{}", nick(None));
     print!("\n");
 }

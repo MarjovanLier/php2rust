@@ -134,6 +134,19 @@ function scalar(int|string|bool $v): bool
     return is_scalar($v);
 }
 
+function both(int|bool $v): string
+{
+    return (string) $v;
+}
+
+function nullable(bool $b): int|string|null
+{
+    if ($b) {
+        return null;
+    }
+    return 7;
+}
+
 $r = new IdResult(true, new DateComponents('1990', '01', '15'), Gender::Male);
 echo show($r->offsetGet('valid')), ' ', show($r->offsetGet('gender')), ' ', show($r->offsetGet('date_components')), "\n";
 $n = new IdResult(false, null, null);
@@ -159,3 +172,7 @@ try {
     echo $e->getMessage(), "\n";
 }
 echo text(-7), text('x'), text(null), ' ', scalar(false) ? 'yes' : 'no', "\n";
+echo both(true), '|', both(false), '|', both(12), "\n";
+$m = nullable(true);
+$k = nullable(false);
+echo gettype($m), ' ', gettype($k), ' ', is_scalar($m) ? 'scalar' : 'not', "\n";

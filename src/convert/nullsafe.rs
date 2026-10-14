@@ -4,7 +4,7 @@
 use mago_syntax::cst::*;
 use mago_syntax::walker::Walker;
 
-use super::{Converter, Mode};
+use super::Converter;
 use crate::names;
 use crate::printer::{self, RExpr};
 use crate::types::RustType;
@@ -43,46 +43,17 @@ impl Converter<'_> {
                 "?-> needs a value that may be null; write -> (P2R-234)",
             );
         };
-        let binding = match &receiver {
-            RExpr::Var(name) | RExpr::Field(_, name) => name.clone(),
-            _ => {
-                return refused(
-                    self,
-                    "?-> converts only on a variable, parameter or property read (P2R-234)",
-                );
-            }
+        let binding = match self.nullsafe_binding(&receiver, inner, arguments) {
+            Ok(binding) => binding,
+            Err(problem) => return refused(self, problem),
         };
-        if self.is_changing(inner) {
-            return refused(
-                self,
-                "?-> on a class that changes its objects is not supported (P2R-234)",
-            );
-        }
         let ClassLikeMemberSelector::Identifier(name) = member else {
             return refused(self, "a member name must be a plain identifier (P2R-134)");
         };
-        if arguments.is_some_and(|list| reads_rust_name(list, &binding)) {
-            return refused(
-                self,
-                "an argument of ?-> cannot read a variable of the name the closure binds (P2R-234)",
-            );
-        }
-        // An argument runs inside the closure, where a call could borrow what the closure
-        // borrows, or a `?` would leave the closure instead of the function.
-        if arguments.is_some_and(|list| !list.arguments.iter().all(|a| simple(a.value()))) {
-            return refused(
-                self,
-                "an argument of ?-> must be a literal, a constant, a variable or a property read on one (P2R-234)",
-            );
-        }
         let bound = RExpr::Var(binding.clone());
         let (body, member_type) = match (&**inner, arguments) {
             (RustType::Class(class), None) => {
-                let field = self
-                    .class_named(class)
-                    .and_then(|index| self.properties(index).find(|f| f.php_name == name.value))
-                    .map(|f| (f.rust_name.clone(), f.ty.clone()));
-                let Some((field, field_type)) = field else {
+                let Some((field, field_type)) = self.property_type_of(class, name.value) else {
                     self.refuse(node, "this class has no property of that name (P2R-134)");
                     return None;
                 };
@@ -95,31 +66,11 @@ impl Converter<'_> {
                 (copied(read, &value_type), value_type)
             }
             (RustType::Class(class), Some(list)) => {
-                let found = self
-                    .class_named(class)
-                    .and_then(|index| Some((index, self.method_index(index, name.value)?)));
-                let Some((index, at)) = found else {
-                    return refused(self, "this class has no method of that name (P2R-135)");
-                };
-                let method = &self.classes[index].methods[at];
-                let problem = if method.is_static {
-                    Some("a static method is called with ::, not through an object (P2R-153)")
-                } else if method.self_mode == Mode::Mut {
-                    Some("?-> on a method that changes its object is not supported (P2R-234)")
-                } else if method.signature.throws {
-                    Some("?-> on a method that throws is not supported (P2R-234)")
-                } else if method.signature.returns.is_none() {
-                    Some("?-> on a void method is not supported (P2R-234)")
-                } else {
-                    None
-                };
-                if let Some(problem) = problem {
-                    return refused(self, problem);
+                match self.nullsafe_call(node, class, name.value, list, bound) {
+                    Ok(converted) => converted,
+                    Err(Some(problem)) => return refused(self, problem),
+                    Err(None) => return None,
                 }
-                let signature = method.signature.clone();
-                let arguments = self.arguments(list, &signature.parameters, node)?;
-                let call = RExpr::MethodCall(Box::new(bound), signature.rust_name, arguments);
-                (call, signature.returns?)
             }
             _ => {
                 return refused(
@@ -145,6 +96,85 @@ impl Converter<'_> {
         Some((
             RExpr::MethodCall(Box::new(receiver), combinator.into(), vec![closure]),
             result,
+        ))
+    }
+
+    /// The Rust name and type of the property with the PHP name `php` of the class `class`.
+    fn property_type_of(&self, class: &str, php: &[u8]) -> Option<(String, RustType)> {
+        let index = self.class_named(class)?;
+        self.properties(index)
+            .find(|f| f.php_name == php)
+            .map(|f| (f.rust_name.clone(), f.ty.clone()))
+    }
+
+    /// The name the closure of `?->` binds, the snake_case name of the variable or last
+    /// property `receiver` reads, or the problem that stops the `?->` (P2R-234).
+    fn nullsafe_binding(
+        &self,
+        receiver: &RExpr,
+        inner: &RustType,
+        arguments: Option<&ArgumentList<'_>>,
+    ) -> Result<String, &'static str> {
+        let (RExpr::Var(binding) | RExpr::Field(_, binding)) = receiver else {
+            return Err("?-> converts only on a variable, parameter or property read (P2R-234)");
+        };
+        if self.is_changing(inner) {
+            return Err("?-> on a class that changes its objects is not supported (P2R-234)");
+        }
+        if arguments.is_some_and(|list| reads_rust_name(list, binding)) {
+            return Err(
+                "an argument of ?-> cannot read a variable of the name the closure binds (P2R-234)",
+            );
+        }
+        // An argument runs inside the closure, where a call could borrow what the closure
+        // borrows, or a `?` would leave the closure instead of the function.
+        if arguments.is_some_and(|list| !list.arguments.iter().all(|a| simple(a.value()))) {
+            return Err(
+                "an argument of ?-> must be a literal, a constant, a variable or a property read on one (P2R-234)",
+            );
+        }
+        Ok(binding.clone())
+    }
+
+    /// The call `bound.m(args)` of the method `method` of the class `class` inside the
+    /// closure of `?->`, with its return type. `Err(Some(problem))` is a problem for the
+    /// caller to record; `Err(None)` means one was recorded (P2R-234). A class that has a
+    /// method that changes its object is a changing class, which the caller refuses.
+    fn nullsafe_call(
+        &mut self,
+        node: &Expression<'_>,
+        class: &str,
+        method: &[u8],
+        list: &ArgumentList<'_>,
+        bound: RExpr,
+    ) -> Result<(RExpr, RustType), Option<&'static str>> {
+        let found = self
+            .class_named(class)
+            .and_then(|index| Some((index, self.method_index(index, method)?)));
+        let Some((index, at)) = found else {
+            return Err(Some("this class has no method of that name (P2R-135)"));
+        };
+        let info = &self.classes[index].methods[at];
+        if info.is_static {
+            return Err(Some(
+                "a static method is called with ::, not through an object (P2R-153)",
+            ));
+        }
+        if info.signature.throws {
+            return Err(Some(
+                "?-> on a method that throws is not supported (P2R-234)",
+            ));
+        }
+        let signature = info.signature.clone();
+        let Some(returns) = signature.returns else {
+            return Err(Some("?-> on a void method is not supported (P2R-234)"));
+        };
+        let arguments = self
+            .arguments(list, &signature.parameters, node)
+            .ok_or(None)?;
+        Ok((
+            RExpr::MethodCall(Box::new(bound), signature.rust_name, arguments),
+            returns,
         ))
     }
 }

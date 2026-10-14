@@ -147,3 +147,23 @@ function kept(float $x, int $n): string
     }
     return $x === 2.0 ? 'float' : 'int';
 }
+
+/**
+ * @implements ArrayAccess<string, float|string>
+ */
+final readonly class FloatOrText implements ArrayAccess
+{
+    public function offsetExists(mixed $offset): bool
+    {
+        return false;
+    }
+
+    public function offsetGet(mixed $offset): float|string
+    {
+        return 'a';
+    }
+
+    public function offsetSet(mixed $offset, mixed $value): void {}
+
+    public function offsetUnset(mixed $offset): void {}
+}

@@ -15,6 +15,12 @@ pub enum BoolOrDayMonthYearShapeOrString {
 }
 
 #[derive(Clone, Debug)]
+pub enum BoolOrInt {
+    Bool(bool),
+    Int(i64),
+}
+
+#[derive(Clone, Debug)]
 pub enum BoolOrIntOrString {
     Bool(bool),
     Int(i64),
@@ -237,6 +243,20 @@ pub fn scalar(v: &BoolOrIntOrString) -> bool {
     );
 }
 
+pub fn both(v: &BoolOrInt) -> String {
+    return match v {
+        BoolOrInt::Bool(x) => String::from(if *x { "1" } else { "" }),
+        BoolOrInt::Int(x) => x.to_string(),
+    };
+}
+
+pub fn nullable(b: bool) -> Option<IntOrString> {
+    if b {
+        return None;
+    }
+    return Some(IntOrString::Int(7));
+}
+
 #[derive(Clone, Debug)]
 pub struct PhpException {
     pub class: &'static str,
@@ -429,6 +449,41 @@ fn main() {
             "yes"
         } else {
             "no"
+        }
+    );
+    print!("\n");
+    print!("{}", both(&BoolOrInt::Bool(true)));
+    print!("|");
+    print!("{}", both(&BoolOrInt::Bool(false)));
+    print!("|");
+    print!("{}", both(&BoolOrInt::Int(12)));
+    print!("\n");
+    let m = nullable(true);
+    let k = nullable(false);
+    print!(
+        "{}",
+        match &m {
+            Some(IntOrString::Int(_)) => "integer",
+            Some(IntOrString::String(_)) => "string",
+            None => "NULL",
+        }
+    );
+    print!(" ");
+    print!(
+        "{}",
+        match &k {
+            Some(IntOrString::Int(_)) => "integer",
+            Some(IntOrString::String(_)) => "string",
+            None => "NULL",
+        }
+    );
+    print!(" ");
+    print!(
+        "{}",
+        if matches!(&m, Some(IntOrString::Int(_)) | Some(IntOrString::String(_))) {
+            "scalar"
+        } else {
+            "not"
         }
     );
     print!("\n");

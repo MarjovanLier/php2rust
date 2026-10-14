@@ -1,2 +1,5 @@
 input.php:7:22: the class name PhpException has no Rust form, or the output uses it (P2R-111)
 input.php:17:15: a throw converts only for new of one of PHP's built-in exception classes (P2R-212)
+input.php:22:22: the class name Result has no Rust form, or the output uses it (P2R-111)
+input.php:24:22: the class name Ok has no Rust form, or the output uses it (P2R-111)
+input.php:26:6: the enum name Err has no Rust form, or the output uses it (P2R-111)

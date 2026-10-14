@@ -69,3 +69,33 @@ function make(): ?Leaf
 {
     return null;
 }
+
+final readonly class Risky
+{
+    public function __construct(public Leaf $leaf) {}
+
+    public function check(): string
+    {
+        throw new RuntimeException('no');
+    }
+}
+
+function throwing(?Risky $r): ?string
+{
+    return $r?->check();
+}
+
+function chainedPlain(?Risky $r): ?string
+{
+    return $r?->leaf->name;
+}
+
+function tested(?Leaf $leaf): bool
+{
+    return isset($leaf?->name) || empty($leaf?->name);
+}
+
+function joined(?Leaf $leaf): string
+{
+    return "name: {$leaf?->name}";
+}

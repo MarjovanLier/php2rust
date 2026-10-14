@@ -68,6 +68,37 @@ final class Config
     public int|string $mode = 'auto';
 }
 
+final class Slot
+{
+    public int|string $v = 0;
+
+    public function set(string $n): void
+    {
+        $this->v = $n;
+    }
+
+    public function kind(): string
+    {
+        $v = $this->v;
+        return gettype($v);
+    }
+}
+
+function describe(int|string $v): string
+{
+    return gettype($v);
+}
+
+function describeEither(bool $c, string $s, int $n): string
+{
+    return describe($c ? $s : $n);
+}
+
+function nick(?string $s): string
+{
+    return show($s);
+}
+
 function either(int|string|null $a, int|string $b): int|string
 {
     return $a ?? $b;
@@ -100,3 +131,8 @@ echo show(copied('c')), "\n";
 $config = new Config();
 echo show($config->mode), ' ', show(either(null, 4)), ' ', show(either('s', 4)), "\n";
 echo bound(3), ' ', bound(null), "\n";
+$slot = new Slot();
+echo $slot->kind(), ' ';
+$slot->set('x');
+echo $slot->kind(), "\n";
+echo describeEither(true, 's', 1), ' ', describeEither(false, 's', 1), ' ', nick('n'), ' ', nick(null), "\n";

@@ -329,9 +329,11 @@ pub(super) fn used_items<'a>(
 ) -> BTreeSet<&'a str> {
     let tokens = tokens(text);
     let mut used = BTreeSet::new();
-    // The brace depth of an enum body; its identifiers are the cases.
+    // The brace depth of an enum body; its identifiers are the cases, other than the types
+    // inside the parentheses of a union enum's variants (P2R-230).
     let mut enum_body: Option<usize> = None;
     let mut depth = 0;
+    let mut parens = 0usize;
     // The bracket depth inside an attribute (`#[derive(Debug)]`), whose names are macros.
     let mut attribute: Option<usize> = None;
     let mut brackets = 0;
@@ -366,9 +368,17 @@ pub(super) fn used_items<'a>(
                 depth = depth.saturating_sub(1);
                 continue;
             }
+            "(" => {
+                parens += 1;
+                continue;
+            }
+            ")" => {
+                parens = parens.saturating_sub(1);
+                continue;
+            }
             _ => {}
         }
-        if enum_body.is_some() {
+        if enum_body.is_some() && parens == 0 {
             continue;
         }
         let Some((name, kind)) = items.get_key_value(*token) else {

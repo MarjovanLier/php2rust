@@ -672,7 +672,7 @@ impl Converter<'_> {
         self.settle(var, variable);
         let entry = &self.variables.entries[var];
         let known = entry.ty.clone()?;
-        match self.later_type(var, &known, variable) {
+        match self.later_type(var, &known, variable, true) {
             Ok(ty) => {
                 let name = entry.rust_name.clone();
                 let read = match self.variables.value(var) {
@@ -1123,8 +1123,8 @@ impl Converter<'_> {
         let empty = self.empty_list(node);
         let found = match (self.site_type(node), assigned) {
             // A union value gives a new variable its union type where Mago types the write
-            // as some of its members (P2R-232).
-            (Err(_), Some(value))
+            // as one or more of its members (P2R-232).
+            (_, Some(value))
                 if matches!(value.inner(), RustType::Union(name)
                 if self.expression_type(node).is_some_and(|site| {
                     self.within_union(site, name, matches!(value, RustType::Option(_)))
@@ -1171,7 +1171,15 @@ impl Converter<'_> {
                     return Some((var, false));
                 }
                 let known = self.variables.entries[var].ty.clone()?;
-                self.later_type(var, &known, node)
+                match assigned {
+                    // A value of the variable's union type keeps it (P2R-232).
+                    Some(value)
+                        if *value == known && matches!(known.inner(), RustType::Union(_)) =>
+                    {
+                        Ok(known)
+                    }
+                    _ => self.later_type(var, &known, node, false),
+                }
             }
         };
         // The value must have the variable's type, or be the `T` of an `Option<T>`: Mago's
@@ -1517,13 +1525,15 @@ impl Converter<'_> {
         self.expression_type(node).is_some_and(lists::only_empty)
     }
 
-    /// The type of a later read or write of `var` at `node`, refused when it differs from
-    /// the variable's type `known` (P2R-34). `[]` fits a list of any element type (P2R-21).
+    /// The type of a later read, or a write when `read` is false, of `var` at `node`,
+    /// refused when it differs from the variable's type `known` (P2R-34). `[]` fits a list
+    /// of any element type (P2R-21).
     fn later_type(
         &self,
         var: Var,
         known: &RustType,
         node: &impl HasSpan,
+        read: bool,
     ) -> Result<RustType, String> {
         if matches!(known, RustType::Vec(_)) && self.empty_list(node) {
             return Ok(known.clone());
@@ -1555,9 +1565,10 @@ impl Converter<'_> {
         }
         let entry = &self.variables.entries[var];
         let found = self.site_type(node);
-        // A union value keeps its type where Mago narrows it to some of its members, one
-        // included (P2R-232).
+        // A read of a union value keeps its type where Mago narrows it to some of its
+        // members, one included (P2R-232); a write such as `.=` keeps P2R-34.
         if let RustType::Union(name) = known.inner()
+            && read
             && self.expression_type(node).is_some_and(|site| {
                 self.within_union(site, name, matches!(known, RustType::Option(_)))
             })

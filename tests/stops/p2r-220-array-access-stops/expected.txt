@@ -15,3 +15,5 @@ input.php:130:46: a parameter of an ArrayAccess method must keep the type mixed 
 input.php:132:33: a parameter of an ArrayAccess method must keep the type mixed (P2R-220)
 input.php:139:16: only a list or a string can be read by index (P2R-47, P2R-165)
 input.php:146:9: the type float(0.5)|int<2, max> has no Rust type (P2R-22)
+input.php:154:34: ArrayAccess converts only with @implements ArrayAccess<K, V> whose K and V have Rust types other than float (P2R-220)
+input.php:166:46: PHP keeps an int where only a docblock gives float, which Rust would turn into a float (P2R-25)

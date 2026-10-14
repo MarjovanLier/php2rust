@@ -11,7 +11,7 @@ use mago_span::Span;
 use mago_syntax::cst::*;
 
 use super::helpers::Helper;
-use super::{Converter, lists, nulls};
+use super::{Converter, lists, nulls, unions};
 use crate::printer::RExpr;
 use crate::types::{self, RustType};
 
@@ -503,7 +503,9 @@ impl Converter<'_> {
         if ty == *wanted {
             return Some(expr);
         }
-        let message = if matches!(ty, RustType::Option(_)) {
+        let message = if matches!(ty.inner(), RustType::Union(_)) {
+            unions::UNION_BUILT_IN
+        } else if matches!(ty, RustType::Option(_)) {
             nulls::NULL_BUILT_IN
         } else {
             message

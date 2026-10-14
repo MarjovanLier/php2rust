@@ -272,6 +272,9 @@ pub fn declared_type(union: &TUnion, enums: &TypeNames) -> Result<RustType, Stri
             ],
         };
         for ty in found {
+            if nullable_object(&ty) {
+                return Err(NULLABLE_OBJECT.to_owned());
+            }
             if !members.contains(&ty) {
                 members.push(ty);
             }
@@ -413,6 +416,12 @@ fn shape_type(keyed: &TKeyedArray, enums: &TypeNames) -> Result<RustType, String
     {
         return Err(format!(
             "{rust_name}, the Rust name of this array shape, is the name of an enum or class (P2R-200)"
+        ));
+    }
+    // A union enum checks the shapes known when it is made, so a later shape checks it.
+    if enums.unions.borrow().contains_key(&rust_name) {
+        return Err(format!(
+            "{rust_name}, the Rust name of this array shape, is the name of a union enum (P2R-230)"
         ));
     }
     let mut shapes = enums.shapes.borrow_mut();

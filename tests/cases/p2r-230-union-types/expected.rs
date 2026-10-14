@@ -17,9 +17,21 @@ pub enum BoolOrFloatOrIntOrListOrStringOrXYShape {
 }
 
 #[derive(Clone, Debug)]
+pub enum BoolOrString {
+    Bool(bool),
+    String(String),
+}
+
+#[derive(Clone, Debug)]
 pub enum BoolOrSuit {
     Bool(bool),
     Suit(Suit),
+}
+
+#[derive(Clone, Debug)]
+pub enum IntOrList {
+    Int(i64),
+    List(Vec<Tree>),
 }
 
 #[derive(Clone, Debug)]
@@ -103,6 +115,83 @@ pub fn point_kind(v: &ListOrXYShape) -> String {
     .to_string();
 }
 
+pub fn key_type(k: &IntOrString) -> String {
+    return (match k {
+        IntOrString::Int(_) => "integer",
+        IntOrString::String(_) => "string",
+    })
+    .to_string();
+}
+
+pub fn literal(x: &IntOrString) -> String {
+    return (match x {
+        IntOrString::Int(_) => "integer",
+        IntOrString::String(_) => "string",
+    })
+    .to_string();
+}
+
+pub fn flag(x: &BoolOrString) -> String {
+    return (match x {
+        BoolOrString::Bool(_) => "boolean",
+        BoolOrString::String(_) => "string",
+    })
+    .to_string();
+}
+
+pub fn defaulted(v: &IntOrString) -> String {
+    return (match v {
+        IntOrString::Int(_) => "integer",
+        IntOrString::String(_) => "string",
+    })
+    .to_string();
+}
+
+#[derive(Clone, Debug)]
+pub struct Lookup {}
+
+impl Lookup {
+    pub fn new() -> Lookup {
+        Lookup {}
+    }
+
+    pub fn offset_exists(&self, _offset: &IntOrString) -> bool {
+        return true;
+    }
+
+    pub fn offset_get(&self, offset: &IntOrString) -> String {
+        return (match offset {
+            IntOrString::Int(_) => "integer",
+            IntOrString::String(_) => "string",
+        })
+        .to_string();
+    }
+
+    pub fn offset_set(&self, _offset: &IntOrString, _value: &str) {}
+
+    pub fn offset_unset(&self, _offset: &IntOrString) {}
+}
+
+#[derive(Clone, Debug)]
+pub struct Tree {
+    pub kids: IntOrList,
+}
+
+impl Tree {
+    pub fn new(kids: &IntOrList) -> Tree {
+        Tree { kids: kids.clone() }
+    }
+
+    pub fn kind(&self) -> String {
+        let kids = self.kids.clone();
+        return (match &kids {
+            IntOrList::Int(_) => "integer",
+            IntOrList::List(_) => "array",
+        })
+        .to_string();
+    }
+}
+
 pub fn suited(card: &Card) -> String {
     let suit = card.suit.clone();
     return (match &suit {
@@ -165,5 +254,30 @@ fn main() {
     print!("{}", suited(&joker));
     print!(" ");
     print!("{}", suited(&Card::new(&IntOrString::Int(2), None)));
+    print!("\n");
+    print!("{}", key_type(&IntOrString::Int(1)));
+    print!(" ");
+    print!("{}", literal(&IntOrString::String(String::from("a"))));
+    print!(" ");
+    print!("{}", flag(&BoolOrString::Bool(true)));
+    print!(" ");
+    print!("{}", flag(&BoolOrString::String(String::from("t"))));
+    print!("\n");
+    print!("{}", defaulted(&IntOrString::Int(5)));
+    print!(" ");
+    print!("{}", defaulted(&IntOrString::String(String::from("x"))));
+    print!("\n");
+    let lookup = Lookup::new();
+    print!("{}", lookup.offset_get(&IntOrString::Int(3)));
+    print!(" ");
+    print!(
+        "{}",
+        lookup.offset_get(&IntOrString::String(String::from("k")))
+    );
+    print!("\n");
+    let leaves = vec![Tree::new(&IntOrList::Int(2))];
+    print!("{}", Tree::new(&IntOrList::Int(1)).kind());
+    print!(" ");
+    print!("{}", Tree::new(&IntOrList::List(leaves)).kind());
     print!("\n");
 }

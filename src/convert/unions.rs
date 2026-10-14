@@ -12,6 +12,11 @@ use super::lists::unparenthesized;
 use crate::printer::{self, RExpr};
 use crate::types::{self, RustType};
 
+/// The problem of a union value as the argument of a built-in function other than
+/// `is_scalar()` and `gettype()` (P2R-232).
+pub(super) const UNION_BUILT_IN: &str =
+    "a value of a union type cannot go to this built-in function (P2R-232)";
+
 /// What a `match` over the variants of a union value gives (P2R-233).
 #[derive(Clone, Copy, PartialEq)]
 pub(super) enum Test {
@@ -153,8 +158,12 @@ impl Converter<'_> {
                 .filter(|member| scalar(member))
                 .map(|member| pattern(&types::variant(member), "_"))
                 .collect();
-            let text = format!("matches!({subject}, {})", patterns.join(" | "));
-            return Some((RExpr::Variants(text, false), RustType::Bool));
+            // A macro call needs no parentheses, wherever it stands (P2R-43).
+            let call = RExpr::Call(
+                "matches!".to_owned(),
+                vec![RExpr::Path(subject), RExpr::Path(patterns.join(" | "))],
+            );
+            return Some((call, RustType::Bool));
         }
         // `(string)` gives an owned string when an int needs `to_string()`.
         let owned = test == Test::Text && members.contains(&RustType::I64);
@@ -209,9 +218,15 @@ impl Converter<'_> {
 
 /// The problem of a declared type whose PHP type `hint` and Mago type `union` disagree on
 /// int and float, or that PHP rejects while Mago accepts it (P2R-25, P2R-230).
-pub(super) fn native_problem(hint: &Hint<'_>, union: &TUnion) -> Option<&'static str> {
+/// `resolve` gives the lowercase fully qualified name of a class name in the hint, or of
+/// the class whose body holds it for `self` (`None`).
+pub(super) fn native_problem(
+    hint: &Hint<'_>,
+    union: &TUnion,
+    resolve: &dyn Fn(Option<&Identifier<'_>>) -> Option<Vec<u8>>,
+) -> Option<&'static str> {
     let mut written = Vec::new();
-    hint_names(hint, &mut written);
+    hint_names(hint, resolve, &mut written);
     let has = |name: &str| written.iter().any(|w| w == name);
     if written
         .iter()
@@ -236,7 +251,7 @@ pub(super) fn native_problem(hint: &Hint<'_>, union: &TUnion) -> Option<&'static
             _ => {}
         }
     }
-    if int && has("float") && !has("int") && !has("mixed") {
+    if int && has("float") && !has("int") {
         return Some(
             "PHP stores an int as a float for this declared type, while its docblock type holds int (P2R-230)",
         );
@@ -249,18 +264,29 @@ pub(super) fn native_problem(hint: &Hint<'_>, union: &TUnion) -> Option<&'static
     None
 }
 
-/// The lowercase names a PHP type hint writes, through `?`, `( )` and `|`.
-fn hint_names(hint: &Hint<'_>, written: &mut Vec<String>) {
+/// The lowercase names a PHP type hint writes, through `?`, `( )` and `|`, a class name
+/// resolved as PHP resolves it, so `Foo|\App\Foo` names one class twice.
+fn hint_names(
+    hint: &Hint<'_>,
+    resolve: &dyn Fn(Option<&Identifier<'_>>) -> Option<Vec<u8>>,
+    written: &mut Vec<String>,
+) {
     let name = match hint {
-        Hint::Nullable(nullable) => return hint_names(nullable.hint, written),
-        Hint::Parenthesized(inner) => return hint_names(inner.hint, written),
+        Hint::Nullable(nullable) => return hint_names(nullable.hint, resolve, written),
+        Hint::Parenthesized(inner) => return hint_names(inner.hint, resolve, written),
         Hint::Union(union) => {
-            hint_names(union.left, written);
-            return hint_names(union.right, written);
+            hint_names(union.left, resolve, written);
+            return hint_names(union.right, resolve, written);
         }
-        Hint::Identifier(identifier) => {
-            String::from_utf8_lossy(identifier.value()).to_ascii_lowercase()
-        }
+        Hint::Identifier(identifier) => match resolve(Some(identifier)) {
+            Some(name) => String::from_utf8_lossy(&name).into_owned(),
+            None => return,
+        },
+        // `self` names the class whose body holds it (P2R-154).
+        Hint::Self_(_) => match resolve(None) {
+            Some(name) => String::from_utf8_lossy(&name).into_owned(),
+            None => return,
+        },
         Hint::Integer(_) => "int".to_owned(),
         Hint::Float(_) => "float".to_owned(),
         Hint::Bool(_) => "bool".to_owned(),

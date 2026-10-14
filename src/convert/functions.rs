@@ -11,7 +11,7 @@ use mago_syntax::walker::Walker;
 use super::control::emit;
 use super::{
     Context, Converter, Mode, ParameterSignature, Signature, Variables, classes, helpers, lists,
-    recursion, unions,
+    nulls, recursion, unions,
 };
 use crate::names;
 use crate::printer::RExpr;
@@ -262,10 +262,11 @@ impl Converter<'_> {
             }
             other => self.expression(other)?,
         };
-        // An int fits a float parameter (P2R-25); every other value must have the
-        // parameter's type, or its inner type for a nullable one.
+        // An int fits a float parameter (P2R-25), and a member value a union one
+        // (P2R-231); every other value must have the parameter's type, or its inner type
+        // for a nullable one.
         let widens = found == RustType::I64 && *inner == RustType::F64;
-        if found != *ty && found != *inner && !widens {
+        if found != *ty && found != *inner && !widens && nulls::member_path(&found, ty).is_none() {
             self.refuse(
                 value,
                 "a parameter default must have the parameter's type (P2R-168)",
@@ -338,7 +339,13 @@ impl Converter<'_> {
             self.refuse(node, "Mago found no type here (P2R-23)");
             return None;
         };
-        if let Some(problem) = hint.and_then(|hint| unions::native_problem(hint, union)) {
+        let resolve = |identifier: Option<&Identifier<'_>>| match identifier {
+            Some(identifier) => Some(self.name_key(identifier, identifier.value())),
+            None => self
+                .current_class
+                .map(|index| self.classes[index].key.clone()),
+        };
+        if let Some(problem) = hint.and_then(|hint| unions::native_problem(hint, union, &resolve)) {
             self.refuse(node, problem);
             return None;
         }

@@ -187,7 +187,10 @@ impl Converter<'_> {
         // Mago may type an argument as a number where it knows more (P2R-104).
         let mut plain = true;
         for (node, (_, ty)) in [(left, &left_value), (right, &right_value)] {
-            if matches!(ty, RustType::Option(_)) {
+            if matches!(ty.inner(), RustType::Union(_)) {
+                self.refuse(node, unions::UNION_BUILT_IN);
+                plain = false;
+            } else if matches!(ty, RustType::Option(_)) {
                 self.refuse(node, nulls::NULL_BUILT_IN);
                 plain = false;
             }

@@ -72,3 +72,88 @@ function named(bool|int $v): int
 {
     return 1;
 }
+
+/** @param array{x: int}|bool $v */
+function unionFirst(array|bool $v): int
+{
+    return 1;
+}
+
+/** @param array{bool_or_x: int} $s */
+function shapeSecond(array $s): int
+{
+    return 1;
+}
+
+/** @param array{int_or_y: int} $s */
+function shapeFirst(array $s): int
+{
+    return 1;
+}
+
+/** @param array{y: int}|int $v */
+function unionSecond(array|int $v): int
+{
+    return 1;
+}
+
+final readonly class Cat {}
+
+final readonly class Dog {}
+
+final readonly class CatOrDog {}
+
+function threeMembers(Cat|Dog|int $v): int
+{
+    return 1;
+}
+
+function twoMembers(CatOrDog|int $v): int
+{
+    return 1;
+}
+
+function trueFalse(true|false $v): int
+{
+    return 1;
+}
+
+/** @param numeric|bool $v */
+function numericMember(int|float|string|bool $v): int
+{
+    return 1;
+}
+
+function objectMember(object|int $v): int
+{
+    return 1;
+}
+
+/** @param array{a: int|string} $s */
+function shapeField(array $s): int
+{
+    return 1;
+}
+
+function sameClass(Cat|\Cat $v): int
+{
+    return 1;
+}
+
+final readonly class Card
+{
+    public function __construct(public int $n) {}
+
+    public function same(self|Card $v): int
+    {
+        return 1;
+    }
+}
+
+final readonly class Item {}
+
+/** @param list<?Item>|string $v */
+function nullableList(array|string $v): int
+{
+    return 1;
+}

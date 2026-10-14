@@ -285,17 +285,30 @@ fn shape_type(keyed: &TKeyedArray, enums: &TypeNames) -> Result<RustType, String
     }
     let mut shapes = enums.shapes.borrow_mut();
     match shapes.get(&rust_name) {
-        Some(known) if *known != fields => {
+        // After a check of a field against null, Mago narrows the whole shape: that is
+        // still the declared struct, as a narrowed read keeps its `Option` (P2R-104).
+        Some(known) if narrows(known, &fields) => {}
+        Some(_) => {
             return Err(format!(
                 "two different array shapes give the Rust name {rust_name} (P2R-200)"
             ));
         }
-        Some(_) => {}
         None => {
             shapes.insert(rust_name.clone(), fields);
         }
     }
     Ok(RustType::Shape(rust_name))
+}
+
+/// True when `fields` are the fields of `known`, each of the same type or, for a field
+/// that may be null, of its inner type (P2R-104, P2R-200).
+fn narrows(known: &[ShapeField], fields: &[ShapeField]) -> bool {
+    known.len() == fields.len()
+        && known.iter().zip(fields).all(|(known, field)| {
+            known.key == field.key
+                && (known.ty == field.ty
+                    || matches!(&known.ty, RustType::Option(inner) if **inner == field.ty))
+        })
 }
 
 /// True when every member of `union` is `null`: the type of the literal `null`, and of a

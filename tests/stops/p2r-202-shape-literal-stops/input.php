@@ -43,3 +43,11 @@ function widened(): array
 {
     return ['x' => 1];
 }
+
+/**
+ * @return array{x: float}
+ */
+function chosen(bool $b): array
+{
+    return ['x' => $b ? 1 : 2.5];
+}

@@ -7,7 +7,7 @@ use mago_syntax::cst::*;
 
 use super::flow::Var;
 use super::variables::Part;
-use super::{Converter, booleans, lists};
+use super::{Converter, booleans, lists, shapes};
 use crate::printer::{self, BinOp, RExpr};
 use crate::types::RustType;
 
@@ -260,8 +260,12 @@ impl Converter<'_> {
     /// against null (P2R-203).
     pub(super) fn coalesce(&mut self, binary: &Binary<'_>) -> Option<(RExpr, RustType)> {
         let left_node = lists::unparenthesized(binary.lhs);
-        let element = matches!(left_node, Expression::ArrayAccess(access)
-            if matches!(self.site_type(access.array), Ok(RustType::Shape(_))));
+        let holder = match left_node {
+            Expression::ArrayAccess(access) => self.site_type(access.array).ok(),
+            _ => None,
+        };
+        let shape = matches!(holder, Some(RustType::Shape(_)));
+        let element = shape && shapes::no_list_read(left_node);
         if !element
             && !matches!(
                 left_node,
@@ -276,8 +280,12 @@ impl Converter<'_> {
                 Expression::Access(Access::Property(_)) | Expression::Call(Call::Method(_))
             ) {
                 "?? on a property read or a method call is not supported yet (P2R-134)"
+            } else if shape {
+                "?? on an array shape element converts only when no list element is read on the way to it (P2R-203)"
+            } else if matches!(&holder, Some(RustType::Option(inner)) if inner.is_struct()) {
+                "a value that may be null cannot be read by key (P2R-106)"
             } else {
-                "?? converts on a variable, parameter or call only; PHP checks anything else with isset (P2R-105)"
+                "?? converts on a variable, parameter, call or array shape element only; PHP checks anything else with isset (P2R-105)"
             };
             self.refuse(binary, message);
             return None;

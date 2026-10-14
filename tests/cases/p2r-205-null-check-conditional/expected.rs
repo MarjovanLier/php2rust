@@ -142,4 +142,26 @@ fn main() {
     .to_string();
     print!("{}", text);
     print!("\n");
+    print!(
+        "{}",
+        if let Some(p) = p.as_deref() {
+            p
+        } else {
+            "none"
+        }
+    );
+    print!(" ");
+    print!(
+        "{}",
+        if let Some(q) = q.as_deref() {
+            q
+        } else {
+            "none"
+        }
+    );
+    print!("\n");
+    for v in vec![Some(String::from("a")), None] {
+        print!("{}", if let Some(v) = v.as_deref() { v } else { "-" });
+    }
+    print!("\n");
 }

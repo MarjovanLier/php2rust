@@ -345,7 +345,14 @@ impl Converter<'_> {
             let bound = binding
                 .take()
                 .map(|(variable, inner)| self.bind_null(variable, inner));
-            arms.push(self.conditional_arm(arm, expected, node.span()));
+            // A string arm is lent while the binding it may read still holds (P2R-205).
+            let converted = match self.conditional_arm(arm, expected, node.span()) {
+                Some((expr, RustType::String)) => self
+                    .lent_arm(arm, expr)
+                    .map(|expr| (expr, RustType::String)),
+                other => other,
+            };
+            arms.push(converted);
             self.variables.close_bindings(bound.as_slice());
             let end = self.variables.flow.current();
             self.variables.flow.edge(end, join);
@@ -367,16 +374,10 @@ impl Converter<'_> {
             );
             return None;
         }
-        let (then_expr, else_expr) = if ty == RustType::String {
-            let lent = self.lent_arm(then, then_expr);
-            (lent, self.lent_arm(otherwise, else_expr))
-        } else {
-            (Some(then_expr), Some(else_expr))
-        };
         let expr = RExpr::If(
             Box::new(condition),
-            Box::new(then_expr?),
-            Box::new(else_expr?),
+            Box::new(then_expr),
+            Box::new(else_expr),
         );
         Some((expr, ty))
     }

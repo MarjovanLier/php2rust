@@ -129,8 +129,9 @@ converts:
   out when the other arms already cover every enum case or both `true` and `false`.
 - `$c ? $a : $b` with a bool condition: `if c { a } else { b }`, of int, float, bool,
   string, enum, object or shape arms, or of `?int`, `?float`, `?bool`, a nullable enum,
-  object or shape where the place it stands in has such a type. String arms are lent, and the result is copied
-  once where a `String` is needed: `(if c { "a" } else { "b" }).to_string()`.
+  object or shape where the place it stands in has such a type. String arms are lent,
+  and the result is copied once where a `String` is needed:
+  `(if c { "a" } else { "b" }).to_string()`.
 - `+`, `-`, `*`, unary minus, `+=`, `-=`, `*=`, `++` and `--` on two ints or two floats,
   `%` on ints, `===` and `!==` on two ints, floats, bools or strings, `==` and `!=` on
   two ints, floats or bools, `<`, `>`, `<=` and `>=` on two ints or two floats, and `&&`,
@@ -183,8 +184,10 @@ the others are findings of the Mago analyser. In short:
   property read or list element on a call or `new`.
 - For array shapes: an optional key (`key?:`), an int key, a shape open to other keys
   (`...`), a key with no Rust name, a shape that holds an object or an enum without
-  cases, two shapes that give one struct name, comparing, printing or changing a shape,
-  `isset` of an element, a key that is not a string literal, a read on an array
+  cases, two shapes that give one struct name, a struct name that an enum or class
+  already has, comparing, printing or changing a shape, `isset` or `empty` of an
+  element, `??` on an element of a list element, a key that is not a string literal,
+  a read on an array
   literal, a literal with a repeated key, a spread or an element without a key, an int
   for a `float` field (PHP keeps the int), a list of nullable objects (`list<?Point>`),
   and a class that holds itself through `?C` (`?Node $next` in `Node`).

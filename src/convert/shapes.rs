@@ -1,6 +1,8 @@
 //! Array shapes as structs: the struct of each shape, shape literals and element reads
 //! (P2R-200 to P2R-203).
 
+use mago_codex::ttype::atomic::TAtomic;
+use mago_codex::ttype::atomic::scalar::TScalar;
 use mago_span::HasSpan;
 use mago_syntax::cst::*;
 
@@ -18,6 +20,18 @@ fn literal_key<'k>(key: &'k Expression<'_>) -> Option<&'k [u8]> {
     match unparenthesized(key) {
         Expression::Literal(Literal::String(string)) => string.value,
         _ => None,
+    }
+}
+
+/// True for a shape element chain that reads no list element: where PHP's isset of `??`
+/// finds an index out of range and gives the default, Rust panics (P2R-203).
+pub(super) fn no_list_read(expression: &Expression<'_>) -> bool {
+    match unparenthesized(expression) {
+        Expression::ArrayAccess(access) => {
+            literal_key(access.index).is_some() && no_list_read(access.array)
+        }
+        Expression::Access(Access::Property(access)) => no_list_read(access.object),
+        _ => true,
     }
 }
 
@@ -114,8 +128,16 @@ impl Converter<'_> {
                     );
                     return None;
                 }
-                // PHP does not check a docblock shape, so the field keeps the int.
-                if *found.inner() == RustType::I64 && *field.ty.inner() == RustType::F64 {
+                // PHP does not check a docblock shape, so the field keeps the int. Mago's
+                // type shows an int that a `?:` arm turned into a float already.
+                let int = *found.inner() == RustType::I64
+                    || self.expression_type(value).is_some_and(|union| {
+                        union
+                            .types
+                            .iter()
+                            .any(|a| matches!(a, TAtomic::Scalar(TScalar::Integer(_))))
+                    });
+                if int && *field.ty.inner() == RustType::F64 {
                     self.refuse(
                         value,
                         "an int cannot go into a float field of an array shape, because PHP keeps the int (P2R-202)",

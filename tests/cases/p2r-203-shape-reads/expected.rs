@@ -52,6 +52,13 @@ pub fn day(data: &AgeNameWhenShape) -> String {
     return when.day.clone();
 }
 
+pub fn aged(data: &AgeNameWhenShape) -> String {
+    if data.age.is_some() {
+        return data.name.as_deref().unwrap_or("someone").to_string();
+    }
+    return String::from("ageless");
+}
+
 pub fn nested(data: &InnerListShape) -> i64 {
     return data.inner.n + data.list.len() as i64;
 }
@@ -102,6 +109,24 @@ fn main() {
         nested(&InnerListShape {
             inner: NShape { n: 5 },
             list: vec![1, 2, 3]
+        })
+    );
+    print!("\n");
+    print!(
+        "{}",
+        aged(&AgeNameWhenShape {
+            name: Some(String::from("Cy")),
+            age: Some(3),
+            when: None
+        })
+    );
+    print!(" ");
+    print!(
+        "{}",
+        aged(&AgeNameWhenShape {
+            name: Some(String::from("Di")),
+            age: None,
+            when: None
         })
     );
     print!("\n");

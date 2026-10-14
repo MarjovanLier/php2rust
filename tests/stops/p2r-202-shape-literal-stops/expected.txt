@@ -3,3 +3,4 @@ input.php:19:12: an array literal with keys converts only as an array shape, wit
 input.php:27:12: an array literal with keys converts only as an array shape, with a string literal key on every element (P2R-202)
 input.php:36:12: an array literal with keys converts only as an array shape, with a string literal key on every element (P2R-202)
 input.php:44:20: an int cannot go into a float field of an array shape, because PHP keeps the int (P2R-202)
+input.php:52:20: an int cannot go into a float field of an array shape, because PHP keeps the int (P2R-202)

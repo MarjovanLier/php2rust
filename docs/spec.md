@@ -725,7 +725,8 @@ Sections 3 to 9 apply to nullable values unless this section says otherwise.
   empty. A parameter promotes with any promotion modifier: a visibility,
   `readonly`, `final` or an asymmetric visibility such as `private(set)`. A
   constructor docblock `@param` or an inline `@var` on a promoted parameter
-  may refine `array` to `list<T>` (P2R-23). A class without a constructor
+  may refine `array` to `list<T>` or to an array shape (P2R-23, P2R-201). A
+  class without a constructor
   gets a `new` without parameters. PHP declares such a class before any
   statement runs, so it may come after the statements outside functions.
   These stop the conversion:
@@ -1444,8 +1445,9 @@ converts those forms.
   arm or a condition that is itself a `?:`, with or without parentheses,
   because Mago reads an unparenthesized nested `?:` from the left where PHP
   rejects it; an arm that assigns, `++` or `--`; a string arm of any other
-  form, such as a call, a joined string, `??` on a call, or a property read
-  or list element on a call or `new`, because Rust drops that string at the
+  form, such as a call, a joined string, `??` on a call, or a property read,
+  list element or shape element on a call or `new`, because Rust drops that
+  string at the
   end of the arm; an `if` of lists, or of strings or lists that may be null
   (an `if` of objects and shapes converts by P2R-205); and a value that may
   be null where the type is not nullable (P2R-106). A check against null
@@ -1601,7 +1603,10 @@ string}`), and keeps an object that may be missing in a nullable property
   shape could exist and rustc rejects the code after it (P2R-130); two
   shapes of one Rust name with different keys or different field types
   (`array{a_b: int}` and `array{a: int, b: int}` both give `ABShape`), at
-  the places of the shape the tool meets second; and a shape whose Rust
+  the places of the shape the tool meets second, other than a shape whose
+  fields are those of the first with a `?T` field typed `T`, which Mago
+  gives a shape after a check of that field against null and which maps to
+  the struct of the first (P2R-104); and a shape whose Rust
   name is the Rust name of an enum or class of the input (P2R-131,
   P2R-173).
 - **P2R-201** A value of a shape type MUST behave as a value of a readonly
@@ -1609,8 +1614,8 @@ string}`), and keeps an object that may be missing in a nullable property
   owned, `list<S>` gives `Vec<S>`, and every place where P2R-26 copies a
   string copies a shape, with `.clone()` unless the source is an owned
   variable that is not read again. A docblock may give a parameter, return
-  value or promoted property declared `array` or `?array` a shape type
-  (P2R-23). A new value for a whole shape variable converts as for an
+  value, promoted property or declared property (P2R-140) declared `array`
+  or `?array` a shape type (P2R-23). A new value for a whole shape variable converts as for an
   object (`$s = [...]`). These stop the conversion: `===`, `!==`, `==`,
   `!=`, `<`, `>`, `<=`, `>=` and `<=>` with a shape operand, also of a
   nullable shape type, other than `===` and `!==` with the literal `null`
@@ -1622,7 +1627,10 @@ string}`), and keeps an object that may be missing in a nullable property
   function (`count`, `array_keys`); a write to an element (`$s['k'] = v`, a
   compound assignment, `++`, `--`, `??=`), an append and `unset`; `isset`
   and `empty` of an element; and an assignment to a function's own shape
-  parameter, as P2R-132 stops one for a class.
+  parameter, as P2R-132 stops one for a class. Where a requirement of
+  sections 3 to 5 already stops the same form for other types, the problem
+  cites that requirement (P2R-41 for a `foreach`, P2R-42 for a condition,
+  P2R-48 for a built-in function, P2R-07 for a cast, `isset` and `empty`).
 - **P2R-202** An array literal whose elements all have a key that is a
   string literal (single-quoted, or double-quoted without interpolation)
   MUST convert to a struct literal when its type is a shape (P2R-200):
@@ -1648,8 +1656,9 @@ string}`), and keeps an object that may be missing in a nullable property
   field is written `field: value`, also where the value is a variable of
   the field's name, because whether that variable moves or is copied is
   known only at the end of the body (P2R-26). These stop the conversion: an
-  int value for a `float` or `?float` field and a list with int elements
-  for a `list<float>` field, because PHP does not check a docblock shape and
+  int value for a `float` or `?float` field, also where only one arm of a
+  `?:` gives an int (`$b ? 1 : 2.5`), and a list with int elements for a
+  `list<float>` field, because PHP does not check a docblock shape and
   keeps the int (P2R-25); a key that appears twice, which PHP keeps once and
   rustc rejects; a literal whose keys are not the keys of the shape it flows
   into; and an element without a key, with a key of another form (a
@@ -1658,18 +1667,23 @@ string}`), and keeps an object that may be missing in a nullable property
 - **P2R-203** `$s['k']`, where `$s` has a shape type and `'k'` is a string
   literal key of that shape, MUST convert to the field read `s.k`, with the
   field's Rust type, lent as a property read is (P2R-134): a Copy field
-  reads as its value, a `String`, `Vec<T>`, class or shape field is read in
+  reads as its value, a `String`, `Vec<T>` or shape field is read in
   place where Rust takes a reference and copied with `.clone()` where
   P2R-26 copies, and a nullable field lends as P2R-134 and P2R-204 say.
   Reads nest (`$s['a']['b']` gives `s.a.b`). `$s['k'] ?? $d` on a field of
   type `Option<T>` MUST convert by P2R-105 as for a variable, because a
   shape always holds its keys, so PHP's isset of the element is a check
   against null: `data.name.as_deref().unwrap_or("unknown")`, and a field
-  that is not Copy is copied first (`data.when.clone().unwrap_or(..)`).
+  that is not Copy is copied first
+  (`data.when.clone().unwrap_or_else(|| make())` for a default with an
+  effect, as P2R-105 says).
   These stop the conversion: a key that is not a string literal, a key the
   shape does not have (Mago reports it, P2R-11), a read on an array literal
-  (Rust rejects a struct literal there in an `if` condition), and a read on
-  a shape that may be null (P2R-106), also on the left of `??`.
+  (Rust rejects a struct literal there in an `if` condition), a read on a
+  shape that may be null (P2R-106), also on the left of `??`, and `??` on a
+  shape element whose chain reads a list element (`$ps[0]['k'] ?? 'x'`),
+  where PHP's isset gives the default for an index out of range and Rust
+  panics.
 - **P2R-204** A nullable class type (`?C`, `C|null`) and a nullable shape
   type MUST map to `Option<S>` as P2R-100 maps other types, where `S` is the
   struct; such a type is a nullable struct type below. A parameter of a
@@ -1713,9 +1727,11 @@ string}`), and keeps an object that may be missing in a nullable property
   struct type converts. Each of its arms gives an owned value (P2R-26,
   P2R-132: `.clone()` unless it moves), and where a reference is needed the
   `if` is lent with `&(..)` for an `&S` parameter and `(..).as_ref()` for an
-  `Option<&S>` parameter. So `$d !== null ? DateComponents::fromArray($d) :
-  null` as the argument for a `?DateComponents` parameter, with `$d` a local
-  variable, gives `(if let Some(d) = d.as_ref() { Some(DateComponents::from_array(d)) } else { None }).as_ref()`.
+  `Option<&S>` parameter. So `$d !== null ? C::fromArray($d) : null` as
+  the argument for a `?C` parameter, with `$d` a local variable, gives
+  `(if let Some(d) = d.as_ref() { Some(C::from_array(d)) } else { None })`
+  followed by `.as_ref()`. A string arm that reads the binding is lent as
+  the binding's `&str` (P2R-180).
 
 ## Spec checklist
 

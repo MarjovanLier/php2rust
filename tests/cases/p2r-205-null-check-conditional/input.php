@@ -77,3 +77,8 @@ echo $e->day, "\n";
 $m = $h->date;
 $text = $m === null ? 'none' : $m->day;
 echo $text, "\n";
+echo $p === null ? 'none' : $p, ' ', $q !== null ? $q : 'none', "\n";
+foreach (['a', null] as $v) {
+    echo $v !== null ? $v : '-';
+}
+echo "\n";

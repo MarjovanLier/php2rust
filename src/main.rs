@@ -95,7 +95,13 @@ fn convert_directory(input: &Path, output: Option<&Path>) -> ExitCode {
     }
     let mut inputs = Vec::new();
     for path in relative {
-        let name = path.to_string_lossy().replace('\\', "/");
+        // Joined from the path's parts, so `x\y.php`, a valid name outside Windows, stays
+        // apart from `x/y.php`: the name is also the file's identity in Mago (P2R-171).
+        let name = path
+            .components()
+            .map(|part| part.as_os_str().to_string_lossy())
+            .collect::<Vec<_>>()
+            .join("/");
         let shown = if shown.ends_with('/') {
             format!("{shown}{name}")
         } else {

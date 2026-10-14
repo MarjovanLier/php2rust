@@ -1346,13 +1346,16 @@ Rust module. One input file still converts as sections 1 to 17 say.
   whose namespaces hold, under equal leading segments, a segment that is
   equal ignoring letter case but not byte for byte (`Acme\Shop` and
   `ACME\Shop\Sub`, or `App\FooBar` and `App\Foobar`, which PHP reads as one
-  namespace), at the namespace statement of the later file in path order.
+  namespace), at the name in the namespace statement of the later file in
+  path order.
 - **P2R-173** Each enum, class and function of the crate MUST have a Rust
   name that no other enum, class or function of the crate has, in any
   module, because a module names the items of other modules by their Rust
-  name alone (P2R-174). Two declarations whose Rust names are equal, or
-  whose fully qualified names are equal ignoring letter case, stop the
-  conversion at each declaration, with the span of the whole declaration.
+  name alone (P2R-174). Two declarations whose Rust names are equal, and
+  two enums or classes, or two functions, whose fully qualified names are
+  equal ignoring letter case, stop the conversion at each declaration, with
+  the span of the whole declaration; an enum and a function of one name
+  (`App\Item` and `App\item`) are apart in PHP and in Rust.
   Mago's `duplicate-definition` finding is not printed, because the
   declaration it names depends on how the path is written. A function whose
   Rust name is the name of a child module of its own module stops the

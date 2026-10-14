@@ -349,8 +349,10 @@ fn tree(dir: &Path) -> Result<BTreeMap<String, Vec<u8>>, String> {
 fn stop(dir: &Path) -> Result<(), String> {
     if dir.join("input").is_dir() {
         let result = tool(&["input", "-o", "out"], dir);
-        let created = dir.join("out").exists();
+        let temporary = dir.join("out.php2rust-tmp");
+        let created = dir.join("out").exists() || temporary.exists();
         let _ = fs::remove_dir_all(dir.join("out"));
+        let _ = fs::remove_dir_all(temporary);
         return stopped(dir, &["input", "-o", "out"], &result, created);
     }
     for args in [&["input.php"][..], &["input.php", "-o", "out.rs"][..]] {

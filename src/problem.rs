@@ -24,13 +24,21 @@ pub struct Problem {
 /// order given, which is the order of their paths, and the span rule within one file
 /// only (P2R-171).
 pub fn render_files(files: &[(&str, &File)], problems: Vec<Problem>) -> String {
-    files
+    let mut text: String = files
         .iter()
         .map(|(path, file)| {
             let own = problems.iter().filter(|p| p.file == file.id).cloned();
             render(path, file, own.collect())
         })
-        .collect()
+        .collect();
+    // A finding whose span is in no input file is still printed, so exit 1 never comes
+    // with an empty stderr.
+    for problem in &problems {
+        if files.iter().all(|(_, file)| file.id != problem.file) {
+            text.push_str(&format!("{}: {}\n", files[0].0, problem.message));
+        }
+    }
+    text
 }
 
 /// Renders problems as `path:line:column: message` lines. Where one span contains or

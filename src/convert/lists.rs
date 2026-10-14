@@ -183,7 +183,7 @@ impl<'ast, 'arena, 'c> Walker<'ast, 'arena, Sites<'c>> for ListSites {
             return;
         };
         let converter = sites.converter;
-        if let Some(signature) = converter.functions.get(&converter.identifier_key(name)) {
+        if let Some(signature) = converter.functions.get(&converter.call_key(name)) {
             sites.arguments(&call.argument_list, &signature.parameters);
         }
     }

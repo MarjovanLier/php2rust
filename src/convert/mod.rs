@@ -1,7 +1,7 @@
 //! Walks the Mago syntax tree and writes Rust (docs/spec.md sections 2 to 5).
 
 use std::borrow::Cow;
-use std::collections::{BTreeSet, HashMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 
 use mago_allocator::LocalArena;
 use mago_analyzer::Analyzer;
@@ -33,6 +33,7 @@ mod booleans;
 mod changes;
 mod classes;
 mod control;
+mod crates;
 mod enums;
 mod expressions;
 mod flow;
@@ -62,65 +63,98 @@ pub enum Failure {
     Invalid(String),
 }
 
+/// One input file: the path its problems print (P2R-03, P2R-171), the name Mago knows it
+/// by, and its bytes.
+pub struct Input {
+    pub shown: String,
+    pub name: String,
+    pub source: Vec<u8>,
+}
+
 /// Converts one PHP file. `path` is the input path as given on the command line.
 pub fn convert(path: &str, source: Vec<u8>) -> Result<String, Failure> {
-    let file = File::ephemeral(Cow::Owned(path.as_bytes().to_vec()), Cow::Owned(source));
-    let arena = LocalArena::new();
-    let program = parse_file(&arena, &file);
-    // Mago recovers from broken input without failing, so its parse errors are checked here.
-    if program.has_errors() {
-        let errors = program
-            .errors
-            .iter()
-            .map(|error| spanned(error, Origin::Tool, format!("syntax error: {error}")))
-            .collect();
-        return Err(Failure::Invalid(problem::render(path, &file, errors)));
-    }
-    let resolved = NameResolver::new(&arena).resolve(program);
-    let statements = flattened(program);
-    let flat = Program {
-        statements: Sequence { nodes: &statements },
-        ..program.clone()
+    let input = Input {
+        shown: path.to_owned(),
+        name: path.to_owned(),
+        source,
     };
+    let mut written = analyse(vec![input], false)?;
+    Ok(written.remove(0).1)
+}
+
+/// Converts the PHP files of a directory into the module files of one library crate, each
+/// with its path inside the crate (P2R-170 to P2R-175).
+pub fn convert_crate(inputs: Vec<Input>) -> Result<Vec<(String, String)>, Failure> {
+    analyse(inputs, true)
+}
+
+/// Parses, analyses and converts the input files together: Mago scans every file into one
+/// codebase, so a class of one file is known in the others (P2R-171). One file converts
+/// to one output file; a `library` converts to the module files of a crate.
+fn analyse(inputs: Vec<Input>, library: bool) -> Result<Vec<(String, String)>, Failure> {
+    let shown: Vec<String> = inputs.iter().map(|input| input.shown.clone()).collect();
+    let files: Vec<File> = inputs
+        .into_iter()
+        .map(|input| {
+            File::ephemeral(
+                Cow::Owned(input.name.into_bytes()),
+                Cow::Owned(input.source),
+            )
+        })
+        .collect();
+    let named: Vec<(&str, &File)> = shown.iter().map(String::as_str).zip(&files).collect();
+    let arena = LocalArena::new();
+    let programs: Vec<&Program<'_>> = files.iter().map(|file| parse_file(&arena, file)).collect();
+    // Mago recovers from broken input without failing, so its parse errors are checked here.
+    let errors: Vec<Problem> = programs
+        .iter()
+        .flat_map(|program| program.errors.iter())
+        .map(|error| spanned(error, Origin::Tool, format!("syntax error: {error}")))
+        .collect();
+    if !errors.is_empty() {
+        return Err(Failure::Invalid(problem::render_files(&named, errors)));
+    }
+    let resolved: Vec<ResolvedNames<'_>> = programs
+        .iter()
+        .map(|program| NameResolver::new(&arena).resolve(program))
+        .collect();
+    let flats: Vec<Vec<Statement<'_>>> =
+        programs.iter().map(|program| flattened(program)).collect();
     let mut codebase = Prelude::build().metadata;
     // An enum or class may not take the fully qualified name of a class-like PHP has built
-    // in, and once the file is scanned the two cannot be told apart (P2R-111, P2R-131,
+    // in, and once the files are scanned the two cannot be told apart (P2R-111, P2R-131,
     // P2R-151).
-    let built_in_classes: HashSet<Vec<u8>> = statements
-        .iter()
-        .filter_map(|statement| {
-            let name = match statement {
-                Statement::Enum(declaration) => &declaration.name,
-                Statement::Class(declaration) => &declaration.name,
-                _ => return None,
-            };
-            let full = resolved.resolve(name).unwrap_or(name.value);
-            codebase
-                .get_class_like(full)
-                .is_some()
-                .then(|| full.to_ascii_lowercase())
-        })
-        .collect();
+    let mut built_in_classes: HashSet<Vec<u8>> = HashSet::new();
     // PHP rejects a function named like one it has built in; Mago does not. Inside a
     // namespace PHP accepts it, and the tool still refuses it (P2R-31, P2R-151).
-    let built_in_functions: HashSet<Vec<u8>> = statements
-        .iter()
-        .filter_map(|statement| match statement {
-            Statement::Function(function)
-                if codebase.get_function(function.name.value).is_some() =>
-            {
-                Some(function.name.value.to_ascii_lowercase())
+    let mut built_in_functions: HashSet<Vec<u8>> = HashSet::new();
+    for (statements, names) in flats.iter().zip(&resolved) {
+        for statement in statements {
+            match statement {
+                Statement::Enum(Enum { name, .. }) | Statement::Class(Class { name, .. }) => {
+                    let full = names.resolve(name).unwrap_or(name.value);
+                    if codebase.get_class_like(full).is_some() {
+                        built_in_classes.insert(full.to_ascii_lowercase());
+                    }
+                }
+                Statement::Function(function)
+                    if codebase.get_function(function.name.value).is_some() =>
+                {
+                    built_in_functions.insert(function.name.value.to_ascii_lowercase());
+                }
+                _ => {}
             }
-            _ => None,
-        })
-        .collect();
-    codebase.extend(scan_program(
-        &arena,
-        &file,
-        program,
-        &resolved,
-        PHPVersion::PHP85,
-    ));
+        }
+    }
+    for ((file, program), names) in files.iter().zip(&programs).zip(&resolved) {
+        codebase.extend(scan_program(
+            &arena,
+            file,
+            program,
+            names,
+            PHPVersion::PHP85,
+        ));
+    }
     populate_codebase(
         &mut codebase,
         &mut SymbolReferences::new(),
@@ -128,40 +162,57 @@ pub fn convert(path: &str, source: Vec<u8>) -> Result<String, Failure> {
         Default::default(),
     );
     let plugins = PluginRegistry::new();
-    let analyzer = Analyzer::new(
-        &arena,
-        &file,
-        &resolved,
-        &codebase,
-        &plugins,
-        Settings::new(PHPVersion::PHP85),
-    );
-    let mut result = AnalysisResult::new(SymbolReferences::new());
-    let Ok(artifacts) = analyzer.analyze_with_artifacts(program, &mut result) else {
-        return Err(Failure::Invalid(format!(
-            "{path}: the Mago analyser could not finish\n"
-        )));
-    };
-    let mut problems: Vec<Problem> = result
-        .issues
+    let mut problems: Vec<Problem> = Vec::new();
+    let mut analysed: Vec<Analysed<'_>> = Vec::new();
+    for (((file, program), names), path) in files.iter().zip(&programs).zip(&resolved).zip(&shown) {
+        let analyzer = Analyzer::new(
+            &arena,
+            file,
+            names,
+            &codebase,
+            &plugins,
+            Settings::new(PHPVersion::PHP85),
+        );
+        let mut result = AnalysisResult::new(SymbolReferences::new());
+        let Ok(artifacts) = analyzer.analyze_with_artifacts(program, &mut result) else {
+            return Err(Failure::Invalid(format!(
+                "{path}: the Mago analyser could not finish\n"
+            )));
+        };
+        // The declaration Mago names in a duplicate depends on how the path is written, so
+        // the tool reports duplicates itself (P2R-173).
+        problems.extend(
+            result
+                .issues
+                .iter()
+                .filter(|issue| reported(issue))
+                .filter(|issue| !library || issue.code.as_deref() != Some("duplicate-definition"))
+                .filter_map(mago_problem),
+        );
+        analysed.push(Analysed {
+            file: file.id,
+            resolved: names,
+            artifacts,
+        });
+    }
+    let units: Vec<Program<'_>> = flats
         .iter()
-        .filter(|issue| reported(issue))
-        .filter_map(mago_problem)
+        .zip(&programs)
+        .map(|(statements, program)| Program {
+            statements: Sequence { nodes: statements },
+            ..(*program).clone()
+        })
         .collect();
-    let analysed = Analysed {
-        file: file.id,
-        resolved: &resolved,
-        artifacts,
-    };
-    let mut converter = Converter::new(&codebase, vec![analysed]);
+    let mut converter = Converter::new(&codebase, analysed);
     converter.built_in_classes = built_in_classes;
     converter.built_in_functions = built_in_functions;
-    let rust = converter.program(&flat);
+    converter.library = library;
+    let written = converter.program(&units);
     problems.append(&mut converter.problems);
     if problems.is_empty() {
-        Ok(rust)
+        Ok(written)
     } else {
-        Err(Failure::Refused(problem::render(path, &file, problems)))
+        Err(Failure::Refused(problem::render_files(&named, problems)))
     }
 }
 
@@ -191,6 +242,11 @@ fn flattened<'a>(program: &Program<'a>) -> Vec<Statement<'a>> {
     statements
 }
 
+/// The last segment of a fully qualified name.
+fn short_name(key: &[u8]) -> &[u8] {
+    key.rsplit(|byte| *byte == b'\\').next().unwrap_or(key)
+}
+
 /// Mago findings that refuse the conversion (P2R-11).
 fn reported(issue: &Issue) -> bool {
     issue.level == Level::Error || issue.code.as_deref() == Some("possibly-undefined-variable")
@@ -204,6 +260,7 @@ fn mago_problem(issue: &Issue) -> Option<Problem> {
         .span;
     let code = issue.code.as_deref().unwrap_or("mago");
     Some(Problem {
+        file: span.file_id,
         start: span.start.offset,
         end: span.end.offset,
         origin: Origin::Mago,
@@ -214,6 +271,7 @@ fn mago_problem(issue: &Issue) -> Option<Problem> {
 fn spanned(node: &impl HasSpan, origin: Origin, message: String) -> Problem {
     let span = node.span();
     Problem {
+        file: span.file_id,
         start: span.start.offset,
         end: span.end.offset,
         origin,
@@ -394,8 +452,15 @@ struct Converter<'c> {
     loops: modes::Loops,
     /// The variables of the body being converted: a function, or `fn main()`.
     variables: Variables,
-    /// The helpers the output calls (P2R-160).
-    helpers: BTreeSet<helpers::Helper>,
+    /// The helpers each module calls, by module index (P2R-160, P2R-172).
+    helpers: BTreeSet<(usize, helpers::Helper)>,
+    /// True for a directory input, which converts to a library crate (P2R-175).
+    library: bool,
+    /// The module whose items are converting (P2R-172).
+    current_module: usize,
+    /// The path of each module below the crate root, in Rust names; the root's is empty
+    /// and comes first. One input file has only the root (P2R-172).
+    module_paths: Vec<Vec<String>>,
 }
 
 impl<'c> Converter<'c> {
@@ -418,6 +483,9 @@ impl<'c> Converter<'c> {
             loops: modes::Loops::default(),
             variables: Variables::default(),
             helpers: BTreeSet::new(),
+            library: false,
+            current_module: 0,
+            module_paths: vec![Vec::new()],
         }
     }
 
@@ -481,13 +549,34 @@ impl<'c> Converter<'c> {
             return false;
         };
         let key = self.identifier_key(identifier);
-        let falls_back = matches!(identifier, Identifier::Local(_))
+        !self.functions.contains_key(&key)
+            && (key == name || (self.falls_back(identifier) && short_name(&key) == name))
+    }
+
+    /// True for an unqualified name that no import maps, which PHP looks up in the global
+    /// namespace when the current namespace has no function of that name (P2R-151).
+    fn falls_back(&self, identifier: &Identifier<'_>) -> bool {
+        matches!(identifier, Identifier::Local(_))
             && !self
                 .analysed(identifier)
                 .resolved
-                .is_imported(&identifier.span().start);
-        !self.functions.contains_key(&key)
-            && (key == name || (falls_back && key.rsplit(|b| *b == b'\\').next() == Some(name)))
+                .is_imported(&identifier.span().start)
+    }
+
+    /// The key of the function a call by `identifier` runs: its fully qualified name, or,
+    /// for an unqualified name in a namespace whose namespaced name no function of the
+    /// crate has, the crate's function of that name in the global namespace (P2R-171).
+    fn call_key(&self, identifier: &Identifier<'_>) -> Vec<u8> {
+        let key = self.identifier_key(identifier);
+        if self.functions.contains_key(&key) || !self.falls_back(identifier) {
+            return key;
+        }
+        let global = short_name(&key).to_vec();
+        if self.functions.contains_key(&global) {
+            global
+        } else {
+            key
+        }
     }
 
     fn refuse(&mut self, node: &impl HasSpan, message: impl Into<String>) {
@@ -516,122 +605,168 @@ impl<'c> Converter<'c> {
         }
     }
 
-    fn program(&mut self, program: &Program<'_>) -> String {
-        self.check_uses(program.statements.as_slice());
-        self.register_enums(program);
-        self.register_class_names(program);
-        self.register(program);
-        self.register_class_members(program);
-        self.decide_modes(program);
+    /// Converts the input files: one file to its output file, or the files of a directory
+    /// to the module files of a crate, each with its path in the crate (P2R-33, P2R-172).
+    /// Every file registers before any body converts, so a body can use the enums,
+    /// classes and functions of every file (P2R-171).
+    fn program(&mut self, units: &[Program<'_>]) -> Vec<(String, String)> {
+        for unit in units {
+            self.check_uses(unit.statements.as_slice());
+        }
+        let module_of = self.modules(units);
+        let statements: Vec<Statement<'_>> = units
+            .iter()
+            .flat_map(|unit| unit.statements.iter().cloned())
+            .collect();
+        let program = Program {
+            statements: Sequence { nodes: &statements },
+            ..units[0].clone()
+        };
+        if self.library {
+            self.duplicates(units, &module_of);
+        }
+        self.register_enums(&program);
+        self.register_class_names(&program);
+        self.register(&program);
+        self.register_class_members(&program);
+        self.decide_modes(&program);
         for (span, message) in std::mem::take(&mut self.loops.problems) {
             self.refuse(&span, message);
         }
         let sites = self.site_types(program.statements.iter(), None);
         self.variables.list_types = sites.lists;
         self.variables.null_types = sites.nulls;
-        let mut items: Vec<Vec<String>> = Vec::new();
+        let mut items: Vec<Vec<Vec<String>>> = vec![Vec::new(); self.module_paths.len()];
+        // The module of each enum, class and function, by Rust name (P2R-174).
+        let mut owners: BTreeMap<String, (usize, crates::ItemKind)> = BTreeMap::new();
         let mut main: Vec<String> = Vec::new();
         // Each enum's place among the items, filled once every use is known (P2R-115).
-        let mut enum_slots: Vec<(usize, usize, &Enum<'_>)> = Vec::new();
-        let mut declared = false;
-        let mut started = false;
-        // A statement of `fn main()` has run, so a later enum is not declared yet (P2R-110).
-        let mut ran = false;
-        let mut after_closing_tag = false;
-        for statement in program.statements.iter() {
-            match statement {
-                Statement::OpeningTag(_) | Statement::ClosingTag(_) | Statement::Noop(_) => {}
-                // PHP drops the one newline right after a closing tag, so it is not output text.
-                Statement::Inline(inline)
-                    if after_closing_tag && matches!(inline.value, b"\n" | b"\r\n") => {}
-                Statement::Inline(inline) => {
-                    self.refuse(inline, "text outside PHP tags is not supported (P2R-13)")
-                }
-                Statement::Declare(declare)
-                    if !declared && !started && is_strict_types(declare) =>
-                {
-                    declared = true
-                }
-                // The statements of an unbraced namespace follow it at the top level
-                // (P2R-150).
-                Statement::Namespace(namespace)
-                    if declared
-                        && !started
-                        && matches!(namespace.body, NamespaceBody::Implicit(_)) =>
-                {
-                    started = true
-                }
-                other => {
-                    if !declared && !started {
-                        self.refuse(
-                            other,
-                            "the file must start with declare(strict_types=1); (P2R-12)",
-                        );
+        let mut enum_slots: Vec<(usize, usize, usize, &Enum<'_>)> = Vec::new();
+        for (unit, &module) in units.iter().zip(&module_of) {
+            self.current_module = module;
+            let items = &mut items[module];
+            let mut declared = false;
+            let mut started = false;
+            // A statement of `fn main()` has run, so a later enum is not declared yet
+            // (P2R-110).
+            let mut ran = false;
+            let mut after_closing_tag = false;
+            for statement in unit.statements.iter() {
+                match statement {
+                    Statement::OpeningTag(_) | Statement::ClosingTag(_) | Statement::Noop(_) => {}
+                    // PHP drops the one newline right after a closing tag, so it is not
+                    // output text.
+                    Statement::Inline(inline)
+                        if after_closing_tag && matches!(inline.value, b"\n" | b"\r\n") => {}
+                    Statement::Inline(inline) => {
+                        self.refuse(inline, "text outside PHP tags is not supported (P2R-13)")
                     }
-                    started = true;
-                    match other {
-                        // Without the declare, that problem is the one reported.
-                        Statement::Namespace(_) if !declared => {}
-                        Statement::Namespace(_) => self.refuse(
-                            other,
-                            "a file may hold one namespace statement, without braces, right after the declare (P2R-150)",
-                        ),
-                        // A `use` only changes how names resolve (P2R-150).
-                        Statement::Use(_) => {}
-                        Statement::Function(function) => {
-                            if let Some(item) = self.function(function) {
-                                items.push(item);
-                            }
+                    Statement::Declare(declare)
+                        if !declared && !started && is_strict_types(declare) =>
+                    {
+                        declared = true
+                    }
+                    // The statements of an unbraced namespace follow it at the top level
+                    // (P2R-150).
+                    Statement::Namespace(namespace)
+                        if declared
+                            && !started
+                            && matches!(namespace.body, NamespaceBody::Implicit(_)) =>
+                    {
+                        started = true
+                    }
+                    other => {
+                        if !declared && !started {
+                            self.refuse(
+                                other,
+                                "the file must start with declare(strict_types=1); (P2R-12)",
+                            );
                         }
-                        Statement::Enum(declaration) => {
-                            if ran {
-                                self.refuse(
-                                    &declaration.name,
-                                    "an enum must come before the statements outside functions, because PHP declares it only when execution reaches it (P2R-110)",
-                                );
+                        started = true;
+                        match other {
+                            // Without the declare, that problem is the one reported.
+                            Statement::Namespace(_) if !declared => {}
+                            Statement::Namespace(_) => self.refuse(
+                                other,
+                                "a file may hold one namespace statement, without braces, right after the declare (P2R-150)",
+                            ),
+                            // A `use` only changes how names resolve (P2R-150).
+                            Statement::Use(_) => {}
+                            Statement::Function(function) => {
+                                if let Some(item) = self.function(function) {
+                                    let name = self.functions[&self.function_key(function)]
+                                        .rust_name
+                                        .clone();
+                                    owners.insert(name, (module, crates::ItemKind::Function));
+                                    items.push(item);
+                                }
                             }
-                            if let Some(index) = self.enum_index(declaration) {
-                                items.push(Vec::new());
-                                enum_slots.push((items.len() - 1, index, declaration));
+                            Statement::Enum(declaration) => {
+                                if ran {
+                                    self.refuse(
+                                        &declaration.name,
+                                        "an enum must come before the statements outside functions, because PHP declares it only when execution reaches it (P2R-110)",
+                                    );
+                                }
+                                if let Some(index) = self.enum_index(declaration) {
+                                    let name = self.enums[index].rust_name.clone();
+                                    owners.insert(name, (module, crates::ItemKind::Type));
+                                    items.push(Vec::new());
+                                    enum_slots.push((module, items.len() - 1, index, declaration));
+                                }
                             }
-                        }
-                        // PHP declares a readonly class before any statement runs, so it may
-                        // come after them (P2R-130).
-                        Statement::Class(declaration) => {
-                            if let Some(index) = self.class_index(declaration) {
-                                let item = self.class_item(declaration, index);
-                                items.push(item);
+                            // PHP declares a readonly class before any statement runs, so it
+                            // may come after them (P2R-130).
+                            Statement::Class(declaration) => {
+                                if let Some(index) = self.class_index(declaration) {
+                                    let name = self.classes[index].rust_name.clone();
+                                    owners.insert(name, (module, crates::ItemKind::Type));
+                                    let item = self.class_item(declaration, index);
+                                    items.push(item);
+                                }
                             }
-                        }
-                        _ => {
-                            ran = true;
-                            self.statement(other, 1, Context::Main, &mut main)
+                            _ if self.library => self.refuse(
+                                other,
+                                "a directory converts to a library, which has no statements outside functions (P2R-175)",
+                            ),
+                            _ => {
+                                ran = true;
+                                self.statement(other, 1, Context::Main, &mut main)
+                            }
                         }
                     }
                 }
+                after_closing_tag = matches!(statement, Statement::ClosingTag(_));
             }
-            after_closing_tag = matches!(statement, Statement::ClosingTag(_));
-        }
-        if !declared && !started {
-            self.problems.push(Problem {
-                start: 0,
-                end: 0,
-                origin: Origin::Tool,
-                message: "the file must start with declare(strict_types=1); (P2R-12)".into(),
-            });
+            if !declared && !started {
+                self.problems.push(Problem {
+                    file: unit.file_id,
+                    start: 0,
+                    end: 0,
+                    origin: Origin::Tool,
+                    message: "the file must start with declare(strict_types=1); (P2R-12)".into(),
+                });
+            }
         }
         self.finish_variables(&mut main);
         // Every enum method converts before any enum is written, because a method can use
         // the helpers of any enum (P2R-115, P2R-155).
         let methods: Vec<Vec<Vec<String>>> = enum_slots
             .iter()
-            .map(|(_, _, declaration)| self.enum_methods(declaration))
+            .map(|&(module, _, _, declaration)| {
+                self.current_module = module;
+                self.enum_methods(declaration)
+            })
             .collect();
-        for ((slot, index, _), methods) in enum_slots.into_iter().zip(methods) {
-            items[slot] = self.enum_item(index, methods);
+        for ((module, slot, index, _), methods) in enum_slots.into_iter().zip(methods) {
+            items[module][slot] = self.enum_item(index, methods);
+        }
+        if self.library {
+            return self.crate_files(items, &owners);
         }
         // Every body has converted, so every helper call is known (P2R-160).
-        items.extend(self.helpers.iter().map(|helper| helper.lines()));
-        assemble(items, main)
+        let mut items = items.remove(0);
+        items.extend(self.helpers.iter().map(|(_, helper)| helper.lines()));
+        vec![(String::new(), assemble(items, main))]
     }
 }

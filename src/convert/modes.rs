@@ -379,7 +379,7 @@ impl<'ast, 'arena> Body<'ast, 'arena, '_, '_> {
                 let Expression::Identifier(name) = call.function else {
                     return None;
                 };
-                let key = converter.identifier_key(name);
+                let key = converter.call_key(name);
                 converter.functions.get(&key)?.returns.clone()
             }
             Expression::Instantiation(instantiation) => {
@@ -673,7 +673,7 @@ impl<'ast, 'arena> Body<'ast, 'arena, '_, '_> {
                 let Expression::Identifier(name) = call.function else {
                     return Vec::new();
                 };
-                match converter.functions.get(&converter.identifier_key(name)) {
+                match converter.functions.get(&converter.call_key(name)) {
                     Some(signature) => {
                         positions(arguments, std::iter::once(signature.parameters.as_slice()))
                     }

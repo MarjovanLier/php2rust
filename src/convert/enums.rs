@@ -28,7 +28,7 @@ pub(super) const RESERVED: &str = "abstract and array as bool break callable cas
 pub(super) struct EnumInfo {
     /// The lowercase PHP name, by which every use finds it (P2R-111).
     key: Vec<u8>,
-    rust_name: String,
+    pub(super) rust_name: String,
     /// The backing type: `i64`, `String`, or `None` for a pure enum.
     backing: Option<RustType>,
     cases: Vec<Case>,

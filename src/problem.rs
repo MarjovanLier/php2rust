@@ -1,6 +1,6 @@
-//! Problem lines for refused or invalid input (P2R-03).
+//! Problem lines for refused or invalid input (P2R-03, P2R-171).
 
-use mago_database::file::File;
+use mago_database::file::{File, FileId};
 
 /// Who found the problem. `Tool` sorts first, so on an equal span the php2rust problem
 /// is the one printed (P2R-03).
@@ -12,15 +12,30 @@ pub enum Origin {
 
 #[derive(Clone, Debug)]
 pub struct Problem {
+    /// The input file the span is in (P2R-171).
+    pub file: FileId,
     pub start: u32,
     pub end: u32,
     pub origin: Origin,
     pub message: String,
 }
 
+/// Renders the problems of every input file, each file named as shown: files in the
+/// order given, which is the order of their paths, and the span rule within one file
+/// only (P2R-171).
+pub fn render_files(files: &[(&str, &File)], problems: Vec<Problem>) -> String {
+    files
+        .iter()
+        .map(|(path, file)| {
+            let own = problems.iter().filter(|p| p.file == file.id).cloned();
+            render(path, file, own.collect())
+        })
+        .collect()
+}
+
 /// Renders problems as `path:line:column: message` lines. Where one span contains or
 /// equals another, only the outer problem is printed (P2R-03).
-pub fn render(path: &str, file: &File, mut problems: Vec<Problem>) -> String {
+fn render(path: &str, file: &File, mut problems: Vec<Problem>) -> String {
     // Outer spans sort before the spans they contain.
     problems.sort_by(|a, b| {
         a.start
@@ -68,6 +83,7 @@ mod tests {
 
     fn tool(start: u32, end: u32, message: &str) -> Problem {
         Problem {
+            file: file(b"").id,
             start,
             end,
             origin: Origin::Tool,
@@ -86,6 +102,7 @@ mod tests {
     fn equal_span_prefers_the_tool_problem() {
         let f = file(b"abcdefghij");
         let mago = Problem {
+            file: f.id,
             start: 1,
             end: 5,
             origin: Origin::Mago,
@@ -126,5 +143,22 @@ mod tests {
         let f = file(b"x");
         let out = render("my dir/in put.php", &f, vec![tool(0, 1, "m")]);
         assert_eq!(out, "my dir/in put.php:1:1: m\n");
+    }
+
+    #[test]
+    fn each_file_keeps_its_own_problems_and_spans() {
+        let a = File::ephemeral(Cow::Borrowed(&b"a.php"[..]), Cow::Borrowed(&b"abcdef"[..]));
+        let b = File::ephemeral(Cow::Borrowed(&b"b.php"[..]), Cow::Borrowed(&b"abcdef"[..]));
+        let on = |file: &File, start, end, message: &str| Problem {
+            file: file.id,
+            ..tool(start, end, message)
+        };
+        // The span in a.php would hide the one in b.php if files were not apart.
+        let problems = vec![on(&b, 2, 3, "inner of b"), on(&a, 0, 5, "outer of a")];
+        let out = render_files(&[("src/a.php", &a), ("src/b.php", &b)], problems);
+        assert_eq!(
+            out,
+            "src/a.php:1:1: outer of a\nsrc/b.php:1:3: inner of b\n"
+        );
     }
 }

@@ -57,9 +57,9 @@ pub(super) const HELPER_NAME: &str =
     "this name is the Rust name of a helper the output may hold, which it would hide (P2R-31)";
 
 impl Converter<'_> {
-    /// A call of `helper`, which the output then holds.
+    /// A call of `helper`, which the module that converts then holds.
     pub(super) fn helper_call(&mut self, helper: Helper, arguments: Vec<RExpr>) -> RExpr {
-        self.helpers.insert(helper);
+        self.helpers.insert((self.current_module, helper));
         RExpr::Call(helper.name().to_owned(), arguments)
     }
 }

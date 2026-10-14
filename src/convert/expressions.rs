@@ -280,7 +280,7 @@ impl Converter<'_> {
             );
             return None;
         };
-        let key = self.identifier_key(name);
+        let key = self.call_key(name);
         let Some(signature) = self.functions.get(&key).cloned() else {
             let text = String::from_utf8_lossy(name.value()).into_owned();
             self.record_refused(node);

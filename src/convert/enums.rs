@@ -157,6 +157,13 @@ impl Converter<'_> {
                 // Section 16 converts methods and constants (P2R-155, P2R-156).
                 ClassLikeMember::Method(method) => {
                     self.method_shape(method);
+                    // PHP rejects a constructor in an enum, and Mago does not report it.
+                    if method.name.value.eq_ignore_ascii_case(b"__construct") {
+                        self.refuse(
+                            &method.name,
+                            "a method whose name starts with __ is not supported (P2R-155)",
+                        );
+                    }
                     continue;
                 }
                 ClassLikeMember::Constant(_) => continue,
@@ -313,10 +320,20 @@ impl Converter<'_> {
         if let Some(found) = self.constant_read(access) {
             return Some(found);
         }
+        // The refused constant is the problem reported for its reads.
+        if self.refused_constant(access) {
+            self.record_refused(access.class);
+            return None;
+        }
+        // A class given by a variable (`$o::NAME`) reads it.
+        self.record_refused(access.class);
         let outside = self.current_class.is_none()
             && matches!(access.class, Expression::Self_(_) | Expression::Static(_));
         let message = match &access.constant {
             _ if outside => "self:: and static:: work only inside a class or enum (P2R-153)",
+            _ if matches!(access.class, Expression::Parent(_)) => {
+                "parent:: is not supported (P2R-135)"
+            }
             ClassLikeConstantSelector::Identifier(name)
                 if name.value.eq_ignore_ascii_case(b"class") =>
             {

@@ -24,6 +24,19 @@ enum Colour: string
     {
         return self::from($code);
     }
+
+    public static function countPastels(self $colour, int $rounds): int
+    {
+        $total = 0;
+        for ($i = 0; $i < $rounds; $i++) {
+            $pastel = match ($colour) {
+                self::CornflowerBlue, self::MediumSeaGreen, self::LightGoldenrodYellow, self::PapayaWhip => 1,
+                self::Black => 0,
+            };
+            $total += $pastel;
+        }
+        return $total;
+    }
 }
 
 enum Unit
@@ -54,4 +67,5 @@ if (!Colour::PRIMARY->isPastel()) {
 if (Unit::BASE === Unit::Metre) {
     echo "metre\n";
 }
+echo Colour::countPastels(Colour::PapayaWhip, 3), "\n";
 echo (new Swatch(Colour::MediumSeaGreen))->name(), Swatch::SIZE, "\n";

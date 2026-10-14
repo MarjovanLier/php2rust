@@ -46,6 +46,24 @@ impl Colour {
     pub fn from_code(code: &str) -> Colour {
         return Colour::from(code);
     }
+
+    pub fn count_pastels(colour: Colour, rounds: i64) -> i64 {
+        let mut total: i64 = 0;
+        let mut i: i64 = 0;
+        let mut pastel: i64;
+        while i < rounds {
+            pastel = match colour {
+                Colour::CornflowerBlue
+                | Colour::MediumSeaGreen
+                | Colour::LightGoldenrodYellow
+                | Colour::PapayaWhip => 1,
+                Colour::Black => 0,
+            };
+            total += pastel;
+            i += 1;
+        }
+        return total;
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -84,6 +102,8 @@ fn main() {
     if Unit::BASE == Unit::Metre {
         print!("metre\n");
     }
+    print!("{}", Colour::count_pastels(Colour::PapayaWhip, 3));
+    print!("\n");
     print!("{}", Swatch::new(Colour::MediumSeaGreen).name());
     print!("{}", Swatch::SIZE);
     print!("\n");

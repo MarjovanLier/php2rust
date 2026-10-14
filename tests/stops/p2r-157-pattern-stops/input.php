@@ -18,4 +18,12 @@ function wide(string $word): int
     };
 }
 
-echo accent('é'), wide('a'), "\n";
+function packed(string $word): int
+{
+    return match ($word) {
+        'alpha-one', 'beta-two', 'gamma-three', 'delta-four', 'epsilon-five', 'zeta-six', 'eta' => 1,
+        default => 0,
+    };
+}
+
+echo accent('é'), wide('a'), packed('eta'), "\n";

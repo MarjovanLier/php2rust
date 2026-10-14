@@ -41,6 +41,9 @@ pub(super) struct ClassInfo {
     /// (P2R-155).
     pub(super) is_enum: bool,
     pub(super) constants: Vec<ConstantInfo>,
+    /// The PHP names of the constants it declares that were refused, whose reads stop
+    /// without a second problem.
+    pub(super) refused_constants: Vec<Vec<u8>>,
 }
 
 impl ClassInfo {
@@ -56,6 +59,7 @@ impl ClassInfo {
             methods: Vec::new(),
             is_enum,
             constants: Vec::new(),
+            refused_constants: Vec::new(),
         }
     }
 
@@ -217,6 +221,27 @@ impl Converter<'_> {
                                 }
                             }
                             _ => {}
+                        }
+                    }
+                }
+                // An enum method follows the rules for functions (P2R-155).
+                Statement::Enum(declaration) => {
+                    let key = self.name_key(&declaration.name, declaration.name.value);
+                    let Some(index) = self.classes.iter().position(|c| c.key == key) else {
+                        continue;
+                    };
+                    for member in declaration.members.iter() {
+                        let ClassLikeMember::Method(method) = member else {
+                            continue;
+                        };
+                        if let Some(at) = self.method_index(index, method.name.value) {
+                            let signature = &self.classes[index].methods[at].signature;
+                            self.nullable_in(
+                                &method.parameter_list,
+                                method.return_type_hint.as_ref(),
+                                signature,
+                                &mut found,
+                            );
                         }
                     }
                 }
@@ -423,15 +448,17 @@ impl Converter<'_> {
         if !is_constructor(method) && final_private(&method.modifiers) {
             self.refuse(
                 &method.name,
-                "a private method cannot be final, and PHP warns about it (P2R-130)",
+                "a private method cannot be final, and PHP warns about it (P2R-135)",
             );
         }
-        // PHP rejects a `static` parameter type; Mago's parser accepts it.
+        // PHP rejects a `static` parameter type; Mago's parser accepts it, alone as a
+        // modifier and inside a union as a type.
         for parameter in method.parameter_list.parameters.iter() {
-            if parameter
-                .hint
-                .as_ref()
-                .is_some_and(|hint| names(hint, is_static))
+            if static_modifier(parameter)
+                || parameter
+                    .hint
+                    .as_ref()
+                    .is_some_and(|hint| names(hint, is_static))
             {
                 self.refuse(
                     parameter,
@@ -653,7 +680,11 @@ impl Converter<'_> {
     /// `null`, `[]` or an enum case (P2R-140).
     fn default_value(&mut self, value: &Expression<'_>, ty: &RustType) -> Option<String> {
         let literal = match lists::unparenthesized(value) {
-            Expression::Literal(_) | Expression::Access(Access::ClassConstant(_)) => true,
+            Expression::Literal(_) => true,
+            // A case, never a constant, which P2R-140 does not list.
+            Expression::Access(Access::ClassConstant(access)) => {
+                self.enum_case_of(access).is_some()
+            }
             Expression::UnaryPrefix(unary) => {
                 matches!(unary.operator, UnaryPrefixOperator::Negation(_))
                     && matches!(
@@ -781,10 +812,14 @@ impl Converter<'_> {
                 .zip(metadata.parameters.iter())
             {
                 if parameter.is_promoted_property() {
-                    self.refuse(
-                        parameter,
-                        "only a constructor parameter can be promoted to a property (P2R-130)",
-                    );
+                    // Mago's parser reads a bare `static` type as a modifier, which
+                    // method_shape refuses (P2R-154).
+                    if !static_modifier(parameter) {
+                        self.refuse(
+                            parameter,
+                            "only a constructor parameter can be promoted to a property (P2R-130)",
+                        );
+                    }
                     converted = false;
                     continue;
                 }
@@ -943,6 +978,16 @@ impl Converter<'_> {
                 known,
             });
         }
+        let refused: Vec<Vec<u8>> = members
+            .iter()
+            .filter_map(|member| match member {
+                ClassLikeMember::Constant(constant) => Some(constant),
+                _ => None,
+            })
+            .flat_map(|constant| constant.items.iter().map(|item| item.name.value.to_vec()))
+            .filter(|name| !constants.iter().any(|c| c.php_name == *name))
+            .collect();
+        self.classes[index].refused_constants = refused;
         self.classes[index].constants = constants;
         self.current_class = outer;
     }
@@ -981,8 +1026,10 @@ impl Converter<'_> {
             {
                 self.expression(value)
             }
+            // PHP rejects `static::` in a constant's value.
             Expression::Access(Access::ClassConstant(access))
-                if self.enum_case_of(access).is_some() =>
+                if self.enum_case_of(access).is_some()
+                    && !matches!(access.class, Expression::Static(_)) =>
             {
                 self.expression(value)
             }
@@ -1036,6 +1083,30 @@ impl Converter<'_> {
             None => RExpr::Path(path),
         };
         Some((read, constant.ty.clone()))
+    }
+
+    /// The type of `Name` read through the class or enum at `class`: a case gives the enum,
+    /// a constant its declared type (P2R-112, P2R-156).
+    pub(super) fn member_type(&self, class: usize, php: &[u8]) -> Option<RustType> {
+        let info = &self.classes[class];
+        if info.is_enum && self.has_case(&info.key, php) {
+            return Some(info.own_type());
+        }
+        info.constants
+            .iter()
+            .find(|c| c.php_name == php)
+            .map(|c| c.ty.clone())
+    }
+
+    /// True when `access` reads a constant its class or enum declares and the tool refused
+    /// (P2R-156).
+    pub(super) fn refused_constant(&self, access: &ClassConstantAccess<'_>) -> bool {
+        let ClassLikeConstantSelector::Identifier(name) = &access.constant else {
+            return false;
+        };
+        self.class_key(access.class)
+            .and_then(|key| self.classes.iter().find(|c| c.key == key))
+            .is_some_and(|class| class.refused_constants.iter().any(|n| n == name.value))
     }
 
     /// Refuses a class that holds itself by value, through its properties or those of
@@ -1252,10 +1323,12 @@ impl Converter<'_> {
             .and_then(|key| self.classes.iter().position(|c| c.key == key));
         let Some(index) = index.filter(|&index| !self.classes[index].is_enum) else {
             self.record_refused(node);
-            self.refuse(
-                node,
-                "new converts only for a readonly class of this file (P2R-133)",
-            );
+            let message = if matches!(instantiation.class, Expression::Parent(_)) {
+                "parent is not supported (P2R-135)"
+            } else {
+                "new converts only for a class of this file (P2R-133)"
+            };
+            self.refuse(node, message);
             return None;
         };
         // The refused constructor parameter is the problem reported for the class.
@@ -1417,6 +1490,8 @@ impl Converter<'_> {
                 return None;
             }
             None => {
+                // A class given by a variable (`$b::m()`) reads it.
+                self.record_refused(call.class);
                 self.record_refused_arguments(&call.argument_list);
                 self.refuse(
                     node,
@@ -1503,6 +1578,15 @@ fn is_static(hint: &Hint<'_>) -> bool {
 /// `self` or `static`, which name the class whose body holds them (P2R-154).
 pub(super) fn is_own_class(hint: &Hint<'_>) -> bool {
     matches!(hint, Hint::Self_(_) | Hint::Static(_))
+}
+
+/// True for a parameter whose only modifier is `static` (P2R-154).
+fn static_modifier(parameter: &FunctionLikeParameter<'_>) -> bool {
+    !parameter.modifiers.is_empty()
+        && parameter
+            .modifiers
+            .iter()
+            .all(|m| matches!(m, Modifier::Static(_)))
 }
 
 /// True for `final` and `private` together (P2R-130, P2R-156).

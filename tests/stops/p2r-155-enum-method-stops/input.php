@@ -31,6 +31,21 @@ enum Size: string
     {
         return 3;
     }
+
+    public function __construct() {}
+
+    /**
+     * @param ?list<Cell> $cells
+     */
+    public function count(?array $cells): int
+    {
+        return 0;
+    }
+}
+
+final class Cell
+{
+    public int $n = 0;
 }
 
 function pick(?Size $size): int

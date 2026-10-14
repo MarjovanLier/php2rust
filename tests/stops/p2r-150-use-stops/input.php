@@ -9,6 +9,9 @@ use Baz\Bar;
 use Foo\Box;
 use function Foo\helper;
 use Foo\Thing as int;
+use Foo\Mixed;
+use Foo\Other as match;
+use Foo\Readonly;
 use const Foo\LIMIT;
 use const Foo\limit;
 

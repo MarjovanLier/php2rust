@@ -21,6 +21,18 @@ function twice(string $text): int
     return namespace\shout($text) + \Acme\Text\shout($text);
 }
 
+/**
+ * @param list<int> $numbers
+ */
+function total(array $numbers, ?int $extra): int
+{
+    return \count($numbers) + ($extra ?? 0);
+}
+
+$none = [];
+$nothing = null;
+echo total($none, $nothing), "\n";
+
 echo shout('ab'), "\n";
 echo twice('abc'), "\n";
 echo strlen_of('abcd'), "\n";

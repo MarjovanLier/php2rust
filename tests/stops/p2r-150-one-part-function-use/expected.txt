@@ -1,0 +1,2 @@
+input.php:5:14: a use of a one-part name outside a namespace has no effect, and PHP warns about it (P2R-150)
+input.php:6:11: a use of a one-part name outside a namespace has no effect, and PHP warns about it (P2R-150)

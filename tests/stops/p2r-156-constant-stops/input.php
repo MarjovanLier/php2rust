@@ -12,6 +12,7 @@ enum Mode
     const SUM = 1 + 1;
     const COPY = self::SUM;
     const A = 1, B = 2;
+    const LATE = static::Fast;
 }
 
 final readonly class Limits

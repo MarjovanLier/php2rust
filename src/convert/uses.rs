@@ -6,6 +6,11 @@ use mago_syntax::cst::*;
 use super::Converter;
 use super::enums::RESERVED;
 
+/// The class names PHP keeps for itself, which no import may take (`use Foo\Mixed;`); a
+/// keyword is refused only as an explicit `as` name, which PHP cannot parse.
+const SPECIAL: &str = "array bool callable false float int iterable mixed never null object \
+    parent self static string true void";
+
 /// What an import names; each kind has its own aliases.
 #[derive(Clone, Copy, PartialEq)]
 enum Kind {
@@ -73,12 +78,23 @@ impl Converter<'_> {
                         "an import may not take the name of a class, enum or function this file declares, which PHP rejects (P2R-150)",
                     )
                 } else if kind == Kind::Class
-                    && RESERVED
+                    && (SPECIAL
                         .split_whitespace()
                         .any(|word| word.as_bytes() == alias)
+                        || (item.alias.is_some()
+                            && RESERVED
+                                .split_whitespace()
+                                .any(|word| word.as_bytes() == alias)))
                 {
                     Some("PHP reserves the name of this import (P2R-150)")
-                } else if kind == Kind::Class && !namespaced && !full.contains(&b'\\') {
+                } else if kind == Kind::Constant
+                    && [&b"true"[..], b"false", b"null"]
+                        .contains(&alias.to_ascii_lowercase().as_slice())
+                {
+                    // The tool reads `true`, `false` and `null` as literals, while PHP
+                    // would read the imported constant.
+                    Some("a constant import may not take the name true, false or null (P2R-150)")
+                } else if !namespaced && item.alias.is_none() && !full.contains(&b'\\') {
                     Some(
                         "a use of a one-part name outside a namespace has no effect, and PHP warns about it (P2R-150)",
                     )

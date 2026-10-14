@@ -376,6 +376,12 @@ impl<'ast, 'arena> Body<'ast, 'arena, '_, '_> {
                 let class = &converter.classes[self.class_of(instantiation.class)?];
                 Some(RustType::Class(class.rust_name.clone()))
             }
+            Expression::Access(Access::ClassConstant(access)) => {
+                let ClassLikeConstantSelector::Identifier(name) = &access.constant else {
+                    return None;
+                };
+                converter.member_type(self.class_of(access.class)?, name.value)
+            }
             Expression::Call(Call::StaticMethod(call)) => {
                 let (class, at) = self.static_method(call)?;
                 converter.classes[class].methods[at]
@@ -401,7 +407,7 @@ impl<'ast, 'arena> Body<'ast, 'arena, '_, '_> {
         depth: usize,
     ) -> Vec<(usize, usize)> {
         let converter = self.converter;
-        if let Some(RustType::Class(class)) = self.type_at(object, depth)
+        if let Some(RustType::Class(class) | RustType::Enum(class)) = self.type_at(object, depth)
             && let Some(class) = converter.class_named(&class)
         {
             return converter

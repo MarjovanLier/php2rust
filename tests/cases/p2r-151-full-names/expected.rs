@@ -19,7 +19,15 @@ pub fn twice(text: &str) -> i64 {
     return shout(text) + shout(text);
 }
 
+pub fn total(numbers: &[i64], extra: Option<i64>) -> i64 {
+    return numbers.len() as i64 + extra.unwrap_or(0);
+}
+
 fn main() {
+    let none: Vec<i64> = Vec::new();
+    let nothing: Option<i64> = None;
+    print!("{}", total(&none, nothing));
+    print!("\n");
     print!("{}", shout("ab"));
     print!("\n");
     print!("{}", twice("abc"));

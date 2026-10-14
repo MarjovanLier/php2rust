@@ -190,6 +190,15 @@ impl Converter<'_> {
                 );
                 continue;
             }
+            // rustfmt packs a long pattern of short literals, each at most 20 columns,
+            // several to a line, a layout the tool does not write.
+            if wide && pattern.iter().all(|p| p.len() <= 20 && !p.contains("::")) {
+                self.refuse(
+                    node,
+                    "a long match pattern of short literals is not supported (P2R-157)",
+                );
+                continue;
+            }
             let (last, earlier) = match pattern.split_last() {
                 Some((last, earlier)) if wide && !earlier.is_empty() => (last.clone(), earlier),
                 _ => (joined, &[][..]),

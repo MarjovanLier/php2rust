@@ -423,14 +423,18 @@ impl<'c> Converter<'c> {
     }
 
     /// True for a call of the built-in function `name` (lowercase): by its name in any
-    /// letter case, with or without a leading `\`, or inside a namespace where PHP falls
-    /// back to the global function (P2R-32, P2R-151).
+    /// letter case, with or without a leading `\`, or by an unqualified name inside a
+    /// namespace that no import maps, where PHP falls back to the global function
+    /// (P2R-32, P2R-151).
     fn calls_built_in(&self, call: &FunctionCall<'_>, name: &[u8]) -> bool {
         let Expression::Identifier(identifier) = call.function else {
             return false;
         };
         let key = self.identifier_key(identifier);
-        !self.functions.contains_key(&key) && key.rsplit(|b| *b == b'\\').next() == Some(name)
+        let falls_back = matches!(identifier, Identifier::Local(_))
+            && !self.resolved.is_imported(&identifier.span().start);
+        !self.functions.contains_key(&key)
+            && (key == name || (falls_back && key.rsplit(|b| *b == b'\\').next() == Some(name)))
     }
 
     fn refuse(&mut self, node: &impl HasSpan, message: impl Into<String>) {

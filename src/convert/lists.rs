@@ -12,7 +12,7 @@ use mago_span::HasSpan;
 use mago_syntax::cst::*;
 use mago_syntax::walker::Walker;
 
-use super::{Converter, Signature, nulls};
+use super::{Converter, ParameterSignature, nulls};
 use crate::printer::RExpr;
 use crate::types::{self, RustType};
 
@@ -69,8 +69,10 @@ pub(super) struct SiteTypes {
 
 /// What the reads and writes of one body say about the type of each variable name.
 struct Sites<'c> {
+    /// Finds the function or static method a call runs, by its fully qualified name
+    /// (P2R-151, P2R-153).
+    converter: &'c Converter<'c>,
     artifacts: &'c AnalysisArtifacts,
-    functions: &'c HashMap<Vec<u8>, Signature>,
     enums: &'c types::TypeNames,
     /// The declared return type of a function body.
     returns: Option<&'c RustType>,
@@ -84,6 +86,19 @@ struct Sites<'c> {
 }
 
 impl Sites<'_> {
+    /// Each variable passed alone as an argument flows into its parameter's type.
+    fn arguments(&mut self, list: &ArgumentList<'_>, parameters: &[ParameterSignature]) {
+        for (argument, parameter) in list.arguments.iter().zip(parameters) {
+            if let Argument::Positional(positional) = argument
+                && positional.ellipsis.is_none()
+                && let Expression::Variable(Variable::Direct(variable)) =
+                    unparenthesized(positional.value)
+            {
+                self.add(variable, Some(parameter.ty.clone()), true);
+            }
+        }
+    }
+
     /// The type Mago gives `node`, unless it is only `[]`.
     fn type_at(&self, node: &impl HasSpan) -> Option<RustType> {
         let union = self.artifacts.get_expression_type(node)?;
@@ -164,22 +179,32 @@ impl<'ast, 'arena, 'c> Walker<'ast, 'arena, Sites<'c>> for ListSites {
     }
 
     fn walk_in_function_call(&self, call: &'ast FunctionCall<'arena>, sites: &mut Sites<'c>) {
-        let Expression::Identifier(Identifier::Local(name)) = call.function else {
+        let Expression::Identifier(name) = call.function else {
             return;
         };
-        let functions = sites.functions;
-        let Some(signature) = functions.get(&name.value.to_ascii_lowercase()) else {
+        let converter = sites.converter;
+        if let Some(signature) = converter.functions.get(&converter.identifier_key(name)) {
+            sites.arguments(&call.argument_list, &signature.parameters);
+        }
+    }
+
+    fn walk_in_static_method_call(
+        &self,
+        call: &'ast StaticMethodCall<'arena>,
+        sites: &mut Sites<'c>,
+    ) {
+        let converter = sites.converter;
+        let (Some(key), ClassLikeMemberSelector::Identifier(name)) =
+            (converter.class_key(call.class), &call.method)
+        else {
             return;
         };
-        let arguments = call.argument_list.arguments.iter();
-        for (argument, parameter) in arguments.zip(&signature.parameters) {
-            if let Argument::Positional(positional) = argument
-                && positional.ellipsis.is_none()
-                && let Expression::Variable(Variable::Direct(variable)) =
-                    unparenthesized(positional.value)
-            {
-                sites.add(variable, Some(parameter.ty.clone()), true);
-            }
+        let Some(class) = converter.classes.iter().position(|c| c.key == key) else {
+            return;
+        };
+        if let Some(at) = converter.method_index(class, name.value) {
+            let parameters = &converter.classes[class].methods[at].signature.parameters;
+            sites.arguments(&call.argument_list, parameters);
         }
     }
 
@@ -202,8 +227,8 @@ impl Converter<'_> {
         returns: Option<&RustType>,
     ) -> SiteTypes {
         let mut sites = Sites {
+            converter: self,
             artifacts: &self.artifacts,
-            functions: &self.functions,
             enums: &self.type_names,
             returns,
             found: HashMap::new(),

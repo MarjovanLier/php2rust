@@ -25,8 +25,13 @@ neutral `namespace` and `use` of P2R-150, the call resolution of P2R-151,
 stops of P2R-154, the helper names and the function rules of P2R-155,
 the case, `class`, `final private`, width and P2R-50 rules of P2R-156,
 and the non-ASCII stop of P2R-157. Section 17 (strings and scalars) was
-written on 14 Oct 2026; it changes P2R-07, P2R-31, P2R-48, P2R-60, P2R-72,
-P2R-106 and P2R-130.
+written on 14 Oct 2026; it changes P2R-07, P2R-31, P2R-33, P2R-43,
+P2R-47, P2R-48, P2R-60, P2R-72, P2R-106, P2R-114, P2R-130, P2R-133, P2R-135
+and P2R-153. The two spec reviewers added the lending, call and naming
+rules of P2R-160, the needle forms of P2R-163, the literal, sign and
+deprecated cast rules of P2R-166, the literal, cast and P2R-50 rules of
+P2R-167, the null, `static::` and declaration rules of P2R-168, and the
+scope and argument position rules of P2R-169.
 
 php2rust converts typed PHP source into normal, readable Rust (`Vec`,
 `String`, `i64`), without AI. It reads PHP with the Mago crates, uses Mago's
@@ -157,7 +162,8 @@ requirement IDs.
   or two PHP names in one function, that give the same Rust name
   (`getTotal()` and `get_total()`); a variable whose Rust name equals the
   Rust name of a function in the file; a PHP function named `main`; a
-  function whose Rust name is the name of a helper of P2R-160; and a
+  function, variable, parameter or foreach key or value whose Rust name is
+  the name of a helper of P2R-160; and a
   function with the name of a function PHP has built in (`next`, `touch`),
   which PHP rejects when it compiles the file and Mago does not report (in
   a namespace PHP accepts it, P2R-151).
@@ -169,7 +175,8 @@ requirement IDs.
   declaration, as in PHP. A file with no statements outside functions other
   than the P2R-12 `declare`, enum declarations and class declarations MUST
   convert to a library file with no `main`. After the P2R-52 line the output
-  holds the enums, classes and functions in source order, then `fn main()`.
+  holds the enums, classes and functions in source order, then the helpers
+  of P2R-160, then `fn main()`.
   A function declared inside another statement stops the conversion.
 - **P2R-34** Variables MUST keep PHP's function-wide scope. A variable's Rust
   type is the widened type of every assignment to it and every read of it; a
@@ -216,6 +223,7 @@ requirement IDs.
     `bool` or `string`
   - `==` and `!=` with both operands the same type, `int`, `float` or `bool`
   - `<`, `>`, `<=`, `>=` with both operands `int` or both `float`
+  - `<<`, `>>`, `<<=` and `>>=` as P2R-167 allows them
 
   Parentheses in the output MUST follow Rust precedence, not the source text.
   An expression statement converts only when it is an assignment, an
@@ -242,7 +250,8 @@ requirement IDs.
   conversion.
 - **P2R-47** Lists MUST support the literal `[a, b]`, the empty literal `[]`
   (P2R-21), append `$a[] = x`, and read `$a[$i]` with an `int` index. Writing
-  to an index (`$a[$i] = x`) stops the conversion.
+  to an index (`$a[$i] = x`) stops the conversion. `$s[$i]` on a string is
+  a string offset (P2R-165).
 - **P2R-48** These built-in functions MUST convert: `count()` on a list
   (length as `i64`), `strlen()` (byte length as `i64`), `intdiv()` (integer
   division towards zero) and `fdiv()` (IEEE float division), and the
@@ -322,7 +331,10 @@ requirement IDs.
   - Reading a string offset past either end of the string: PHP warns and
     gives `""`. Rust panics.
   - `substr()` or a string offset that cuts a character of more than one
-    byte: PHP gives the raw bytes, Rust gives U+FFFD in their place.
+    byte: PHP gives the raw bytes, Rust gives U+FFFD (three bytes) in their
+    place, so later lengths, comparisons and joins of that value differ
+    too. The README lists these two; no case folder can show them, because
+    PHP warns or prints bytes that are not UTF-8.
   - Comments and docblocks are not copied (version 1).
 
 ## 8. Tests and CI
@@ -502,9 +514,11 @@ Sections 3 to 9 apply to nullable values unless this section says otherwise.
   read or an append; an element of a list literal, or an appended value,
   whose list holds values that cannot be null; an argument of a built-in
   function (P2R-48), of `E::from()` or of `E::tryFrom()`; the enum of
-  `->name` or `->value`; the subject of a `match` (P2R-120); an argument for
-  a parameter that is not nullable; and a `return` value in a function
-  whose return type is not nullable.
+  `->name` or `->value`; the subject of a `match` (P2R-120); an operand of
+  a cast (P2R-166) or of `<<`, `>>`, `<<=` or `>>=` (P2R-167); the string
+  or the index of a string offset read (P2R-165); an argument for a
+  parameter that is not nullable; and a `return` value in a function whose
+  return type is not nullable.
   These also stop: a parameter default value other than those of P2R-168,
   and `return;` or a path that reaches the end of a function with a
   nullable return type.
@@ -1127,12 +1141,19 @@ reads a leading number, `substr` clamps its offsets), the output holds a
 small helper function that copies PHP's rules.
 
 - **P2R-160** The output MUST hold one private helper function for each
-  helper the file uses, and no other: `ctype_digit`, `php_int`,
-  `php_offset` and `php_substr`, in that order, after the enums, classes
-  and functions and before `fn main()`, one blank line before each, in
-  rustfmt's layout. Each helper MUST give PHP's result for every argument,
-  except for the differences P2R-60 lists. A function of the file whose
-  Rust name is the name of a helper stops the conversion (P2R-31).
+  helper the output calls, and no other (a call left out with a `default`
+  arm, P2R-121, does not count): `ctype_digit`, `php_int`, `php_offset`
+  and `php_substr`, in that order, after the enums, classes and functions
+  and before `fn main()`, one blank line before each, in rustfmt's layout.
+  Each helper takes its string as `&str`, and its string argument is lent
+  as a string argument is (P2R-24, P2R-134): `php_substr(&s, ..)` for a
+  `String` variable, `php_int(&self.text)` for a field, `ctype_digit(s)`
+  for a `&str`. Each helper MUST give PHP's result for every argument,
+  except for the differences P2R-60 lists; a case folder that runs each
+  helper on many values against PHP checks it (P2R-72). A function,
+  variable, parameter or foreach key or value whose Rust name is the name
+  of a helper stops the conversion (P2R-31), because a Rust local of that
+  name hides the helper.
 - **P2R-161** `ctype_digit($s)` with a `string` argument MUST convert to
   `ctype_digit(s)`, true when the string is not empty and every byte is an
   ASCII digit. An argument of another type stops the conversion (PHP treats
@@ -1142,13 +1163,19 @@ small helper function that copies PHP's rules.
   `a.starts_with(b)`, `a.ends_with(b)` and `a.contains(b)`, with `b` lent
   as an argument (P2R-24): all three compare bytes, and an empty `$b`
   gives true in both languages.
-- **P2R-163** `in_array($v, [...], true)`, whose second argument is a list
-  literal of literals or enum cases of the type of `$v` (int, string or an
-  enum), MUST convert to `[a, b].contains(&v)`, with a string `$v` read as
-  `&str`. These stop the conversion: `in_array()` without the third
+- **P2R-163** `in_array($v, [...], true)` MUST convert to
+  `[a, b].contains(&v)` when the second argument is a list literal whose
+  elements are all int literals, with or without unary minus, all string
+  literals without interpolation, or all cases of one enum, of the Rust
+  type of `$v`. The needle is `&v.as_str()` for a `String`, `&v` for a
+  `&str`, an int or an enum, and `&(..)` around an operator expression
+  (`&(v + 1)`); when the needle and every element are literals, the first
+  element gets `_i64` (P2R-49). The array follows the 60-column rule of
+  P2R-115. These stop the conversion: `in_array()` without the third
   argument or with any other third argument, because PHP then compares
   loosely (`in_array('1e3', ['1000'])` is true); a second argument of any
-  other form; and a list literal without elements.
+  other form; a list literal without elements; and an integer literal that
+  PHP reads as a float (P2R-49).
 - **P2R-164** `substr($s, $start)` and `substr($s, $start, $length)` with a
   `string` and int arguments MUST convert to `php_substr(s, start, None)`
   and `php_substr(s, start, Some(length))`, of Rust type `String`. The
@@ -1158,43 +1185,74 @@ small helper function that copies PHP's rules.
   A `null` length stops the conversion.
 - **P2R-165** A read of a string offset, `$s[$i]` with a `string` `$s` and
   an int `$i`, MUST convert to `php_offset(s, i)`, the one byte at that
-  offset as a `String`; a negative offset counts from the end. A write to a
-  string offset stops the conversion.
+  offset as a `String`; a negative offset counts from the end. Where Mago
+  knows the value of the string, it reports an offset outside it (a
+  negative one included) as `invalid-array-index`, and the conversion
+  stops (P2R-11). A write to a string offset stops the conversion.
 - **P2R-166** `(int) $s` with a `string` operand MUST convert to
   `php_int(s)`, which reads the number at the start of the string as PHP
   does: leading whitespace, a sign, digits, a fraction and an exponent;
   `0` when there is no number; the integer part of a float string (`"1.9"`
   gives 1, `"1e3"` gives 1000); the largest or smallest int when the
   number is past the int range; and `0` for a number too large for a
-  float. `(string) $n` with an int operand MUST convert to `n.to_string()`.
-  Every other cast still stops the conversion (P2R-07): of a float (PHP
-  and Rust differ past the int range), of a bool, null, array or object,
-  and `(bool)`, `(float)`, `(array)`, `(object)` and `(unset)`.
+  float. `(string) $n` with an int operand MUST convert to
+  `n.to_string()`; an operand made only of literals gets `_i64` on its
+  first literal (P2R-49), and a negative operand or an operator expression
+  gets parentheses (`(-5_i64).to_string()`, `(-x).to_string()`). `(int)`
+  and `(string)` convert in any letter case and with spaces inside the
+  parentheses. Every other cast still stops the conversion (P2R-07): of a
+  float (PHP and Rust differ past the int range), of a bool, null, array
+  or object; `(int)` of an int and `(string)` of a string; `(bool)`,
+  `(float)`, `(array)`, `(object)` and `(unset)`; and `(integer)` and
+  `(binary)`, which PHP 8.5 deprecates with a message and Mago does not
+  report.
 - **P2R-167** `<<`, `>>`, `<<=` and `>>=` with int operands, whose right
   operand is an int literal from 0 to 63, MUST convert to the Rust
   operators, which shift the bits of an `i64` as PHP does (`1 << 63` is the
-  smallest int, `>>` keeps the sign). Any other shift count stops the
-  conversion: PHP gives 0 or -1 for a count of 64 or more and throws for a
-  negative one, while Rust panics. `<<=` and `>>=` follow the rules of the
-  other compound assignments (P2R-43, P2R-44, P2R-142).
+  smallest int, `>>` keeps the sign). The shift count stays a plain literal
+  (Rust shifts an `i64` by an `i32`), an exception to P2R-49; a left
+  operand made only of literals gets `_i64` (`1_i64 << 40`), and a left
+  operand that ends in a cast gets parentheses (`(xs.len() as i64) << 2`),
+  because Rust reads `as i64 <<` as generic arguments. For P2R-50 a shift
+  of known values has its value, as a literal does: `(1 << 63) - 1` and
+  `$b = 1 << 62; $b * 2` stop. Any other shift count stops the conversion:
+  PHP gives 0 or -1 for a count of 64 or more and throws for a negative
+  one, while Rust panics. `<<=` and `>>=` on a variable convert as `+=`
+  does (P2R-43), and on a chain as `+=` does in P2R-142; form 1 of P2R-147
+  does not apply to them.
 - **P2R-168** A parameter of a function, a method or a constructor MAY have
-  a default value: an int or float literal, with or without unary minus, a
-  bool literal, a single- or double-quoted string literal, `null` for a
-  nullable type, `[]` for a list type, or a case of an enum of the file. A
-  call that leaves the parameter out MUST pass the default, converted as an
-  argument for that parameter (P2R-24, P2R-25, P2R-102). These stop the
-  conversion: a default of any other form (a constant, an expression,
-  `new`); a default on a parameter before one without a default, which PHP
-  deprecates with a message when it compiles the file; and a default on a
-  by-reference or variadic parameter (P2R-07).
-- **P2R-169** A call MAY name its arguments (`f(a: 1, b: 2)`), after its
+  a default value: an int or float literal, with or without unary minus
+  (`-0` for a `float` gives `0.0`, P2R-156), a bool literal, a
+  single-quoted string literal or a double-quoted one without
+  interpolation, `null` for a parameter whose declared type is nullable
+  (`?T` or `T|null`), `[]` for a list or nullable list type, or a case of
+  an enum of the file written `E::Case` or `self::Case`. A call that leaves
+  the parameter out MUST pass the default, converted at its declaration
+  (`self` names the class or enum that declares the parameter) and passed
+  as an argument for that parameter (P2R-24, P2R-25, P2R-102): a filled-in
+  `[]` is `&[]`, `&mut []`, `Vec::new()` or `Some(&[])` by the parameter's
+  form (P2R-143). The filled-in call follows the one-line rule of P2R-51 as
+  Rust writes it. These stop the conversion: a default of any other form (a
+  constant, an expression, `new`, an interpolated string, `static::Case`,
+  which PHP rejects and Mago does not report); a `null` default for a type
+  that is not nullable (`int $x = null`), which PHP deprecates, or rejects
+  on a promoted parameter, and Mago does not report as an error; a default
+  on a parameter before one without a default, which PHP deprecates with a
+  message when it compiles the file; and a default on a by-reference or
+  variadic parameter (P2R-07).
+- **P2R-169** A call of a function, method, static method or constructor
+  of the file MAY name its arguments (`f(a: 1, b: 2)`), after its
   positional arguments, in the order of the parameters, and leave out a
   parameter that has a default. It MUST convert as the call with every
-  argument in parameter order and each left-out default filled in. These
-  stop the conversion: named arguments in another order, because PHP
+  argument in parameter order and each left-out default filled in. For
+  P2R-21, P2R-102 and P2R-143 to P2R-147, a named argument counts at the
+  position of its parameter, and a filled-in default names no variable.
+  These stop the conversion: named arguments in another order, because PHP
   evaluates them in the written order and Rust in parameter order; a
-  spread argument; and a name the function does not have (Mago reports
-  it, P2R-11).
+  positional argument after a named one, which PHP rejects and Mago does
+  not report; a named argument of a built-in function or of `E::from()`
+  and `E::tryFrom()` (P2R-114); a spread argument; and a name the function
+  does not have (Mago reports it, P2R-11).
 
 ## Spec checklist
 

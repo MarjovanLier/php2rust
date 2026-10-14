@@ -1,0 +1,4 @@
+input.php:10:26: a value that may be null cannot go to a built-in function (P2R-106)
+input.php:11:10: str_ends_with() takes two positional arguments (P2R-162)
+input.php:12:10: str_contains() takes two positional arguments (P2R-162)
+input.php:13:23: str_contains() is supported only on strings (P2R-162)

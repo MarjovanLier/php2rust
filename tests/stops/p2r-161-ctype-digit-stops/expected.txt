@@ -1,0 +1,4 @@
+input.php:10:22: a value that may be null cannot go to a built-in function (P2R-106)
+input.php:11:10: ctype_digit() takes one positional argument (P2R-161)
+input.php:12:10: ctype_digit() takes one positional argument (P2R-161)
+input.php:13:10: Impossible type assertion: `$list` of type `list<string>` can never be `numeric-string`. (impossible-type-comparison)

@@ -1,0 +1,6 @@
+input.php:7:16: Invalid index type `int(5)` used for array access on `string('abc')`. (invalid-array-index)
+input.php:7:26: Invalid index type `int(-4)` used for array access on `string('abc')`. (invalid-array-index)
+input.php:8:5: writing to a string offset is not supported (P2R-165)
+input.php:9:10: a value that may be null cannot be read by index (P2R-106)
+input.php:10:13: a value that may be null cannot be a string offset (P2R-106)
+input.php:11:13: a string offset must be an int (P2R-165)

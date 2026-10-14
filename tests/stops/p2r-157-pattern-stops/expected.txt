@@ -1,3 +1,0 @@
-input.php:8:143: a match pattern with non-ASCII text longer than 95 bytes is not supported (P2R-157)
-input.php:16:113: this statement is too long for one line (P2R-51)
-input.php:24:100: a long match pattern of short literals is not supported (P2R-157)

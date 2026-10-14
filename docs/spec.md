@@ -89,8 +89,9 @@ requirement IDs.
 - **P2R-05** On exit 1 or 2 the tool MUST write nothing to stdout and MUST
   NOT create, change or truncate the output file. A failed write MUST NOT
   leave a partial output file (review concern, not checked mechanically).
-- **P2R-06** The same input MUST always give the same stdout bytes, the same
-  output file bytes and the same stderr bytes.
+- **P2R-06** With the same rustfmt (P2R-190), the same input MUST always give
+  the same stdout bytes, the same output file bytes and the same stderr
+  bytes.
 - **P2R-07** Only the constructs that sections 3 to 5 and 11 to 19 list as
   converting may convert. Any other construct MUST stop the conversion,
   which means it is reported as a problem under P2R-03. Examples that stop
@@ -403,12 +404,16 @@ requirement IDs.
   `PHPVersion::LATEST` MUST be PHP 8.5, because Mago always builds its
   prelude with `LATEST`. Version 1 pins Mago 1.55.0.
 - **P2R-82** The README MUST state what the tool does, how to install it
-  (`cargo install --locked`), how to run it, the supported PHP, the refusal
-  rules in short, the known differences (P2R-60) and the command of P2R-76.
+  (`cargo install --locked`), that it needs `rustfmt` on `PATH` (P2R-190),
+  which rustup's minimal profile leaves out, how to run it, the supported
+  PHP, the refusal rules in short, the known differences (P2R-60) and the
+  command of P2R-76.
 - **P2R-83** The Rust toolchain MUST be pinned in `rust-toolchain.toml`. The
   `rust-version` in `Cargo.toml` MUST equal the `rust-version` of the pinned
   Mago crates (1.99.0 for Mago 1.55.0), and the pinned toolchain MUST be at
-  least that version.
+  least that version. The tests MUST fail when `rustfmt --version` does not
+  name the commit of the pinned rustc, because the layout of the expected
+  files is that rustfmt's (P2R-190).
 
 ## 10. Roadmap (not yet specified)
 
@@ -434,19 +439,23 @@ Each milestone gets its own requirements in this file when its work starts.
   functions (section 17 converts the first string functions, default
   parameter values and named arguments); maps and array shapes; interfaces
   and inheritance; exceptions; closures. The goal is
-  code of the kind a Laravel application holds. After section 19, under the
-  standing direction to take the recommended option, the order is: layout
-  by rustfmt (section 20); array shapes as structs and nullable object
-  types; exceptions as `Result`; interfaces and inheritance, with
-  `ArrayAccess` as Rust's `Index`; maps and `preg_*`; then the
-  `StringManipulation` library, which `SouthAfricanIDValidator` calls. Two
-  points are open:
+  code of the kind a Laravel application holds.
+- **Order after section 19**, set on 14 Oct 2026 under Marjo's direction of
+  that day to take the recommended option without asking: layout by
+  rustfmt (section 20); array shapes as structs and nullable object types;
+  exceptions as `Result`; interfaces and inheritance, with `ArrayAccess` as
+  Rust's `Index`; maps and `preg_*`; closures; then the
+  `StringManipulation` library, which `SouthAfricanIDValidator` calls.
+  Three points are open:
   - PHP functions with no counterpart in Rust's standard library
     (`preg_replace`, `DateTime::createFromFormat`): a short one becomes a
     helper written into the output, as `php_int` is (section 17); one that
     needs an engine, such as `preg_replace`, takes a crate, as maps take
-    `indexmap`, so its output needs Cargo. Which formats of
-    `DateTime::createFromFormat` a helper covers is not decided.
+    `indexmap`. Which formats of `DateTime::createFromFormat` a helper
+    covers is not decided.
+  - Output that needs a crate cannot be built with plain `rustc`, which
+    P2R-50, P2R-72 and P2R-176 use; how such output and its tests are built
+    (a `Cargo.toml` beside it) is not decided.
   - Dynamic PHP (`mixed`, magic methods, facades, reflection, arrays with
     values of mixed types) has no plain Rust form. Converting it needs a
     dynamic value type, which no section specifies yet.
@@ -684,7 +693,8 @@ Sections 3 to 9 apply to nullable values unless this section says otherwise.
   compares as `s.as_str()`; a subject that is already `&str` (a string
   parameter, a P2R-104 binding, `->name`, a string `->value`) stays as it is.
 - **P2R-123** The `match` MUST be the whole value of its `return`, `let` or
-  assignment, with one arm per PHP arm, and rustfmt lays it out (P2R-190).
+  assignment, with one arm per PHP arm other than a `default` that P2R-121
+  leaves out, and rustfmt lays it out (P2R-190).
 - **P2R-124** For P2R-34 and P2R-35, each arm MUST be its own path from the
   subject, and the paths join after the `match`.
 
@@ -805,7 +815,8 @@ Sections 3 to 9 apply to nullable values unless this section says otherwise.
   joining of an object; `instanceof`; `clone`, also with new property
   values; a cast of an object; and an object as a condition.
 - **P2R-137** The struct MUST list one field per property
-  (`pub x: i64`), followed by `impl C {`. `new` comes first in the `impl`
+  (`pub x: i64`), and one blank line separates it from `impl C {`. `new`
+  comes first in the `impl`
   block, after the constants of P2R-157, as `pub fn new(params) -> C` with
   the constructor's parameters, and its body is the struct literal as the
   tail expression, `C { x, y }`; rustfmt lays these out (P2R-190). A field
@@ -859,8 +870,7 @@ decided on 11 Oct 2026.
   `$x->p--` as P2R-43 does for a variable (`x.p += 1;`, `x.p += 1.0;` for a
   float); and `$x->p[] = v` to `x.p.push(v);`. The value converts as for an
   assignment to a variable of the property's type (P2R-25, P2R-26,
-  P2R-102), and the chain follows the 60-column chain rule of P2R-134, the
-  target and `.push(v)` included. These stop the conversion: a change
+  P2R-102). These stop the conversion: a change
   through a call result or a `new` expression; `??=`; a write to a list
   element of a property (`$x->p[0] = v`, P2R-47); a change used as a value
   (P2R-44); an int appended to a `list<float>` property, or a list with int
@@ -1050,9 +1060,7 @@ file. Converting several files together is a later slice.
   `self::cases()`, with `static::` too, as P2R-114 converts `E::from()`,
   `E::tryFrom()` and `E::cases()`. A static call counts as a function call
   for P2R-50, P2R-143 to P2R-145 and P2R-147, and for the left side of
-  `??` (P2R-105). A static call, a constant read (P2R-156) and a case are
-  the root of a chain for the 60-column rule of P2R-134, never one of its
-  elements. These stop the conversion: `self::m()`, `static::m()` or
+  `??` (P2R-105). These stop the conversion: `self::m()`, `static::m()` or
   `C::m()` where `m` is not
   static (PHP throws an `Error`, or calls it on `$this` inside a method);
   a static method called through an object (`$o->m()`, `$this->m()`);
@@ -1314,8 +1322,9 @@ Rust module. One input file still converts as sections 1 to 17 say.
   (P2R-174), then its items: the enums, classes and functions of every
   input file of that namespace, files in path order and items in source
   order, then the helpers (P2R-160) that its items call. One blank line
-  comes before each group and each item. rustfmt sorts the `pub mod` lines
-  (P2R-190). These stop the
+  comes before each group and each item, and none inside a group, because
+  rustfmt sorts the `pub mod` lines and the `use` lines only within a group
+  of lines with no blank line between them (P2R-190). These stop the
   conversion: a namespace segment whose snake_case name has no Rust form
   (P2R-30), or is `self`, `super`, `crate` or `Self`, which a raw
   identifier cannot carry; a module named `mod`, and a module directly
@@ -1366,7 +1375,8 @@ Rust module. One input file still converts as sections 1 to 17 say.
   `input.php` and a directory `expected/` in place of `expected.rs`; the
   crate written from `input/` MUST hold the same set of files as
   `expected/`, each equal byte for byte, and every file MUST start with the
-  P2R-52 line. `rustfmt --edition 2024 --check expected/lib.rs` and
+  P2R-52 line. `rustfmt --edition 2024 --config-path <empty file> --check
+  expected/lib.rs` and
   `rustc --edition 2024 --crate-type lib -D warnings expected/lib.rs` MUST
   pass; both follow the modules. A stop folder MAY hold a directory `input/`
   in place of `input.php`; run as `php2rust input -o out`, the tool MUST exit
@@ -1491,27 +1501,41 @@ and 3 in the real library, and three of the final reviews found a width
 rule copied wrong. The tool now lets rustfmt lay out the output, as a person
 writing Rust does. P2R-51 records the change.
 
-- **P2R-190** Before it writes any output, the tool MUST lay out the Rust it
-  built by running the first `rustfmt` on `PATH` with `--edition 2024` and
-  `--config-path` naming an empty configuration file, so a `rustfmt.toml`
-  near the output or in the user's configuration does not change the
-  layout. For a directory input it runs rustfmt once on the crate's
-  `lib.rs`, which follows the module files. When rustfmt cannot be started,
-  exits with an error, or would change its own output when run again with
-  `--check`, the tool MUST print the reason to stderr and exit 2 (P2R-04),
-  writing nothing (P2R-05). The output then depends on the rustfmt version
-  as well as the input (P2R-06); the tests run the pinned toolchain's
-  rustfmt (P2R-83). A line that rustfmt cannot shorten, such as a long
-  string literal, stays as rustfmt leaves it.
+- **P2R-190** Every output the tool writes, to stdout, to the `-o` file or
+  as a file of a crate, MUST equal what the first `rustfmt` on `PATH` gives
+  for it with `--edition 2024` and `--config-path` naming an empty
+  configuration file, so a `rustfmt.toml` near the output or in the user's
+  configuration does not change the layout. The files and the empty
+  configuration file are written to a private directory under the system's
+  temporary directory for this, and a crate is laid out from its `lib.rs`,
+  which names the module files. rustfmt runs in the tool's working
+  directory and environment, with `RUSTUP_AUTO_INSTALL=0` so a rustup proxy
+  never downloads a toolchain. rustfmt runs only when the input converts,
+  so an input that stops exits 1 whether or not rustfmt can run. When
+  rustfmt cannot be started, exits with an error, or would change its own
+  result when run again on it, the tool MUST print one fixed message for
+  each of the three to stderr and exit 2 (P2R-04), and P2R-05 and P2R-170
+  apply: nothing at `-o`, and no temporary file or directory left. The
+  output then depends on the rustfmt version as well as the input (P2R-06);
+  the tests run the pinned toolchain's rustfmt (P2R-83). rustfmt keeps a
+  statement it cannot fit, such as one with a long string literal, as the
+  tool gave it, so the tool writes each statement and each block line on a
+  line of its own, indented four spaces for each block level, with no
+  trailing whitespace. A case folder that holds a `rustfmt.toml` beside its
+  input checks that the tool ignores it, and a CLI test runs the tool with
+  an empty `PATH`, and with a `rustfmt` that fails and one that changes its
+  result on a second run, and checks the three exits 2.
 - **P2R-191** A construct MUST NOT stop the conversion because of the width
   of its Rust text or the layout rustfmt gives it. The rules that sections
   6 and 11 to 19 stated only to copy rustfmt's layout are removed from
-  P2R-51, P2R-115, P2R-123, P2R-134, P2R-137, P2R-148, P2R-156, P2R-157,
-  P2R-160, P2R-163, P2R-168, P2R-172, P2R-174 and P2R-180. A case folder
-  holds the forms that stopped before: a long statement, a long condition
-  with a check against null, a long `match` pattern, a long `?:`, a `?:`
-  as a `match` arm's value, a long chain and a long list, run against PHP
-  (P2R-72).
+  P2R-51, P2R-115, P2R-123, P2R-134, P2R-137, P2R-142, P2R-148, P2R-153,
+  P2R-156, P2R-157, P2R-160, P2R-163, P2R-168, P2R-172, P2R-174 and
+  P2R-180. A case folder holds the forms that stopped before, run against
+  PHP (P2R-72): a long statement, a long condition with a check against
+  null, with the `let` first and after other operands, a long `match`
+  pattern, also with non-ASCII text, a non-ASCII enum arm, a long `?:`, a
+  `?:` as a `match` arm's value, a long chain, a long list, a long
+  `pub const`, a long `new` call and a long string literal inside a call.
 
 ## Spec checklist
 

@@ -1,1 +1,0 @@
-input.php:14:6: this statement is too long for one line (P2R-51)

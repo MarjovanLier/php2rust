@@ -1428,8 +1428,9 @@ converts those forms.
   whole `?:` is never used, because Mago types it as one arm where it
   decides the condition. When only int literals type the `if`, its first
   arm gets `_i64`, and a first write names the type (`let x: i64 = ..`,
-  P2R-49). String arms are lent as `&str` (a literal as it is, a `String`
-  variable as `v.as_str()`), so the `if` lends a `&str` as `??` does
+  P2R-49). String arms are lent as `&str` (a literal, a parameter or another
+  lent string as it is, a `String` variable, property read or list element
+  as `v.as_str()`), so the `if` lends a `&str` as `??` does
   (P2R-105); where a `String` is needed (P2R-26) it is copied once:
   `(if c { "a" } else { "b" }).to_string()`. Each arm is its own path for
   the reads and writes of variables (P2R-34), as an arm of a `match` is
@@ -1441,8 +1442,11 @@ converts those forms.
   which tests PHP truthiness; a condition that is not a bool (P2R-42); an
   arm or a condition that is itself a `?:`, with or without parentheses,
   because Mago reads an unparenthesized nested `?:` from the left where PHP
-  rejects it; an arm that assigns, `++` or `--`; and a value that may be
-  null where the type is not nullable (P2R-106). A check against null does
+  rejects it; an arm that assigns, `++` or `--`; a string arm of any other
+  form, such as a call or a joined string, because Rust drops that string
+  at the end of the arm; an `if` of lists or objects, or of strings, lists
+  or objects that may be null; and a value that may be null where the type
+  is not nullable (P2R-106). A check against null does
   not narrow inside an arm (P2R-104), so `$x !== null ? $x + 1 : 0` stops.
 - **P2R-181** A function, method or static method MAY change a parameter of
   type `string` or `list<T>` by an assignment, `.=` or an append: the body
@@ -1453,9 +1457,11 @@ converts those forms.
   copy, as PHP passes one. The parameter keeps its borrowed type in the
   signature (P2R-24), and from the copy line on it is an owned local
   variable for every rule (P2R-26, P2R-34, P2R-35, P2R-104, P2R-105,
-  P2R-122, P2R-160). These still stop: a foreach key or value with the
-  parameter's name (P2R-41), a parameter of a type that changes its objects
-  (P2R-143), and a promoted constructor parameter.
+  P2R-122, P2R-160), so a later foreach key or value may take its name
+  (P2R-41). These still stop: a foreach key or value with the name of a
+  parameter that no assignment, `.=` or append changes (P2R-24), a parameter
+  of a type that changes its objects (P2R-143), and a promoted constructor
+  parameter.
 - **P2R-182** `trim($s)`, `ltrim($s)` and `rtrim($s)` with one `string`
   argument MUST convert to `php_trim(s)`, `php_ltrim(s)` and `php_rtrim(s)`,
   of type `String`: helpers (P2R-160) that remove the bytes PHP removes by

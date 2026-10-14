@@ -352,7 +352,9 @@ requirement IDs.
 - **P2R-71** Each `expected.rs` MUST pass the checks of P2R-50 and P2R-51,
   and MUST start with the P2R-52 line.
 - **P2R-72** For each case with `fn main()`, the PHP run
-  `php -n -d display_errors=stderr -d error_reporting=E_ALL input.php` and
+  `php -n -d display_errors=stderr -d error_reporting=E_ALL input.php`
+  (with `-d extension=ctype` added for a PHP build that loads `ctype` as a
+  shared extension, which `-n` skips) and
   the Rust program built with `rustc --edition 2024` (debug) MUST print the
   same stdout. Both MUST exit 0, the stdout MUST NOT be empty, and PHP's
   stderr MUST be empty. A case without `fn main()` gets the checks of P2R-70

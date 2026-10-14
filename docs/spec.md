@@ -798,7 +798,8 @@ decided on 11 Oct 2026.
   single- or double-quoted string literal (`String::from("hi")`; heredoc
   and nowdoc stop, as everywhere in version 1); `null`, or a literal of the inner
   type (`Some(5)`), for a nullable type; `[]` for a list type; or a case of
-  an enum. `new` stores the default (`count: 0`, `items: Vec::new()`,
+  an enum, never a class or enum constant (P2R-156). `new` stores the
+  default (`count: 0`, `items: Vec::new()`,
   `note: None`, `side: Side::Left`). A promoted parameter with `readonly` is
   set only by `new` (Mago reports a write anywhere else, P2R-11). These stop
   the conversion: a declared property without a type or a default, with a
@@ -958,10 +959,19 @@ file. Converting several files together is a later slice.
     report: two imports of one kind (class, function or constant) with the
     same name, ignoring letter case except for constants; a class or
     function import whose name is the short name of a class, enum or
-    function the file declares under another fully qualified name; and a
-    class import whose name P2R-111 reserves (`as self`, `as int`);
-  - a class import of a one-part name in a file without a namespace
-    (`use Foo;`), for which PHP prints a warning.
+    function the file declares under another fully qualified name; a class
+    import whose name is one PHP keeps for its own types (`self`, `parent`,
+    `static`, `array`, `bool`, `callable`, `false`, `float`, `int`,
+    `iterable`, `mixed`, `never`, `null`, `object`, `string`, `true`,
+    `void`), with or without `as`; and an `as` name that is a PHP keyword
+    (`as match`), which PHP cannot parse and Mago's parser accepts (a
+    keyword as the last part of the imported name, `use Foo\Match;`, is
+    allowed);
+  - an import of a one-part name without `as`, of any kind, in a file
+    without a namespace (`use Foo;`, `use function strlen;`), for which PHP
+    prints a warning;
+  - a constant import named `true`, `false` or `null` in any letter case,
+    which PHP reads in place of the literal and the tool does not.
 - **P2R-151** The tool MUST find every enum, class and function of the file
   by its fully qualified name in lowercase (`acme\shop\size`), as Mago's
   name resolution gives it; Mago's types hold the fully qualified name too
@@ -990,7 +1000,7 @@ file. Converting several files together is a later slice.
   `static::` or its class name, stops the conversion (P2R-50). These stop
   the conversion: `$this` in a static method (PHP throws an `Error`), and a
   static property. A `final private` method (PHP prints a warning for it)
-  stops by P2R-130.
+  stops by P2R-135.
 - **P2R-153** `C::m(args)`, `self::m(args)` and `static::m(args)`, where `m`
   is a static method, MUST convert to `C::m(args)` with the Rust name of
   the class or enum `C` that declares `m`, also as a statement (P2R-43).
@@ -1038,12 +1048,13 @@ file. Converting several files together is a later slice.
   `try_from` or `cases`, which the helpers of P2R-115 take, and a method
   whose PHP name is `cases`, `from` or `tryFrom` in any letter case (PHP
   rejects `cases` in every enum and `from` and `tryFrom` in a backed enum,
-  and Mago does not report it); the method stops of P2R-130 and P2R-131
-  (a name that starts with `__`, the Rust name `new` or `clone`, two
-  methods with one Rust name or with PHP names equal ignoring letter case,
-  `final private`); a method that calls itself on every path (P2R-50, as
-  in P2R-135); and a method call on a value of Rust type `Option<E>`
-  (P2R-106).
+  and Mago does not report it); the method stops of P2R-130, P2R-131 and
+  P2R-135 (a name that starts with `__`, `__construct` included, which PHP
+  rejects in an enum and Mago does not report, the Rust name `new` or
+  `clone`, two methods with one Rust name or with PHP names equal ignoring
+  letter case, `final private`); a method that calls itself on every path
+  (P2R-50, as in P2R-135); and a method call on a value of Rust type
+  `Option<E>` (P2R-106).
 - **P2R-156** A class of section 14 or 15 and an enum MAY declare
   constants, one per `const` statement, with or without a visibility,
   `final` and a type. The value MUST be an int or float literal, with or
@@ -1064,7 +1075,9 @@ file. Converting several files together is a later slice.
   P2R-50 a read of an int constant has the constant's value, as a literal
   does: arithmetic on it that overflows, and `%` or `intdiv()` by a
   constant 0, stop the conversion. These stop the conversion: a value of
-  any other form (an expression, another constant, a list, heredoc); a
+  any other form (an expression, another constant, a list, heredoc, and a
+  case written `static::Small`, which PHP rejects in a constant's value and
+  Mago does not report); a
   declared type other than `int`, `float`, `bool`, `string` or an enum of
   the file; two constants in one `const` statement; two constants of one
   class or enum with the same Rust name (`X` and `x`); a constant whose
@@ -1072,8 +1085,10 @@ file. Converting several files together is a later slice.
   `const x`), or whose PHP name is the name of a case (PHP rejects it, and
   Mago does not report it); a constant named `class` in any letter case,
   and a constant that is `final` and `private`, which PHP rejects and Mago
-  does not report; a `pub const` line wider than 100 columns (the one-line
-  rule of P2R-51); `C::class`; `$o::NAME`; and a constant declared at the
+  does not report; a `pub const` line longer than 100 bytes (the one-line
+  rule of P2R-51; for ASCII text, wider than 100 columns, and a non-ASCII
+  line stops at 100 bytes, as in P2R-115); `C::class`; `$o::NAME`; and a
+  constant declared at the
   top level or with `define()` (P2R-07). A constant is never a `match`
   condition (P2R-120), also when its value is a case or a literal.
 - **P2R-157** The `impl` block of a class or enum MUST hold, in this order,
@@ -1087,9 +1102,11 @@ file. Converting several files together is a later slice.
   five columns for ` => {`) MUST put one condition per line: the first at
   the level of the arm, each further one at the same level after `| `, and
   the last followed by ` => value,`. When one of these lines is wider than
-  100 columns, the conversion stops (P2R-123). A pattern with non-ASCII
-  text that is longer than 95 bytes stops the conversion, because rustfmt
-  counts columns and the tool counts bytes (as in P2R-115).
+  100 columns, the conversion stops (P2R-123). These stop the conversion:
+  a pattern with non-ASCII text that ends after byte 95, because rustfmt
+  counts columns and the tool counts bytes (as in P2R-115); and a pattern
+  that ends after column 95 whose conditions are all literals of at most
+  20 columns, which rustfmt packs several to a line.
 
 ## Spec checklist
 

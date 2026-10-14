@@ -11,7 +11,8 @@ function check(?string $maybe, string $s, array $list): bool
     $b = ctype_digit($s, $s);
     $c = ctype_digit(text: $s);
     $d = ctype_digit($list);
-    return $a && $b && $c && $d;
+    $e = ctype_digit(53);
+    return $a && $b && $c && $d && $e;
 }
 
 if (check("1", "2", [])) {

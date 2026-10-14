@@ -19,4 +19,13 @@ function casts(string $s, int $n, float $f, bool $b, array $list, ?string $maybe
     echo count((array) $n);
     echo (int) $maybe;
     echo (string) $list;
+    echo (int) null;
+    echo (unset) $n;
+    echo (object) $n;
+    echo (string) Suit::Hearts;
+}
+
+enum Suit
+{
+    case Hearts;
 }

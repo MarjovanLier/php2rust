@@ -22,3 +22,8 @@ echo f(1, 2, 3, 4), "\n";
 echo f(p: 1, 2), "\n";
 echo strlen(string: "x"), "\n";
 echo Size::from(value: 's')->value, "\n";
+if (Size::tryFrom(...['s']) === null) {
+    echo "none\n";
+}
+echo strlen(...["abc"]), "\n";
+echo intdiv(num2: 2, num1: 7), "\n";

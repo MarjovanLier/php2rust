@@ -138,21 +138,13 @@ impl Converter<'_> {
         node: &Expression<'_>,
         name: &str,
     ) -> Option<((RExpr, RustType), (RExpr, RustType))> {
-        let (left, right) = match call.argument_list.arguments.as_slice() {
-            [Argument::Positional(left), Argument::Positional(right)]
-                if left.ellipsis.is_none() && right.ellipsis.is_none() =>
-            {
-                (left.value, right.value)
-            }
-            _ => {
-                self.record_refused(node);
-                self.refuse(
-                    node,
-                    format!("{name} takes two positional arguments (P2R-48)"),
-                );
-                return None;
-            }
-        };
+        let arguments = self.built_in_arguments(
+            call,
+            node,
+            (2, 2),
+            &format!("{name} takes two positional arguments (P2R-48)"),
+        )?;
+        let (left, right) = (arguments[0], arguments[1]);
         // Both convert first, so problems in both are reported.
         let converted = (self.expression(left), self.expression(right));
         let (Some(left_value), Some(right_value)) = converted else {

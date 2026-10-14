@@ -414,7 +414,7 @@ impl Converter<'_> {
             self.record_refused(node);
             self.refuse(
                 argument,
-                "named and spread arguments are not supported (P2R-07)",
+                "named and spread arguments of E::from(), E::tryFrom() and E::cases() are not supported (P2R-169)",
             );
             return None;
         }

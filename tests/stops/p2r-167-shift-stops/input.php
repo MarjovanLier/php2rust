@@ -11,6 +11,7 @@ function shifts(int $n, float $f, ?int $maybe): void
     echo $f >> 1;
     echo $maybe << 1;
     echo $n << (1 + 1);
+    echo $n >> -1;
     $i = 1 << 62;
     echo $i * 2;
     $k = $n;

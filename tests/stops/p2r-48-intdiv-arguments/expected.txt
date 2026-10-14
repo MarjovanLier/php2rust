@@ -1,1 +1,1 @@
-input.php:5:6: intdiv takes two positional arguments (P2R-48)
+input.php:5:6: a named or spread argument of a built-in function is not supported (P2R-169)

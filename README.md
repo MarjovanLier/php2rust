@@ -250,6 +250,9 @@ php2rust refuses some valid PHP that version 1 converts in other forms:
   columns for call arguments, so it stops. Put the arguments in variables first.
 - `$s ?? $this->name`, a nullable string parameter with a string property as the
   default, is wider than rustfmt's 60 columns for a method chain, so it stops.
+- `$a ?? ...` on a local nullable string counts as a chain with `.clone()` even when the
+  variable is not read again, so such a line of 61 to 68 columns stops where rustfmt
+  would keep it. Put the default in a variable first.
 - A `match` that starts a new variable stops when its arms are all `[]` or all `null`,
   or when its list arms differ in whether their elements may be null (`[null, 1]` and
   `[5]`), because no arm gives the variable its type. Assign the variable first.

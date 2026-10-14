@@ -45,15 +45,16 @@ impl Converter<'_> {
         call: &FunctionCall<'_>,
         node: &Expression<'_>,
     ) -> Option<(RExpr, RustType)> {
-        let [Argument::Positional(argument)] = call.argument_list.arguments.as_slice() else {
-            self.record_refused(node);
-            self.refuse(node, "strlen takes one positional argument (P2R-48)");
-            return None;
-        };
-        let (expr, ty) = self.expression(argument.value)?;
+        let arguments = self.built_in_arguments(
+            call,
+            node,
+            (1, 1),
+            "strlen takes one positional argument (P2R-48)",
+        )?;
+        let (expr, ty) = self.expression(arguments[0])?;
         // Mago may type the argument as a string where it knows more (P2R-104).
         if matches!(ty, RustType::Option(_)) {
-            self.refuse(argument.value, nulls::NULL_BUILT_IN);
+            self.refuse(arguments[0], nulls::NULL_BUILT_IN);
             return None;
         }
         Some((RExpr::Len(Box::new(expr)), RustType::I64))
@@ -151,8 +152,8 @@ impl Converter<'_> {
     }
 
     /// The positional arguments of a call of a built-in function, when there are from
-    /// `min` to `max` of them, or `None` with `message` recorded: a named or spread
-    /// argument stops it as well (P2R-169).
+    /// `min` to `max` of them, or `None` with `message` recorded. A named or spread
+    /// argument stops the call (P2R-169).
     pub(super) fn built_in_arguments<'arena>(
         &mut self,
         call: &FunctionCall<'arena>,
@@ -160,25 +161,20 @@ impl Converter<'_> {
         (min, max): (usize, usize),
         message: &str,
     ) -> Option<Vec<&'arena Expression<'arena>>> {
-        let values: Option<Vec<&'arena Expression<'arena>>> = call
-            .argument_list
-            .arguments
+        let arguments = &call.argument_list.arguments;
+        let message = if arguments
             .iter()
-            .map(|argument| match argument {
-                Argument::Positional(positional) if positional.ellipsis.is_none() => {
-                    Some(positional.value)
-                }
-                _ => None,
-            })
-            .collect();
-        match values {
-            Some(values) if (min..=max).contains(&values.len()) => Some(values),
-            _ => {
-                self.record_refused(node);
-                self.refuse(node, message.to_owned());
-                None
-            }
-        }
+            .any(|argument| matches!(argument, Argument::Named(_)) || argument.is_unpacked())
+        {
+            "a named or spread argument of a built-in function is not supported (P2R-169)"
+        } else if (min..=max).contains(&arguments.len()) {
+            return Some(arguments.iter().map(Argument::value).collect());
+        } else {
+            message
+        };
+        self.record_refused(node);
+        self.refuse(node, message.to_owned());
+        None
     }
 
     /// An argument of a built-in function that must have the type `wanted`, converted but

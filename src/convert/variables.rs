@@ -69,12 +69,7 @@ const NO_COPY: &str = "an object whose class changes its objects is never copied
 /// The problem of a write to the binding of a null check (P2R-104).
 const CHECKED: &str = "a variable that a check against null binds cannot be assigned until the check's block ends (P2R-104)";
 
-/// Stands after a string or list variable that a statement moves, for its `.clone()` when
-/// the variable is read again (P2R-26). The mark is this character, six hex digits and
-/// this character: as wide as `.clone()`, so the widths `printer` checks inside a
-/// `vec![..]` or a call with the mark in place are never smaller than the final ones. A
-/// line that holds a mark is measured at the end of the body, once the mark is resolved.
-pub(super) const COPY: char = '\u{2}';
+pub(super) use crate::printer::COPY;
 
 /// A line whose text is known only at the end of the body.
 enum Pending {

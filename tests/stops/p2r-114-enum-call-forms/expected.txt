@@ -1,3 +1,3 @@
-input.php:14:16: named and spread arguments are not supported (P2R-07)
+input.php:14:16: named and spread arguments of E::from(), E::tryFrom() and E::cases() are not supported (P2R-169)
 input.php:17:5: E::from() on an enum without cases always fails, and rustc rejects the code after it (P2R-50)
 input.php:17:28: E::from() on an enum without cases always fails, and rustc rejects the code after it (P2R-50)

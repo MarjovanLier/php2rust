@@ -336,6 +336,10 @@ requirement IDs.
     place, so later lengths, comparisons and joins of that value differ
     too. The README lists these two; no case folder can show them, because
     PHP warns or prints bytes that are not UTF-8.
+  - `(int)` of a string of 19 digits above `PHP_INT_MAX` followed by `e+`
+    or `e-` without exponent digits (`"9300000000000000000e+"`): PHP's
+    number parser reads one byte late and gives a wrapped value
+    (-9146744073709551616); `php_int` gives the largest or smallest int.
   - Comments and docblocks are not copied (version 1).
 
 ## 8. Tests and CI
@@ -1172,8 +1176,9 @@ small helper function that copies PHP's rules.
   type of `$v`. The needle is `&v.as_str()` for a `String`, `&v` for a
   `&str`, an int or an enum, and `&(..)` around an operator expression
   (`&(v + 1)`); when the needle and every element are literals, the first
-  element gets `_i64` (P2R-49). The array follows the 60-column rule of
-  P2R-115. These stop the conversion: `in_array()` without the third
+  element gets `_i64` (P2R-49). An array wider than 60 columns stops the
+  conversion (P2R-51), because rustfmt then splits it. These stop the
+  conversion: `in_array()` without the third
   argument or with any other third argument, because PHP then compares
   loosely (`in_array('1e3', ['1000'])` is true); a second argument of any
   other form; a list literal without elements; and an integer literal that

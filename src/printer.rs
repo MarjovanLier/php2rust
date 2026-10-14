@@ -73,6 +73,14 @@ pub const ARGS_WIDTH: usize = 60;
 /// only has to fit the line.
 const CHAIN_WIDTH: usize = 60;
 
+/// Stands after a string or list variable that a statement moves, for its `.clone()` when
+/// the variable is read again (P2R-26). The mark is this character, six hex digits and
+/// this character: as wide as `.clone()`, so the widths checked here with the mark in
+/// place are never smaller than the final ones, and a chain counts it as the `.clone()`
+/// it may become. A line that holds a mark is measured at the end of the body, once the
+/// mark is resolved.
+pub const COPY: char = '\u{2}';
+
 /// A Rust expression before layout.
 #[derive(Clone, Debug)]
 pub enum RExpr {
@@ -400,6 +408,10 @@ fn calls(expr: &RExpr) -> usize {
         RExpr::Method(inner, _) | RExpr::Len(inner) | RExpr::MapOwned(inner) => 1 + calls(inner),
         RExpr::Unwrap { option, .. } => 1 + calls(option),
         RExpr::Field(object, _) | RExpr::MethodCall(object, ..) => 1 + calls(object),
+        // shortcut: a mark that resolves to nothing still counts, so a chain of 61 to 68
+        // columns may stop where rustfmt would keep it; resolve chains at the end of the
+        // body to lift this.
+        RExpr::Var(name) => usize::from(name.contains(COPY)),
         _ => 0,
     }
 }

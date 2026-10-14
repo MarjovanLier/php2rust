@@ -534,21 +534,15 @@ impl Converter<'_> {
         call: &FunctionCall<'_>,
         node: &Expression<'_>,
     ) -> Option<(RExpr, RustType)> {
-        let mut arguments = call.argument_list.arguments.iter();
-        let argument = match (arguments.next(), arguments.next()) {
-            (Some(Argument::Positional(argument)), None) if argument.ellipsis.is_none() => argument,
-            _ => {
-                self.record_refused(node);
-                self.refuse(
-                    node,
-                    "count() converts with one list argument only (P2R-48)",
-                );
-                return None;
-            }
-        };
-        let (list, ty) = self.expression(argument.value)?;
+        let arguments = self.built_in_arguments(
+            call,
+            node,
+            (1, 1),
+            "count() converts with one list argument only (P2R-48)",
+        )?;
+        let (list, ty) = self.expression(arguments[0])?;
         if matches!(ty, RustType::Option(_)) {
-            self.refuse(argument.value, nulls::NULL_BUILT_IN);
+            self.refuse(arguments[0], nulls::NULL_BUILT_IN);
             return None;
         }
         if !matches!(ty, RustType::Vec(_)) {

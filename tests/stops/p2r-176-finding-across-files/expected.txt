@@ -1,0 +1,1 @@
+input/Use.php:11:21: Invalid argument type for argument #1 of `App\count_up`: expected `int`, but found `string`. (invalid-argument)

@@ -1,0 +1,1 @@
+input/sub/two.php:5:7: syntax error: Expected one of `Semicolon`, `CloseTag` before end of file

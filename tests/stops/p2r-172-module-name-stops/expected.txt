@@ -1,0 +1,5 @@
+input/a.php:5:11: a module named mod is not supported, because rustc rejects it or warns about it (P2R-172)
+input/b.php:5:11: a module named lib is not supported, because rustc rejects it or warns about it (P2R-172)
+input/d.php:5:11: another namespace gives the same module path (P2R-172)
+input/e.php:5:11: a module named main is not supported, because rustc rejects it or warns about it (P2R-172)
+input/g.php:7:10: a function may not take the name of a child module of its own module, which its use line would import too (P2R-173)

@@ -1,0 +1,2 @@
+input/main.php:12:1: a directory converts to a library, which has no statements outside functions (P2R-175)
+input/require.php:7:1: a directory converts to a library, which has no statements outside functions (P2R-175)

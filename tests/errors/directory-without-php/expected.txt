@@ -1,0 +1,1 @@
+input: the directory holds no .php file

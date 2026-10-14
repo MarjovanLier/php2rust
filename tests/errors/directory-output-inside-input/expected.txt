@@ -1,0 +1,1 @@
+input/out: the output directory is inside the input directory

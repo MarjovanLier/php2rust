@@ -1,0 +1,6 @@
+input/a.php:7:1: another enum, class or function of the crate has the same Rust name or fully qualified name (P2R-173)
+input/a.php:12:1: another enum, class or function of the crate has the same Rust name or fully qualified name (P2R-173)
+input/b.php:7:1: another enum, class or function of the crate has the same Rust name or fully qualified name (P2R-173)
+input/b.php:12:1: another enum, class or function of the crate has the same Rust name or fully qualified name (P2R-173)
+input/c.php:5:11: an earlier file writes this namespace with other letter case, and PHP reads both as one namespace (P2R-172)
+input/c.php:7:1: another enum, class or function of the crate has the same Rust name or fully qualified name (P2R-173)

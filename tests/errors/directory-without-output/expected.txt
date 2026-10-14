@@ -1,0 +1,1 @@
+input: a directory input needs -o with the directory to create for the crate

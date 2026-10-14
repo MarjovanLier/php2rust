@@ -1,0 +1,3 @@
+input/A.php:9:12: intdiv by zero always fails (P2R-50)
+input/Sub/B.php:9:12: % by zero always fails (P2R-50)
+input/Sub/B.php:14:12: calls to unknown_function are not supported (P2R-48)

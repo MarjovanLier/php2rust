@@ -122,7 +122,12 @@ fn folders_behave_as_the_spec_says() {
     fs::create_dir_all(&scratch).expect("scratch directory");
     let mut failures: Vec<String> = Vec::new();
     for dir in folders("cases") {
-        if let Err(why) = case(&dir, &scratch) {
+        let result = if dir.join("input").is_dir() {
+            crate_case(&dir, &scratch)
+        } else {
+            case(&dir, &scratch)
+        };
+        if let Err(why) = result {
             failures.push(format!("cases/{}: {why}", name(&dir)));
         }
     }
@@ -231,34 +236,157 @@ fn case(dir: &Path, scratch: &Path) -> Result<(), String> {
     Ok(())
 }
 
-/// P2R-73: refused with the expected problem lines, nothing written.
+/// P2R-176: a directory `input/` converts to the crate in `expected/`, file by file, twice
+/// the same, and the crate passes rustfmt and rustc.
+fn crate_case(dir: &Path, scratch: &Path) -> Result<(), String> {
+    let out = scratch.join(format!("{}-crate", name(dir)));
+    let again = scratch.join(format!("{}-again", name(dir)));
+    for target in [&out, &again] {
+        let _ = fs::remove_dir_all(target);
+        let path = target.to_str().expect("UTF-8 scratch path");
+        let result = tool(&["input", "-o", path], dir);
+        if result.status.code() != Some(0) || !result.stderr.is_empty() || !result.stdout.is_empty()
+        {
+            return Err(format!(
+                "exit {:?}, stderr:\n{}",
+                result.status.code(),
+                text(&result.stderr)
+            ));
+        }
+    }
+    let written = tree(&out)?;
+    if tree(&again)? != written {
+        return Err("two runs gave different crates (P2R-06)".into());
+    }
+    let expected_dir = dir.join("expected");
+    if bless() {
+        let _ = fs::remove_dir_all(&expected_dir);
+        for (path, bytes) in &written {
+            let target = expected_dir.join(path);
+            fs::create_dir_all(target.parent().expect("a file in a folder"))
+                .map_err(|e| e.to_string())?;
+            fs::write(target, bytes).map_err(|e| e.to_string())?;
+        }
+    }
+    let expected = tree(&expected_dir)?;
+    if written != expected {
+        let paths = |files: &BTreeMap<String, Vec<u8>>| files.keys().cloned().collect::<Vec<_>>();
+        let changed: Vec<&String> = written
+            .iter()
+            .filter(|(path, bytes)| expected.get(*path) != Some(bytes))
+            .map(|(path, _)| path)
+            .collect();
+        return Err(format!(
+            "crate differs from expected/\n-- expected files {:?}\n-- written files {:?}\n-- changed {changed:?}",
+            paths(&expected),
+            paths(&written)
+        ));
+    }
+    if let Some((path, _)) = expected
+        .iter()
+        .find(|(_, bytes)| !bytes.starts_with(HEADER.as_bytes()))
+    {
+        return Err(format!(
+            "expected/{path} does not start with the P2R-52 line"
+        ));
+    }
+    let format = run(
+        "rustfmt",
+        &["--edition", "2024", "--check", "expected/lib.rs"],
+        dir,
+    );
+    if !format.status.success() {
+        return Err(format!(
+            "rustfmt --check failed (P2R-51):\n{}",
+            text(&format.stdout)
+        ));
+    }
+    let library = scratch.join(format!("{}.rlib", name(dir)));
+    let target = library.to_str().expect("UTF-8 scratch path");
+    let build = run(
+        "rustc",
+        &[
+            "--edition",
+            "2024",
+            "--crate-type",
+            "lib",
+            "-D",
+            "warnings",
+            "-o",
+            target,
+            "expected/lib.rs",
+        ],
+        dir,
+    );
+    if !build.status.success() {
+        return Err(format!("rustc failed (P2R-50):\n{}", text(&build.stderr)));
+    }
+    Ok(())
+}
+
+/// Every file under `dir`, by its path below `dir` with `/`, with its bytes.
+fn tree(dir: &Path) -> Result<BTreeMap<String, Vec<u8>>, String> {
+    fn walk(root: &Path, dir: &Path, files: &mut BTreeMap<String, Vec<u8>>) -> Result<(), String> {
+        for entry in fs::read_dir(dir).map_err(|e| format!("{}: {e}", dir.display()))? {
+            let path = entry.map_err(|e| e.to_string())?.path();
+            if path.is_dir() {
+                walk(root, &path, files)?;
+            } else {
+                let relative = path.strip_prefix(root).expect("below the root");
+                let key = relative.to_string_lossy().replace('\\', "/");
+                files.insert(key, fs::read(&path).map_err(|e| e.to_string())?);
+            }
+        }
+        Ok(())
+    }
+    let mut files = BTreeMap::new();
+    walk(dir, dir, &mut files)?;
+    Ok(files)
+}
+
+/// P2R-73: refused with the expected problem lines, nothing written. A stop folder with a
+/// directory `input/` runs as `php2rust input -o out` (P2R-176).
 fn stop(dir: &Path) -> Result<(), String> {
+    if dir.join("input").is_dir() {
+        let result = tool(&["input", "-o", "out"], dir);
+        let created = dir.join("out").exists();
+        let _ = fs::remove_dir_all(dir.join("out"));
+        return stopped(dir, &["input", "-o", "out"], &result, created);
+    }
     for args in [&["input.php"][..], &["input.php", "-o", "out.rs"][..]] {
         let result = tool(args, dir);
-        if bless() {
-            fs::write(dir.join("expected.txt"), &result.stderr).map_err(|e| e.to_string())?;
-        }
-        let expected = fs::read_to_string(dir.join("expected.txt"))
-            .map_err(|e| format!("expected.txt: {e}"))?;
-        let stderr = text(&result.stderr);
-        if result.status.code() != Some(1) {
-            return Err(format!(
-                "{args:?}: exit {:?}, expected 1\n{stderr}",
-                result.status.code()
-            ));
-        }
-        if stderr != expected {
-            return Err(format!(
-                "{args:?}: stderr differs\n-- expected\n{expected}-- actual\n{stderr}"
-            ));
-        }
-        if !result.stdout.is_empty() {
-            return Err(format!("{args:?}: stdout is not empty (P2R-05)"));
-        }
-        if dir.join("out.rs").exists() {
-            let _ = fs::remove_file(dir.join("out.rs"));
-            return Err(format!("{args:?}: out.rs was created (P2R-05)"));
-        }
+        let created = dir.join("out.rs").exists();
+        let _ = fs::remove_file(dir.join("out.rs"));
+        stopped(dir, args, &result, created)?;
+    }
+    Ok(())
+}
+
+/// Checks one stop run: exit 1, `expected.txt` on stderr, nothing on stdout, and no
+/// output written (P2R-05, P2R-73).
+fn stopped(dir: &Path, args: &[&str], result: &Output, created: bool) -> Result<(), String> {
+    if bless() {
+        fs::write(dir.join("expected.txt"), &result.stderr).map_err(|e| e.to_string())?;
+    }
+    let expected =
+        fs::read_to_string(dir.join("expected.txt")).map_err(|e| format!("expected.txt: {e}"))?;
+    let stderr = text(&result.stderr);
+    if result.status.code() != Some(1) {
+        return Err(format!(
+            "{args:?}: exit {:?}, expected 1\n{stderr}",
+            result.status.code()
+        ));
+    }
+    if stderr != expected {
+        return Err(format!(
+            "{args:?}: stderr differs\n-- expected\n{expected}-- actual\n{stderr}"
+        ));
+    }
+    if !result.stdout.is_empty() {
+        return Err(format!("{args:?}: stdout is not empty (P2R-05)"));
+    }
+    if created {
+        return Err(format!("{args:?}: the output was created (P2R-05)"));
     }
     Ok(())
 }
@@ -297,14 +425,15 @@ fn error(dir: &Path) -> Result<(), String> {
     Ok(())
 }
 
-/// Every file in the folder except expected.txt, by name, with its bytes.
+/// Every file in the folder and below it except expected.txt, by path, with its bytes; a
+/// directory counts as an empty entry, so one the run creates shows (P2R-74, P2R-176).
 fn snapshot(dir: &Path) -> Result<BTreeMap<String, Vec<u8>>, String> {
-    let mut files = BTreeMap::new();
+    let mut files = tree(dir)?;
+    files.remove("expected.txt");
     for entry in fs::read_dir(dir).map_err(|e| e.to_string())? {
         let path = entry.map_err(|e| e.to_string())?.path();
-        let file = name(&path);
-        if file != "expected.txt" {
-            files.insert(file, fs::read(&path).map_err(|e| e.to_string())?);
+        if path.is_dir() {
+            files.insert(format!("{}/", name(&path)), Vec::new());
         }
     }
     Ok(files)

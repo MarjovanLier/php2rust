@@ -204,13 +204,18 @@ impl Converter<'_> {
         name: &str,
         helper: Helper,
     ) -> Option<(RExpr, RustType)> {
+        let id = if name.ends_with("trim") {
+            "P2R-182"
+        } else {
+            "P2R-183"
+        };
         let arguments = self.built_in_arguments(
             call,
             node,
             (1, 1),
-            &format!("{name}() converts with one string argument only (P2R-182, P2R-183)"),
+            &format!("{name}() converts with one string argument only ({id})"),
         )?;
-        let message = format!("{name}() is supported only on a string (P2R-182, P2R-183)");
+        let message = format!("{name}() is supported only on a string ({id})");
         let text = self.typed_argument(arguments[0], &RustType::String, &message)?;
         let text = self.borrowed(text, &RustType::String);
         Some((self.helper_call(helper, vec![text]), RustType::String))
@@ -258,6 +263,8 @@ impl Converter<'_> {
         let (text, count) = (text?, count?);
         let count = match count {
             RExpr::Int(value) if value >= 0 => RExpr::Int(value),
+            // PHP reads `-0` as 0.
+            RExpr::Neg(inner) if matches!(*inner, RExpr::Int(0)) => RExpr::Int(0),
             // A length is a `usize` already.
             RExpr::Len(list) => RExpr::Method(list, "len"),
             RExpr::Neg(_) | RExpr::Int(_) => {
@@ -314,20 +321,6 @@ impl Converter<'_> {
             (2, 2),
             "implode() converts with a glue and a list only (P2R-186)",
         )?;
-        let plain = matches!(
-            lists::unparenthesized(arguments[0]),
-            Expression::Literal(Literal::String(_))
-                | Expression::Variable(Variable::Direct(_))
-                | Expression::Access(Access::Property(_) | Access::ClassConstant(_))
-        );
-        if !plain {
-            self.record_refused(node);
-            self.refuse(
-                arguments[0],
-                "implode() needs a literal, variable, property or constant as its glue, because Rust runs the list first (P2R-186)",
-            );
-            return None;
-        }
         let list_type = RustType::Vec(Box::new(RustType::String));
         let glue = self.typed_argument(
             arguments[0],
@@ -340,6 +333,13 @@ impl Converter<'_> {
             "implode() is supported only on a list of strings (P2R-186)",
         );
         let (glue, list) = (glue?, list?);
+        if !no_effect(&glue) {
+            self.refuse(
+                arguments[0],
+                "implode() needs a literal, constant, variable, parameter, or chain of property reads on one of them as its glue, because Rust runs the list first (P2R-186)",
+            );
+            return None;
+        }
         let glue = self.borrowed(glue, &RustType::String);
         Some((
             RExpr::MethodCall(Box::new(list), "join".to_owned(), vec![glue]),
@@ -721,6 +721,17 @@ pub(super) fn sole_read(value: &Expression<'_>) -> Option<Span> {
             }
         }
         _ => None,
+    }
+}
+
+/// True for a value whose reading has no effect, so it may run after the list where PHP
+/// runs it first: a literal, a constant, a variable or parameter, or a property read on
+/// one of them (P2R-186).
+fn no_effect(expr: &RExpr) -> bool {
+    match expr {
+        RExpr::Str(_) | RExpr::Path(_) | RExpr::Var(_) => true,
+        RExpr::Field(object, _) => no_effect(object),
+        _ => false,
     }
 }
 

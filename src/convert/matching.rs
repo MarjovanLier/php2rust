@@ -5,7 +5,7 @@ use mago_span::HasSpan;
 use mago_syntax::cst::*;
 
 use super::lists::unparenthesized;
-use super::variables::COPY;
+use super::variables::{self, COPY};
 use super::{Converter, nulls};
 use crate::printer::{self, RExpr};
 use crate::types::RustType;
@@ -13,10 +13,6 @@ use crate::types::RustType;
 /// rustfmt keeps an arm's pattern on one line while it ends by this column, which leaves
 /// room for ` => {` (P2R-157).
 const PATTERN_WIDTH: usize = 95;
-
-/// rustfmt's `single_line_if_else_max_width`: a wider `if` goes over several lines
-/// (P2R-180).
-const IF_WIDTH: usize = 50;
 
 /// True when an arm of type `ty` converts to `expected`: the same type, a value where an
 /// `Option` of it is needed, or an int where a float is (P2R-25, P2R-102).
@@ -414,8 +410,9 @@ impl Converter<'_> {
             Box::new(then_expr?),
             Box::new(else_expr?),
         );
-        // Measured with the `_i64` the first arm may get.
-        if !printer::expr(&expr, true).is_ok_and(|text| text.len() <= IF_WIDTH) {
+        // Measured as printed where the place fixes the type; the printer refuses the `_i64`
+        // that another place adds when it makes the `if` too wide.
+        if !printer::expr(&expr, false).is_ok_and(|text| text.len() <= printer::IF_WIDTH) {
             self.refuse(
                 node,
                 "an if wider than 50 bytes is not supported, because rustfmt splits it over several lines (P2R-180)",
@@ -450,22 +447,42 @@ impl Converter<'_> {
         Some((nulls::wrapped(expr, &ty, expected), expected.clone()))
     }
 
-    /// A string arm of `?:` as a `&str`, so the `if` lends one as `??` does: a literal or
-    /// a parameter as it is, a variable, property read or list element as `v.as_str()`
-    /// (P2R-180). Rust drops any other string at the end of the arm, so it stops.
+    /// A string arm of `?:` as a `&str`, so the `if` lends one as `??` does: a `&str` that
+    /// outlives the arm as it is, a variable, or a property read or list element on one,
+    /// as `v.as_str()` (P2R-180). Rust drops any other string at the end of the arm, a
+    /// call result or a new object included, so it stops.
     fn lent_arm(&mut self, arm: &Expression<'_>, expr: RExpr) -> Option<RExpr> {
+        if self.outlives_arm(&expr) {
+            Some(expr)
+        } else if variables::chain_root(&expr).is_some() {
+            Some(RExpr::Method(Box::new(expr), "as_str"))
+        } else {
+            self.refuse(
+                arm,
+                "a string arm of ?: must be a literal, a variable, a parameter, or a property read or list element on one of them, because Rust drops any other string at the end of the arm (P2R-180)",
+            );
+            None
+        }
+    }
+
+    /// True for a `&str` that outlives the arm of `?:` it stands in: a literal, a
+    /// constant, an enum's `name()` or `value()`, a `&str` parameter, or `??` on a variable
+    /// or parameter with such a default (P2R-180).
+    fn outlives_arm(&self, expr: &RExpr) -> bool {
         match expr {
-            _ if self.is_reference(&expr) => Some(expr),
-            RExpr::Var(_) | RExpr::Field(..) | RExpr::Index(..) => {
-                Some(RExpr::Method(Box::new(expr), "as_str"))
+            RExpr::Str(_) | RExpr::Path(_) | RExpr::Method(_, "name" | "value") => true,
+            RExpr::Var(name) => self.variables.is_borrowed(name),
+            RExpr::Ref(inner) => variables::chain_root(inner).is_some(),
+            RExpr::Unwrap {
+                option, default, ..
+            } => {
+                let option = match &**option {
+                    RExpr::Method(inner, "as_deref") => inner,
+                    other => other,
+                };
+                variables::chain_root(option).is_some() && self.outlives_arm(default)
             }
-            _ => {
-                self.refuse(
-                    arm,
-                    "a string arm of ?: must be a literal, a variable, a parameter, a property read or a list element, because Rust drops any other string at the end of the arm (P2R-180)",
-                );
-                None
-            }
+            _ => false,
         }
     }
 

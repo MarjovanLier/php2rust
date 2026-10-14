@@ -395,7 +395,8 @@ impl Converter<'_> {
             );
         }
         let parameters = self.finish_variables(&mut body);
-        body.splice(0..0, copy_lines(&signature.parameters, &copied, 1));
+        let copies = self.copy_lines(&function.parameter_list, &signature.parameters, &copied, 1);
+        body.splice(0..0, copies);
         self.variables = outer;
         self.current_function = outer_function;
         self.self_calls = outer_calls;
@@ -444,27 +445,37 @@ impl Converter<'_> {
             .map(|parameter| parameter.php_name.clone())
             .collect()
     }
-}
 
-/// The copy line of each parameter in `copied`, in parameter order, at `depth` (P2R-181).
-pub(super) fn copy_lines(
-    parameters: &[ParameterSignature],
-    copied: &HashSet<Vec<u8>>,
-    depth: usize,
-) -> Vec<String> {
-    parameters
-        .iter()
-        .filter(|parameter| copied.contains(&parameter.php_name))
-        .map(|parameter| {
+    /// The copy line of each parameter in `copied`, in parameter order, at `depth`
+    /// (P2R-181). A line too long for one line stops at its parameter (P2R-51).
+    pub(super) fn copy_lines(
+        &mut self,
+        list: &FunctionLikeParameterList<'_>,
+        parameters: &[ParameterSignature],
+        copied: &HashSet<Vec<u8>>,
+        depth: usize,
+    ) -> Vec<String> {
+        let mut lines = Vec::new();
+        for parameter in parameters {
+            if !copied.contains(&parameter.php_name) {
+                continue;
+            }
             let name = &parameter.rust_name;
             let copy = match &parameter.ty {
                 RustType::Option(_) => "map(ToOwned::to_owned)",
                 RustType::Vec(_) => "to_vec()",
                 _ => "to_string()",
             };
-            format!("{}let mut {name} = {name}.{copy};", "    ".repeat(depth))
-        })
-        .collect()
+            let span = list
+                .parameters
+                .iter()
+                .find(|node| node.variable.name.get(1..) == Some(parameter.php_name.as_slice()))
+                .map_or(list.span(), |node| node.variable.span());
+            let line = format!("let mut {name} = {name}.{copy};");
+            lines.push(self.emit(&span, depth, line));
+        }
+        lines
+    }
 }
 
 /// Collects the PHP names, without `$`, of the variables that an assignment or an append

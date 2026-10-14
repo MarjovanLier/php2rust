@@ -1266,6 +1266,10 @@ impl Converter<'_> {
                 "$this cannot be assigned (P2R-135)"
             } else if matches!(entry.ty, Some(RustType::Class(_))) {
                 "an object parameter cannot be assigned, because Rust borrows it (P2R-132)"
+            } else if matches!(entry.ty.as_ref().map(RustType::inner), Some(RustType::Vec(element)) if self.is_changing(element))
+            {
+                // Its copy would copy objects that never copy (P2R-145).
+                "a list parameter of objects whose class changes them cannot be changed, because its copy would copy them (P2R-143)"
             } else {
                 "a string or list parameter cannot be changed, because PHP passes a copy (P2R-24)"
             };

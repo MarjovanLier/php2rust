@@ -68,6 +68,10 @@ pub fn octal_overflow(raw: &[u8]) -> bool {
 /// them (P2R-51).
 pub const ARGS_WIDTH: usize = 60;
 
+/// rustfmt's `single_line_if_else_max_width`, which counts bytes: a wider `if` goes over
+/// several lines (P2R-180).
+pub const IF_WIDTH: usize = 50;
+
 /// rustfmt's `chain_width`: a chain of two or more method calls or field reads that is
 /// wider goes one element per line, so php2rust refuses it (P2R-51). One element on its own
 /// only has to fit the line.
@@ -394,7 +398,6 @@ fn render(expr: &RExpr, anchor: bool, min_precedence: u8) -> Result<String, TooW
             let option = render(option, false, POSTFIX)?;
             chained(expr, format!("{option}.{method}({argument})"))?
         }
-        // The converter refuses an `if` that rustfmt would split (P2R-180).
         RExpr::If(condition, then, otherwise) => {
             let text = format!(
                 "if {} {{ {} }} else {{ {} }}",
@@ -402,6 +405,11 @@ fn render(expr: &RExpr, anchor: bool, min_precedence: u8) -> Result<String, TooW
                 render(then, anchor && !anchored(expr), 0)?,
                 render(otherwise, false, 0)?
             );
+            // The converter refuses a wider `if` with its own message; only the `_i64`
+            // that the place it stands in adds can make it wider here.
+            if text.len() > IF_WIDTH {
+                return Err(TooWide);
+            }
             if min_precedence > 0 {
                 format!("({text})")
             } else {

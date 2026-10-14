@@ -10,8 +10,7 @@ use mago_syntax::cst::*;
 use super::recursion::{self, Target};
 use super::variables::THIS;
 use super::{
-    Context, Converter, Mode, ParameterSignature, Signature, Variables, functions, helpers, lists,
-    nulls,
+    Context, Converter, Mode, ParameterSignature, Signature, Variables, helpers, lists, nulls,
 };
 use crate::names;
 use crate::printer::{self, RExpr};
@@ -1316,10 +1315,8 @@ impl Converter<'_> {
             );
         }
         let parameters = self.finish_variables(&mut body);
-        body.splice(
-            0..0,
-            functions::copy_lines(&signature.parameters, &copied, 2),
-        );
+        let copies = self.copy_lines(&method.parameter_list, &signature.parameters, &copied, 2);
+        body.splice(0..0, copies);
         self.variables = outer;
         self.current_method = outer_method;
         self.current_class = outer_class;

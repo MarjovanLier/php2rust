@@ -69,6 +69,14 @@ fn check_toolchain() {
         "rustfmt is missing: {}",
         text(&rustfmt.stderr)
     );
+    // `rustc 1.99.0 (b940084d7e 2026-..)`: the expected files are this rustfmt's layout
+    // (P2R-83, P2R-190).
+    let commit = rustc.split(['(', ' ']).nth(3).unwrap_or_default();
+    let rustfmt = text(&rustfmt.stdout);
+    assert!(
+        !commit.is_empty() && rustfmt.contains(commit),
+        "the tests need the rustfmt of the pinned rustc ({commit}), found: {rustfmt}"
+    );
     let php = text(&run("php", &["-n", "-r", "echo PHP_VERSION;"], &root()).stdout);
     assert!(
         php.starts_with("8.5."),
@@ -120,6 +128,9 @@ fn folders_behave_as_the_spec_says() {
     check_toolchain();
     let scratch = std::env::temp_dir().join(format!("php2rust-tests-{}", std::process::id()));
     fs::create_dir_all(&scratch).expect("scratch directory");
+    // The empty configuration the tool lays out with, so a `rustfmt.toml` near a folder
+    // does not change the check (P2R-190).
+    fs::write(scratch.join("rustfmt.toml"), "").expect("empty rustfmt configuration");
     let mut failures: Vec<String> = Vec::new();
     for dir in folders("cases") {
         let result = if dir.join("input").is_dir() {
@@ -148,6 +159,25 @@ fn folders_behave_as_the_spec_says() {
         failures.len(),
         failures.join("\n\n")
     );
+}
+
+/// `rustfmt --check` of `file`, run in `dir` with the empty configuration in `scratch`
+/// (P2R-51, P2R-190).
+fn formatted(scratch: &Path, file: &str, dir: &Path) -> Output {
+    let config = scratch.join("rustfmt.toml");
+    let config = config.to_str().expect("UTF-8 scratch path");
+    run(
+        "rustfmt",
+        &[
+            "--edition",
+            "2024",
+            "--config-path",
+            config,
+            "--check",
+            file,
+        ],
+        dir,
+    )
 }
 
 /// P2R-70 to P2R-72: same text, clean Rust, same printed output as PHP.
@@ -179,11 +209,7 @@ fn case(dir: &Path, scratch: &Path) -> Result<(), String> {
     if !source.starts_with(HEADER) {
         return Err("expected.rs does not start with the P2R-52 line".into());
     }
-    let format = run(
-        "rustfmt",
-        &["--edition", "2024", "--check", "expected.rs"],
-        dir,
-    );
+    let format = formatted(scratch, "expected.rs", dir);
     if !format.status.success() {
         return Err(format!(
             "rustfmt --check failed (P2R-51):\n{}",
@@ -290,11 +316,7 @@ fn crate_case(dir: &Path, scratch: &Path) -> Result<(), String> {
             "expected/{path} does not start with the P2R-52 line"
         ));
     }
-    let format = run(
-        "rustfmt",
-        &["--edition", "2024", "--check", "expected/lib.rs"],
-        dir,
-    );
+    let format = formatted(scratch, "expected/lib.rs", dir);
     if !format.status.success() {
         return Err(format!(
             "rustfmt --check failed (P2R-51):\n{}",

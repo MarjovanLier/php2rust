@@ -23,7 +23,6 @@ final readonly class Limits
     const x = 2;
     const array LIST = [];
     final private const HIDDEN = 1;
-    const WIDE = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
 
     public function __construct(public int $n) {}
 

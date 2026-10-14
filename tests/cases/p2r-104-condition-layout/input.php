@@ -10,8 +10,9 @@ function code(int $n): ?int
     return null;
 }
 
-$n = 2;
+$n = 5;
 $v = code($n);
 if ($n > 1 && $v !== null && $v > 3) {
     echo "big\n";
 }
+echo "done\n";

@@ -82,3 +82,91 @@ fn refusal_keeps_an_existing_output_file() {
     );
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// P2R-190: without rustfmt an input that converts exits 2 and writes nothing, for a file
+/// and for a directory; an input that stops still exits 1.
+#[test]
+fn missing_rustfmt_exits_2_and_writes_nothing() {
+    let dir = scratch("no-rustfmt");
+    let empty = dir.join("empty-path");
+    std::fs::create_dir_all(dir.join("src")).unwrap();
+    std::fs::create_dir_all(&empty).unwrap();
+    let source = "<?php\n\ndeclare(strict_types=1);\n\nfunction one(): int\n{\n    return 1;\n}\n";
+    std::fs::write(dir.join("in.php"), source).unwrap();
+    std::fs::write(dir.join("src").join("a.php"), source).unwrap();
+    std::fs::write(dir.join("stops.php"), "<?php\n\necho \"x\\n\";\n").unwrap();
+    let run = |args: &[&str]| {
+        Command::new(env!("CARGO_BIN_EXE_php2rust"))
+            .args(args)
+            .current_dir(&dir)
+            .env("PATH", &empty)
+            .output()
+            .unwrap()
+    };
+    for args in [&["in.php", "-o", "out.rs"][..], &["src", "-o", "crate"]] {
+        let out = run(args);
+        assert_eq!(out.status.code(), Some(2), "{args:?}");
+        assert!(out.stdout.is_empty(), "{args:?}");
+        assert!(
+            String::from_utf8_lossy(&out.stderr).contains("rustfmt"),
+            "{args:?}"
+        );
+    }
+    for left in [
+        "out.rs",
+        "out.rs.php2rust-tmp",
+        "crate",
+        "crate.php2rust-tmp",
+    ] {
+        assert!(!dir.join(left).exists(), "{left} exists");
+    }
+    assert_eq!(run(&["stops.php"]).status.code(), Some(1));
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// P2R-190: a rustfmt that fails, and one whose `--check` finds a change, each give exit 2
+/// with their own fixed message and no output file.
+#[cfg(unix)]
+#[test]
+fn failing_rustfmt_exits_2_with_a_fixed_message() {
+    use std::os::unix::fs::PermissionsExt;
+    let dir = scratch("bad-rustfmt");
+    std::fs::write(
+        dir.join("in.php"),
+        "<?php\n\ndeclare(strict_types=1);\n\necho \"x\\n\";\n",
+    )
+    .unwrap();
+    let cases = [
+        (
+            "fails",
+            "#!/bin/sh\nexit 1\n",
+            "rustfmt failed on the output",
+        ),
+        (
+            "unsettled",
+            "#!/bin/sh\ncase \"$*\" in *--check*) exit 1;; esac\nexit 0\n",
+            "rustfmt changes its own layout when it runs again",
+        ),
+    ];
+    for (name, script, message) in cases {
+        let bin = dir.join(name);
+        std::fs::create_dir_all(&bin).unwrap();
+        let rustfmt = bin.join("rustfmt");
+        std::fs::write(&rustfmt, script).unwrap();
+        std::fs::set_permissions(&rustfmt, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let out = Command::new(env!("CARGO_BIN_EXE_php2rust"))
+            .args(["in.php", "-o", "out.rs"])
+            .current_dir(&dir)
+            .env("PATH", &bin)
+            .output()
+            .unwrap();
+        assert_eq!(out.status.code(), Some(2), "{name}");
+        assert_eq!(
+            String::from_utf8_lossy(&out.stderr),
+            format!("in.php: cannot lay out the output: {message}\n"),
+            "{name}"
+        );
+        assert!(!dir.join("out.rs").exists(), "{name}");
+    }
+    let _ = std::fs::remove_dir_all(&dir);
+}

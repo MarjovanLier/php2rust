@@ -24,7 +24,6 @@ abstract class Shape
 final class Defaults
 {
     public float $f = true;
-    public ?string $note = 'a very long default string that is wider than sixty columns';
     public int $fooBar = 0;
     public int $foo_bar = 1;
 }

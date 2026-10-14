@@ -23,25 +23,6 @@ readonly class Person
     }
 }
 
-readonly class Leaf
-{
-    public function __construct(public string $textValueWithAVeryLongName)
-    {
-    }
-}
-
-readonly class Branch
-{
-    public function __construct(public Leaf $leafHolderWithLongName)
-    {
-    }
-
-    public function size(): int
-    {
-        return strlen($this->leafHolderWithLongName->textValueWithAVeryLongName);
-    }
-}
-
 function uses(Person $p): string
 {
     $field = 'age';

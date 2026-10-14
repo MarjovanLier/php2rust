@@ -166,7 +166,9 @@ converts:
 - classes that implement `ArrayAccess` with a docblock `@implements ArrayAccess<K, V>`:
   `offsetGet()` and the other three methods become plain methods whose `mixed`
   parameters and return take K and V, and `#[Override]` on them is left out.
-  `is_scalar($v)` and `gettype($v)` give their answer from `$v`'s type.
+  `gettype($v)` gives its answer from `$v`'s type, and so does `is_scalar($v)` for a
+  scalar `$v`; for any other `$v`, Mago reports the check as impossible and the
+  conversion stops.
 
 ## What stops the conversion
 

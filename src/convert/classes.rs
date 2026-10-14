@@ -43,7 +43,7 @@ pub(super) struct ClassInfo {
     pub(super) is_enum: bool,
     /// The template arguments K and V of `ArrayAccess`, for a class that implements it
     /// (P2R-220).
-    array_access: Option<(TUnion, TUnion)>,
+    pub(super) array_access: Option<(TUnion, TUnion)>,
     pub(super) constants: Vec<ConstantInfo>,
     /// The PHP names of the constants it declares that were refused, whose reads stop
     /// without a second problem.
@@ -87,6 +87,8 @@ pub(super) struct MethodInfo {
     pub(super) self_mode: Mode,
     /// A static method has no `self` (P2R-152).
     pub(super) is_static: bool,
+    /// The positions of the parameters that K or V of `ArrayAccess` types (P2R-220).
+    templated: Vec<usize>,
 }
 
 /// A constant of a class or enum (P2R-156).
@@ -413,6 +415,25 @@ impl Converter<'_> {
             let overrides =
                 array_access && ARRAY_ACCESS_METHODS.contains(&lowercase(method).as_slice());
             self.method_shape(method, overrides);
+            // PHP rejects a parameter that narrows the interface's mixed, and Mago does
+            // not report it.
+            if overrides {
+                let name = lowercase(method);
+                for (at, parameter) in method.parameter_list.parameters.iter().enumerate() {
+                    let interface = at == 0 || (at == 1 && name == b"offsetset");
+                    if interface
+                        && parameter
+                            .hint
+                            .as_ref()
+                            .is_some_and(|hint| !matches!(hint, Hint::Mixed(_)))
+                    {
+                        self.refuse(
+                            parameter,
+                            "a parameter of an ArrayAccess method must keep the type mixed (P2R-220)",
+                        );
+                    }
+                }
+            }
             if is_constructor(method) {
                 constructors += 1;
                 if constructors > 1 {
@@ -512,7 +533,10 @@ impl Converter<'_> {
             .flat_map(|list| list.attributes.iter())
             .collect();
         let only_override = attributes.len() == 1
-            && attributes[0].argument_list.is_none()
+            && attributes[0]
+                .argument_list
+                .as_ref()
+                .is_none_or(|list| list.arguments.is_empty())
             && self.identifier_key(&attributes[0].name) == b"override";
         if let Some(attributes) = method.attribute_lists.first()
             && !(overrides && only_override)
@@ -909,6 +933,7 @@ impl Converter<'_> {
             };
             let mut converted = self.defaults_last(&method.parameter_list);
             let mut parameters: Vec<ParameterSignature> = Vec::new();
+            let mut templated = Vec::new();
             for (parameter, meta) in method
                 .parameter_list
                 .parameters
@@ -937,9 +962,14 @@ impl Converter<'_> {
                     continue;
                 }
                 let declared = meta.get_type_metadata().map(|t| &t.type_union);
+                let mixed = declared.is_some_and(TUnion::is_mixed);
                 let declared = self
                     .templated(index, method, Some(parameters.len()), declared)
                     .cloned();
+                // K and V are never mixed, so a mixed type that is gone was replaced.
+                if mixed && !declared.as_ref().is_some_and(TUnion::is_mixed) {
+                    templated.push(parameters.len());
+                }
                 match self.parameter(parameter, declared.as_ref(), taken, &parameters) {
                     Some(signature) => parameters.push(signature),
                     None => converted = false,
@@ -975,6 +1005,7 @@ impl Converter<'_> {
                         .modifiers
                         .iter()
                         .any(|m| matches!(m, Modifier::Static(_))),
+                    templated,
                 });
             }
         }
@@ -1358,6 +1389,14 @@ impl Converter<'_> {
             &mut self.variables,
             Variables::with_parameters(&parameters, &copied),
         );
+        // `self` is the first variable of a method that is not static.
+        let first = parameters.len() - signature.parameters.len();
+        let templated: Vec<usize> = self.classes[class].methods[at]
+            .templated
+            .iter()
+            .map(|at| at + first)
+            .collect();
+        self.variables.template(&templated);
         let outer_method = self.current_method.replace((class, at));
         let outer_class = self.current_class.replace(class);
         let outer_calls = std::mem::take(&mut self.self_calls);

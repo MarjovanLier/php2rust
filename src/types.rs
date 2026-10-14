@@ -333,6 +333,12 @@ pub fn only_null(union: &TUnion) -> bool {
     !union.types.is_empty() && union.types.iter().all(|a| matches!(a, TAtomic::Null))
 }
 
+/// True when `union` is `mixed`, or `scalar` after `is_scalar()`: what Mago knows of a
+/// parameter that the `ArrayAccess` template types (P2R-220).
+pub fn mixed_or_scalar(union: &TUnion) -> bool {
+    union.is_mixed() || matches!(union.types.as_ref(), [TAtomic::Scalar(TScalar::Generic)])
+}
+
 fn atomic_type(atomic: &TAtomic, enums: &TypeNames) -> Option<RustType> {
     match atomic {
         TAtomic::Scalar(TScalar::Integer(_)) => Some(RustType::I64),

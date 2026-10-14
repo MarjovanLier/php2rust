@@ -706,6 +706,11 @@ impl Converter<'_> {
 pub(super) fn sole_read(value: &Expression<'_>) -> Option<Span> {
     match value {
         Expression::Parenthesized(inner) => sole_read(inner.expression),
+        // `(string)` of a string converts to its operand (P2R-222).
+        Expression::UnaryPrefix(UnaryPrefix {
+            operator: UnaryPrefixOperator::StringCast(..),
+            operand,
+        }) => sole_read(operand),
         Expression::Variable(Variable::Direct(variable)) => Some(variable.span),
         Expression::CompositeString(CompositeString::Interpolated(string)) => {
             let mut parts = string.parts.iter().filter(|part| !empty(part));

@@ -1922,8 +1922,11 @@ interfaces and inheritance are later slices.
   parameter of `offsetSet` takes V, and the return of `offsetGet` takes V,
   each in its parameter or owned form (`&str` and `String` for a string,
   `&[T]` and `Vec<T>` for a list, `&C` and `C` for a class or shape;
-  P2R-24, P2R-132, P2R-201). A declared type other than `mixed` keeps its
-  own Rust type (P2R-20). A read of such a parameter in the body has its
+  P2R-24, P2R-132, P2R-201). A return type other than `mixed` keeps its
+  own Rust type (P2R-20). A parameter of these four methods with a written
+  type other than `mixed` stops: PHP rejects it when it loads the class,
+  because a parameter may not narrow the interface's `mixed`, and Mago
+  does not report it. A read of such a parameter in the body has its
   Rust type, also where Mago types it `mixed`, or `scalar` after
   `is_scalar()`, and P2R-24, P2R-34 and P2R-181 apply to it by that type.
   A float K or V stops, because a `mixed` slot keeps an int that P2R-25
@@ -1934,7 +1937,8 @@ interfaces and inheritance are later slices.
   class, its write, `isset`, `unset` and `??` (a later slice; call
   `offsetGet()` instead).
 - **P2R-221** The attribute `#[Override]` (any name PHP resolves to
-  `\Override`), written once and without arguments, MUST be left out on a
+  `\Override`), written once and with no arguments (`#[Override]` or
+  `#[Override()]`), MUST be left out on a
   method of a class that P2R-220 converts when the method implements a
   method of `ArrayAccess`: PHP checks the attribute when it compiles the
   class, and the Rust output has nothing left to check. Every other
@@ -1943,7 +1947,9 @@ interfaces and inheritance are later slices.
   `#[Override]` on a method that overrides nothing.
 - **P2R-222** `is_scalar($v)` MUST convert to `true` when `$v` has PHP type
   int, float, bool or string (Rust `i64`, `f64`, `bool`, `String` or
-  `&str`), and to `false` for a list, an enum, a class or a shape.
+  `&str`), and to `false` for a list, an enum, a class or a shape. Mago
+  reports each `false` case as an impossible type comparison, so in
+  practice those stop by P2R-11 before this rule applies.
   `gettype($v)` MUST convert to the string literal PHP gives: `"integer"`,
   `"double"`, `"boolean"`, `"string"`, `"array"` for a list or a shape, and
   `"object"` for an enum or a class; it follows P2R-24 and P2R-26 as a

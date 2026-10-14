@@ -41,7 +41,7 @@ final readonly class Parts implements ArrayAccess
         );
     }
 
-    #[Override]
+    #[Override()]
     public function offsetUnset(mixed $offset): void
     {
         throw new BadMethodCallException('Parts is immutable.');
@@ -98,3 +98,6 @@ $c = new Counts();
 $c->offsetSet(1, 5);
 $c->offsetUnset(2);
 echo $c->offsetGet(2), ' ', $c->offsetExists(4) ? 'in' : 'out', "\n";
+$w = 'xyz';
+$u = (string) $w;
+echo $u, $w, "\n";

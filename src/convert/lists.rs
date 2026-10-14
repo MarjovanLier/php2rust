@@ -395,7 +395,11 @@ impl Converter<'_> {
                 );
                 return None;
             }
-            RustType::Class(_) => {
+            RustType::Class(name)
+                if self
+                    .class_named(&name)
+                    .is_some_and(|at| self.classes[at].array_access.is_some()) =>
+            {
                 self.refuse(
                     access,
                     "an element read on an object is not supported yet; call offsetGet() (P2R-220)",

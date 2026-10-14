@@ -209,4 +209,9 @@ fn main() {
     print!(" ");
     print!("{}", if c.offset_exists(4) { "in" } else { "out" });
     print!("\n");
+    let w = String::from("xyz");
+    let u = w.clone();
+    print!("{}", u);
+    print!("{}", w);
+    print!("\n");
 }

@@ -108,3 +108,42 @@ final readonly class Read implements ArrayAccess
         return $this['a'];
     }
 }
+
+/**
+ * @implements ArrayAccess<int, string>
+ */
+final class Narrowed implements ArrayAccess
+{
+    public function offsetExists(mixed $offset): bool
+    {
+        return true;
+    }
+
+    public function offsetGet(mixed $offset): string
+    {
+        if ($offset > 5) {
+            $offset = $offset > 9 ? 1 : 'a';
+        }
+        return 'x';
+    }
+
+    public function offsetSet(mixed $offset, string $value): void {}
+
+    public function offsetUnset(int $offset): void {}
+}
+
+final readonly class Plain
+{
+    public function first(): int
+    {
+        return $this[0];
+    }
+}
+
+function kept(float $x, int $n): string
+{
+    if ($n > 0) {
+        $x = $n > 1 ? $n : 0.5;
+    }
+    return $x === 2.0 ? 'float' : 'int';
+}

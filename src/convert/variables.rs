@@ -155,6 +155,8 @@ struct Entry {
     /// A string or list parameter that the body changes, so the body starts with a copy
     /// line and the variable owns its value from there on (P2R-181).
     copied: bool,
+    /// A `mixed` parameter of an `ArrayAccess` method that K or V types (P2R-220).
+    templated: bool,
 }
 
 /// A foreach key or value (P2R-41), or the binding of a null check (P2R-104).
@@ -280,9 +282,20 @@ impl Variables {
                 binding: None,
                 mode: parameter.mode,
                 changed: false,
+                templated: false,
             });
         }
         variables
+    }
+
+    /// Marks the parameters at `positions` as typed by the `ArrayAccess` template
+    /// (P2R-220).
+    pub(super) fn template(&mut self, positions: &[usize]) {
+        for &at in positions {
+            if let Some(entry) = self.entries.get_mut(at) {
+                entry.templated = true;
+            }
+        }
     }
 
     pub(super) fn read(&mut self, var: Var, span: Span) {
@@ -1437,6 +1450,7 @@ impl Converter<'_> {
             mode: Mode::Shared,
             changed: false,
             copied: false,
+            templated: false,
         });
         (self.variables.entries.len() - 1, named)
     }
@@ -1531,7 +1545,13 @@ impl Converter<'_> {
         let found = self.site_type(node);
         // A parameter that the `ArrayAccess` template types is `mixed` to Mago, or
         // `scalar` after `is_scalar()`; a read has the parameter's type (P2R-220).
-        if found.is_err() && entry.parameter.is_some() && !entry.copied {
+        if found.is_err()
+            && entry.templated
+            && !entry.copied
+            && self
+                .expression_type(node)
+                .is_some_and(types::mixed_or_scalar)
+        {
             return Ok(known.clone());
         }
         found.and_then(|found| same_type(&entry.php_name, known, found))

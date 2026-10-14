@@ -106,6 +106,19 @@ function passed(): string
     }
 }
 
+function skipping(): int
+{
+    $total = 0;
+    foreach ([1, -2, 3] as $n) {
+        try {
+            $total += risky($n);
+        } catch (RangeException $e) {
+            continue;
+        }
+    }
+    return $total;
+}
+
 function quiet(): int
 {
     try {

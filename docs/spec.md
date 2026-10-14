@@ -67,7 +67,9 @@ P2R-105, P2R-120, P2R-160, P2R-171, P2R-172, P2R-174 and P2R-175. The two
 spec reviewers replaced the first `if let` form of P2R-214 with the
 labelled blocks that rustc follows as PHP does, and added the flow rule of
 P2R-212, the catch-all, naming and nesting rules of P2R-214, the
-all-throw stop of P2R-215 and the exit rules of P2R-216.
+all-throw stop of P2R-215 and the exit rules of P2R-216. The final review
+of the build added the handler `break` stop, the plain block around the
+binding and the `getCode()` limits of P2R-214.
 
 php2rust converts typed PHP source into normal, readable Rust (`Vec`,
 `String`, `i64`), without AI. It reads PHP with the Mago crates, uses Mago's
@@ -1778,9 +1780,9 @@ slice.
   (P2R-151), so an unimported `RuntimeException` inside a namespace, which
   names a class of that namespace, stops. The struct comes after the
   enums, classes and functions and before the helpers (P2R-33, P2R-160),
-  or for a directory input in `lib.rs` (P2R-172). An enum, class or
-  function whose Rust name is `PhpException` stops the conversion
-  (P2R-173).
+  or for a directory input in `lib.rs` (P2R-172). An enum or class whose
+  Rust name is `PhpException` stops the conversion, as other names the
+  output uses do (P2R-111, P2R-131).
 - **P2R-211** A function, method, static method or enum method MUST throw
   when its body holds a `throw`, or a call of a function or method that
   throws, outside the body of a `try` with a catch-all clause (P2R-214); a
@@ -1809,7 +1811,8 @@ slice.
   and each call that throws in a `try` body is a path to its handlers
   (P2R-214). These stop the conversion: any argument other than `message`
   and `code`, positional or named; `new` of any other class; a `throw` of
-  any other expression; and an exception object used in any other way.
+  any other expression; and an exception object used in any other way
+  (`new C(..)` outside a `throw` stops by P2R-133).
 - **P2R-213** A call of a function or method that throws MUST convert with
   `?` after it (`f(x)?`) in a function that throws, to
   `f(x).unwrap_or_else(|e| e.uncaught())` in `fn main()` outside a `try`
@@ -1820,9 +1823,9 @@ slice.
   default of `??` (P2R-105) and the message of `?? throw` (P2R-215).
 - **P2R-214** `try { body } catch (C $e) { handler } ...` MUST convert to
   `'attempt: { let e = 'throw: { body; break 'attempt; }; handlers }` when a
-  path reaches the end of the body, and to `let e = 'throw: { body };`
-  followed by the handlers when none does, because rustc rejects a label
-  that nothing names. Each `throw` and each call that throws in the body
+  path reaches the end of the body, and to `{ let e = 'throw: { body };
+  handlers }` when none does, because rustc rejects a label that nothing
+  names; the block ends the binding with the handlers. Each `throw` and each call that throws in the body
   leaves `'throw` with its exception (P2R-212, P2R-213), so the handlers
   run only after a throw and the end of the body skips them; rustc follows
   these paths as PHP does, so a variable that the body and a handler both
@@ -1839,20 +1842,26 @@ slice.
   test and no handler reads the variable. The variable of a `catch` is a
   new variable that holds only inside its handler, as a `foreach` value
   does (P2R-41): `$e->getMessage()` gives `e.message`, lent as a `String`
-  field (P2R-134), and `$e->getCode()` gives `e.code`, of Rust type `i64`
-  whatever type Mago gives it. These stop the conversion: `finally`; a
+  field (P2R-134), and `$e->getCode()` gives `e.code`, of Rust type `i64`,
+  where its value is printed, joined, computed with or compared; Mago types
+  `getCode()` as `int|string`, so its assignment to a variable stops by
+  P2R-22, and its return or its use as an `int` argument stops on Mago's
+  finding (P2R-11). These stop the conversion: `finally`; a
   `try` inside another `try`, its catch bodies included, whose labels
-  would shadow the outer ones; a `try` whose body holds no `throw` and no
-  call that throws that converts (a `default` arm that P2R-121 leaves out
-  does not count); a `break` or `continue` in the body that leaves it,
-  which Rust rejects inside a labelled block; a class in a `catch` that is
+  would shadow the outer ones (the problem is reported at the inner
+  `try`); a `try` whose body holds no `throw` and no call that throws that
+  converts (a `default` arm that P2R-121 leaves out does not count); a
+  `break` or `continue` that leaves the body, and one that leaves a handler
+  when a path reaches the end of the body, which Rust rejects inside a
+  labelled block; a class in a `catch` that is
   not in P2R-210 (`Error`, `TypeError` and the input's own classes
   included); a clause after a catch-all, which PHP never runs; clauses of
   one `try` with different variable names; a clause that tests a class
   when no clause has a variable; a catch variable whose name the function
   already uses before the `try`, because PHP overwrites it; and a read of
-  `$e` after its handler, or any other use of `$e` than `getMessage()`,
-  `getCode()` and `throw $e`.
+  `$e` after its handler (by P2R-34), or any other use of `$e` than
+  `getMessage()`, `getCode()` and `throw $e` (a built-in function such as
+  `get_class($e)` stops by P2R-48).
 - **P2R-215** A `throw` expression MUST convert in two more places: as the
   arm result of a `match` (P2R-120), where the arm result is
   `return Err(PhpException::new(..))` (or the forms of P2R-212 in
@@ -1860,8 +1869,8 @@ slice.
   C(..)` on an `$a` that P2R-105 accepts, where it gives
   `a.ok_or_else(|| PhpException::new(..))?` in a function that throws,
   with `$a` taken as `unwrap_or` takes it in P2R-105 (a parameter
-  `Option<&T>` copied with `.map(ToOwned::to_owned)`, a field copied with
-  `.clone()`). Mago types a `throw` as `never`, so neither the arm type
+  `Option<&T>` copied with `.map(ToOwned::to_owned)`, an array shape element
+  copied with `.clone()`). Mago types a `throw` as `never`, so neither the arm type
   rules of P2R-122 nor the type rule of P2R-105 applies to it. These stop
   the conversion: a `match` whose every converted arm is a `throw`, because
   rustc finds the code around it unreachable (P2R-50); `?? throw` in

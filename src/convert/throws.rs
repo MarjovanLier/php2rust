@@ -688,6 +688,7 @@ impl Converter<'_> {
         let scope = self.variables.open(slot, false);
         let outer_raise = self.raise.replace(Raise::Attempt);
         let outer_attempt = self.attempt.replace(Vec::new());
+        let problems = self.problems.len();
         for statement in node.block.statements.iter() {
             self.statement(statement, depth + 2, context, body);
         }
@@ -695,11 +696,28 @@ impl Converter<'_> {
         let exits = std::mem::replace(&mut self.attempt, outer_attempt).unwrap_or_default();
         self.variables.close(scope);
         self.raise = outer_raise;
-        // A `default` arm left out holds no throw that runs (P2R-121).
-        if exits.is_empty() {
+        // A `default` arm left out holds no throw that runs (P2R-121). A call or `try` in
+        // the body that has its own problem leaves no exit here, so the body is not blamed.
+        if exits.is_empty() && self.problems.len() == problems {
             self.refuse(
                 node,
                 "this try body throws nothing, so no catch of it ever runs (P2R-214)",
+            );
+        }
+        // The handlers then sit inside `'attempt`, where Rust rejects a `break` or
+        // `continue` without a label.
+        let mut leaves = false;
+        if reaches_end {
+            for clause in &clauses {
+                for statement in clause.block.statements.iter() {
+                    Leaving.walk_statement(statement, &mut leaves);
+                }
+            }
+        }
+        if leaves {
+            self.refuse(
+                node,
+                "a break or continue cannot leave a catch of a try whose body can reach its end, because Rust holds the catch in a labelled block (P2R-214)",
             );
         }
         let mut arriving = Vec::new();
@@ -712,8 +730,7 @@ impl Converter<'_> {
         for exit in exits {
             self.variables.flow.edge(exit, handler);
         }
-        // Without `'attempt` the handlers sit one level higher; rustfmt lays out the body.
-        let level = usize::from(reaches_end);
+        let level = 1;
         body.push(emit(depth + level, "};".to_owned()));
         // A handler starts with the values before the body, less those the body changes.
         self.variables.set_values(&before);
@@ -750,13 +767,16 @@ impl Converter<'_> {
             self.variables.flow.edge(handler, clause_block);
             self.variables.flow.enter(clause_block);
             let clause_scope = self.variables.open(slot, false);
-            if let (Some(php), Some(name)) = (&php, &name) {
-                self.caught.push((php.clone(), name.clone(), false));
+            // A name without a Rust form has its problem; `_` keeps its reads from being
+            // reported again.
+            if let Some(php) = &php {
+                let rust = name.clone().unwrap_or_else(|| "_".to_owned());
+                self.caught.push((php.clone(), rust, false));
             }
             for statement in clause.block.statements.iter() {
                 self.statement(statement, inner, context, body);
             }
-            if php.is_some() && name.is_some() {
+            if php.is_some() {
                 read |= self.caught.pop().is_some_and(|(_, _, read)| read);
             }
             self.variables.close(clause_scope);
@@ -786,15 +806,11 @@ impl Converter<'_> {
         } else {
             "_".to_owned()
         };
-        let throw = format!("let {binding} = 'throw: {{");
-        if reaches_end {
-            body[opening] = emit(depth, "'attempt: {".to_owned());
-            body[opening + 1] = emit(depth + 1, throw);
-            body.push(emit(depth, "}".to_owned()));
-        } else {
-            body[opening] = emit(depth, throw);
-            body.remove(opening + 1);
-        }
+        // A plain block ends the binding with the handlers, so it hides no later variable.
+        let label = if reaches_end { "'attempt: {" } else { "{" };
+        body[opening] = emit(depth, label.to_owned());
+        body[opening + 1] = emit(depth + 1, format!("let {binding} = 'throw: {{"));
+        body.push(emit(depth, "}".to_owned()));
         self.trying -= 1;
         self.variables.flow.enter(after);
         self.join(arriving, "a try whose body and catches all leave");

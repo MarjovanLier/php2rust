@@ -69,12 +69,14 @@ impl Checker {
     }
 
     pub fn safe(a: &str) -> i64 {
-        let _ = 'throw: {
-            return match Parse::digit(a) {
-                Ok(v) => v,
-                Err(e) => break 'throw e,
+        {
+            let _ = 'throw: {
+                return match Parse::digit(a) {
+                    Ok(v) => v,
+                    Err(e) => break 'throw e,
+                };
             };
-        };
-        return -1;
+            return -1;
+        }
     }
 }

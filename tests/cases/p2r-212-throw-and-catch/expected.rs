@@ -57,16 +57,18 @@ pub fn check(n: i64) -> Result<(), PhpException> {
 }
 
 pub fn safe(n: i64) -> Result<i64, PhpException> {
-    let e = 'throw: {
-        return Ok(match half(n) {
-            Ok(v) => v,
-            Err(e) => break 'throw e,
-        });
-    };
-    if e.is_a("DomainException") {
-        return Ok(-1);
-    } else {
-        return Err(e);
+    {
+        let e = 'throw: {
+            return Ok(match half(n) {
+                Ok(v) => v,
+                Err(e) => break 'throw e,
+            });
+        };
+        if e.is_a("DomainException") {
+            return Ok(-1);
+        } else {
+            return Err(e);
+        }
     }
 }
 
@@ -98,19 +100,21 @@ pub fn first(x: Option<i64>) -> Result<i64, PhpException> {
 }
 
 pub fn relay(n: i64) -> Result<i64, PhpException> {
-    let e = 'throw: {
-        return Ok(match half(n) {
-            Ok(v) => v,
-            Err(e) => break 'throw e,
-        });
-    };
-    if e.is_a("InvalidArgumentException") {
-        print!("relaying ");
-        print!("{}", e.message);
-        print!("\n");
-        return Err(e);
-    } else {
-        return Err(e);
+    {
+        let e = 'throw: {
+            return Ok(match half(n) {
+                Ok(v) => v,
+                Err(e) => break 'throw e,
+            });
+        };
+        if e.is_a("InvalidArgumentException") {
+            print!("relaying ");
+            print!("{}", e.message);
+            print!("\n");
+            return Err(e);
+        } else {
+            return Err(e);
+        }
     }
 }
 

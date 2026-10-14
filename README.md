@@ -89,6 +89,10 @@ converts:
   becomes `&str` and a `list<T>` parameter `&[T]`. A call may use any letter case, as
   in PHP. Statements outside functions become `fn main()`; a file of only functions
   becomes a library.
+- parameter defaults that are literals, `null` (for `?T` or `T|null`), `[]` or enum
+  cases, in functions, methods and constructors. A call that leaves a parameter out
+  passes its default in Rust. Named arguments (`f(1, wide: true)`) convert when they
+  follow the order of the parameters.
 - variables with PHP's function-wide scope. Names become snake_case, and a Rust keyword
   becomes a raw identifier (`r#type`). Strings and lists are copied on assignment, as
   in PHP.
@@ -101,12 +105,19 @@ converts:
 - `+`, `-`, `*`, unary minus, `+=`, `-=`, `*=`, `++` and `--` on two ints or two floats,
   `%` on ints, `===` and `!==` on two ints, floats, bools or strings, `==` and `!=` on
   two ints, floats or bools, `<`, `>`, `<=` and `>=` on two ints or two floats, and `&&`,
-  `||` and `!` on bools.
+  `||` and `!` on bools. `<<`, `>>`, `<<=` and `>>=` on ints, by a literal count from 0
+  to 63.
+- the casts `(int)` of a string, which reads the number at its start as PHP does, and
+  `(string)` of an int.
 - strings built with `.`, `.=` and interpolation of simple variables (`"Hi $name"`,
   `"Hi {$name}"`) from string and int values, and `echo` of string and int values.
 - lists: the literal `[a, b]`, the empty list `[]`, append (`$a[] = x`) and read
-  (`$a[$i]`).
-- the built-in functions `count()`, `strlen()`, `intdiv()` and `fdiv()`.
+  (`$a[$i]`). A read of a string offset (`$s[$i]`) gives that byte as a string.
+- the built-in functions `count()`, `strlen()`, `intdiv()`, `fdiv()`, `ctype_digit()`,
+  `str_starts_with()`, `str_ends_with()`, `str_contains()`, `substr()`, and
+  `in_array($v, [...], true)` on a list literal. Where PHP's rules differ from Rust's
+  standard library, the output holds a small private helper function that copies them
+  (`php_int`, `php_offset`, `php_substr`, `ctype_digit`), only when it calls one.
 - integer literals in every PHP form, float literals, and single-quoted and
   double-quoted strings.
 
@@ -116,9 +127,17 @@ Anything not listed above stops the conversion. php2rust then prints every probl
 its line and column, and writes nothing. Its own messages end with the requirement ID;
 the others are findings of the Mago analyser. In short:
 
-- PHP that version 1 does not convert, for example closures, interfaces, casts, `print`,
-  `printf`, `exit`, heredoc, global constants other than `true` and `false`, and
-  built-in functions other than the four above.
+- PHP that version 1 does not convert, for example closures, interfaces, casts other
+  than the two above, `print`, `printf`, `exit`, heredoc, global constants other than
+  `true` and `false`, and built-in functions other than those above. `in_array()`
+  without `true` as its third argument, because PHP then compares loosely.
+- A parameter default that is not a literal, `null`, `[]` or an enum case, a `null`
+  default for a type that is not nullable, and a default before a parameter without
+  one. Named arguments in another order than the parameters, a positional argument
+  after a named one, a spread argument, and a named argument of a built-in function.
+- A function, variable or parameter named like a helper (`php_int`, `php_offset`,
+  `php_substr`, `ctype_digit`), which would hide it. A shift by a count that is not a
+  literal from 0 to 63, and a write to a string offset.
 - A namespace with braces, a second namespace, or one after other code. Imports that PHP
   rejects (two imports with one name, an import named like a class or function of the
   file, `as self`) or warns about (`use Foo;` outside a namespace).
@@ -164,10 +183,10 @@ the others are findings of the Mago analyser. In short:
   element type, or a union of different types other than `T|null`. A missing parameter or
   return type.
 - A value that may be null where PHP gives null a meaning Rust does not copy, or where a
-  plain value is needed: in `echo`, string building, arithmetic, a condition, `foreach`,
-  a list read, a built-in function, or for a parameter or return type that is not
-  nullable. Also `==` with `null`, `??` on a list element, `??=`, a parameter default
-  value, and a write to a variable while a check against null binds it.
+  plain value is needed: in `echo`, string building, arithmetic, a shift, a cast, a
+  condition, `foreach`, a list read, a string offset, a built-in function, or for a
+  parameter or return type that is not nullable. Also `==` with `null`, `??` on a list
+  element, `??=`, and a write to a variable while a check against null binds it.
 - PHP behaviour that Rust would not copy exactly: `/` (use `intdiv()` or `fdiv()`), `**`,
   `<=>`, `==` and ordering on strings, arithmetic or comparison that mixes int and float,
   a float or bool in `echo` or in a string, a condition that is not a bool, an
@@ -258,6 +277,11 @@ php2rust refuses some valid PHP that version 1 converts in other forms:
   message.
 - Reading a list at a negative index or past its end: PHP warns and gives `null`. Rust
   panics.
+- Reading a string offset past either end of the string: PHP warns and gives `""`. Rust
+  panics.
+- `substr()` or a string offset that cuts a character of more than one byte: PHP gives
+  the raw bytes, Rust gives U+FFFD (three bytes) in their place, so later lengths,
+  comparisons and joins of that value differ too.
 - `Suit::from()` with a value that no case has: PHP throws a `ValueError` (exit code 255
   when uncaught), Rust panics (exit code 101).
 - An `int` property that overflows in `+=`, `-=`, `*=`, `++` or `--`: PHP throws a

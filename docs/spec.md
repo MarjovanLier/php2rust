@@ -40,7 +40,14 @@ P2R-71, P2R-73, P2R-74 and P2R-76, and P2R-171 says how "the file" reads
 in sections 1 to 17. The two spec reviewers added the duplicate,
 letter case, module name and child module stops of P2R-172 and P2R-173,
 the global function fallback and path rules of P2R-171, the Rust-line and
-sort rules of P2R-174, and the folder rules of P2R-176.
+sort rules of P2R-174, and the folder rules of P2R-176; the final review of
+the build added the primitive and between-module stops of P2R-172.
+Section 19 (everyday expressions) was written on 14 Oct 2026; it changes
+P2R-07, P2R-24, P2R-42, P2R-48, P2R-60, P2R-72, P2R-101 and P2R-171. The
+spec reviewer added the context type, `_i64`, `&str` arm, nesting, byte
+width and `match` arm rules of P2R-180, the owned-local rule of P2R-181,
+PHP's argument order in P2R-185 and P2R-186, Mago's count check in
+P2R-184, and the `%` grammar of P2R-187.
 
 php2rust converts typed PHP source into normal, readable Rust (`Vec`,
 `String`, `i64`), without AI. It reads PHP with the Mago crates, uses Mago's
@@ -81,7 +88,7 @@ requirement IDs.
   leave a partial output file (review concern, not checked mechanically).
 - **P2R-06** The same input MUST always give the same stdout bytes, the same
   output file bytes and the same stderr bytes.
-- **P2R-07** Only the constructs that sections 3 to 5 and 11 to 18 list as
+- **P2R-07** Only the constructs that sections 3 to 5 and 11 to 19 list as
   converting may convert. Any other construct MUST stop the conversion,
   which means it is reported as a problem under P2R-03. Examples that stop
   in version 1 (section 16 converts `namespace`, `use` and class
@@ -145,7 +152,7 @@ requirement IDs.
   declaration stops the conversion.
 - **P2R-24** A `string` parameter MUST become `&str` and a `list<T>`
   parameter MUST become `&[T]`. A function that assigns to or changes its own
-  string or list parameter stops the conversion (PHP passes a copy).
+  string or list parameter works on a copy, as PHP passes one (P2R-181).
 - **P2R-25** An `int` value passed to a `float` parameter (declared or
   built-in) or returned from a function declared `float` MUST convert to
   `f64`: a literal as a float literal (`4` to `4.0`), any other value with
@@ -219,8 +226,8 @@ requirement IDs.
   an earlier local variable or an earlier `foreach` binding converts, and
   counts as a new variable for P2R-34 (it may have a different Rust type).
   A key or value that reuses a parameter name follows P2R-24 and P2R-35.
-- **P2R-42** Conditions of `if`, `while`, `for`, and the operands of `&&`,
-  `||` and `!`, MUST be `bool`. A non-bool condition (PHP truthiness) stops
+- **P2R-42** Conditions of `if`, `while`, `for` and `?:` (P2R-180), and the
+  operands of `&&`, `||` and `!`, MUST be `bool`. A non-bool condition (PHP truthiness) stops
   the conversion.
 - **P2R-43** These operators MUST convert:
   - `+`, `-`, `*` and unary minus, with both operands `int` or both `float`
@@ -264,8 +271,8 @@ requirement IDs.
 - **P2R-48** These built-in functions MUST convert: `count()` on a list
   (length as `i64`), `strlen()` (byte length as `i64`), `intdiv()` (integer
   division towards zero) and `fdiv()` (IEEE float division), and the
-  functions of section 17. A call to any other function not declared in
-  the file stops the conversion.
+  functions of sections 17 and 19. A call to any other function not
+  declared in the file stops the conversion.
 - **P2R-49** Literals MUST convert by their PHP value and type, never by
   copying their text:
   - Integer literals in decimal, hexadecimal, octal (`017` and `0o17`) and
@@ -348,6 +355,11 @@ requirement IDs.
     or `e-` without exponent digits (`"9300000000000000000e+"`): PHP's
     number parser reads one byte late and gives a wrapped value
     (-9146744073709551616); `php_int` gives the largest or smallest int.
+  - `str_repeat()` with a count that is negative at run time: PHP throws a
+    `ValueError` (exit code 255 when uncaught); Rust panics, or gives an
+    empty string when the string is empty.
+  - `explode()` with an empty separator that is not a literal: PHP throws a
+    `ValueError`, Rust panics (exit code 101).
   - Comments and docblocks are not copied (version 1).
 
 ## 8. Tests and CI
@@ -368,7 +380,7 @@ requirement IDs.
   stderr MUST be empty. A case without `fn main()` gets the checks of P2R-70
   and P2R-71 only. Review concern, not checked mechanically: each case's
   stdout depends on every construct the case covers, and every construct of
-  sections 3 to 5 and 11 to 17 appears in at least one case with
+  sections 3 to 5, 11 to 17 and 19 appears in at least one case with
   `fn main()`.
 - **P2R-73** Each stop folder `tests/stops/<id>-<slug>/` holds `input.php`
   and `expected.txt`. Run from inside the folder, once as
@@ -457,8 +469,8 @@ Sections 3 to 9 apply to nullable values unless this section says otherwise.
 - **P2R-101** A nullable `string` parameter MUST become `Option<&str>` and a
   nullable `list<T>` parameter MUST become `Option<&[T]>`. P2R-24 and P2R-26
   apply to the value inside the `Option`: a function that assigns to its own
-  nullable string or list parameter stops the conversion, and an assigned,
-  appended or returned nullable string or list behaves as a copy.
+  nullable string or list parameter works on a copy (P2R-181), and an
+  assigned, appended or returned nullable string or list behaves as a copy.
 - **P2R-102** The literal `null` MUST convert to `None`. Like `[]` (P2R-21),
   `null` takes its type `Option<T>` from the other assignments and reads of
   the same variable, or from the declared parameter, return or element type
@@ -1303,7 +1315,7 @@ Rust module. One input file still converts as sections 1 to 17 say.
   span rule of P2R-03 compares problems of one file only. Mago analyses
   every input file together, so a class, enum or function of one file is
   known in every other file. For a directory input, "the file" in sections
-  1 to 17 means every input file together (P2R-31, P2R-43, P2R-48,
+  1 to 17 and 19 means every input file together (P2R-31, P2R-43, P2R-48,
   P2R-111, P2R-115, P2R-120, P2R-131, P2R-151, P2R-153, P2R-156, P2R-160,
   P2R-163, P2R-168, P2R-169 and others), except in P2R-12, P2R-13, P2R-110
   and P2R-150, which apply to each file alone (a `use` in one file may name
@@ -1400,6 +1412,102 @@ Rust module. One input file still converts as sections 1 to 17 say.
   mechanically: a call between two files of a crate is checked by rustc
   only, because P2R-72 runs only a case with `fn main()` and a crate has
   none.
+
+## 19. Everyday expressions (milestone 2, slice 9)
+
+Application code chooses values with `?:`, works on a copy of a string
+parameter, and builds text with the common string functions. This section
+converts those forms.
+
+- **P2R-180** `$c ? $a : $b` with a `bool` condition (P2R-42) MUST convert
+  to `if c { a } else { b }`. The `if` takes its type from the place it
+  stands in, as a `match` does (P2R-122): a `return` of a declared type, an
+  argument for a parameter, or a variable that has a type; P2R-25, P2R-26
+  and P2R-102 apply to each arm. Anywhere else both arms must have one Rust
+  type, and arms of two Rust types stop the conversion; Mago's type for the
+  whole `?:` is never used, because Mago types it as one arm where it
+  decides the condition. When only int literals type the `if`, its first
+  arm gets `_i64`, and a first write names the type (`let x: i64 = ..`,
+  P2R-49). String arms are lent as `&str` (a literal as it is, a `String`
+  variable as `v.as_str()`), so the `if` lends a `&str` as `??` does
+  (P2R-105); where a `String` is needed (P2R-26) it is copied once:
+  `(if c { "a" } else { "b" }).to_string()`. Each arm is its own path for
+  the reads and writes of variables (P2R-34), as an arm of a `match` is
+  (P2R-124). The `if` gets parentheses where it is an operand of an
+  operator, a cast, a method call, a field read or `&`. These stop the
+  conversion: an `if` wider than 50 bytes, which rustfmt splits over
+  several lines (P2R-51); a `?:` that is the result of a `match` arm, which
+  rustfmt always writes as a block (P2R-123); the short form `$a ?: $b`,
+  which tests PHP truthiness; a condition that is not a bool (P2R-42); an
+  arm or a condition that is itself a `?:`, with or without parentheses,
+  because Mago reads an unparenthesized nested `?:` from the left where PHP
+  rejects it; an arm that assigns, `++` or `--`; and a value that may be
+  null where the type is not nullable (P2R-106). A check against null does
+  not narrow inside an arm (P2R-104), so `$x !== null ? $x + 1 : 0` stops.
+- **P2R-181** A function, method or static method MAY change a parameter of
+  type `string` or `list<T>` by an assignment, `.=` or an append: the body
+  MUST then start with one copy line per such parameter, in parameter
+  order, before the other lines: `let mut p = p.to_string();`,
+  `let mut p = p.to_vec();`, or for a nullable parameter
+  `let mut p = p.map(ToOwned::to_owned);`. The body then works on its own
+  copy, as PHP passes one. The parameter keeps its borrowed type in the
+  signature (P2R-24), and from the copy line on it is an owned local
+  variable for every rule (P2R-26, P2R-34, P2R-35, P2R-104, P2R-105,
+  P2R-122, P2R-160). These still stop: a foreach key or value with the
+  parameter's name (P2R-41), a parameter of a type that changes its objects
+  (P2R-143), and a promoted constructor parameter.
+- **P2R-182** `trim($s)`, `ltrim($s)` and `rtrim($s)` with one `string`
+  argument MUST convert to `php_trim(s)`, `php_ltrim(s)` and `php_rtrim(s)`,
+  of type `String`: helpers (P2R-160) that remove the bytes PHP removes by
+  default, space, `\t`, `\n`, `\r`, `\0` and `\x0B`, where Rust's `trim`
+  also removes `\x0C` and Unicode spaces and keeps `\0`. A second argument
+  stops the conversion.
+- **P2R-183** `strtolower($s)` and `strtoupper($s)` with a `string` argument
+  MUST convert to `s.to_ascii_lowercase()` and `s.to_ascii_uppercase()`,
+  which change only ASCII letters, as PHP 8.2 and later do. `ucfirst($s)`
+  and `lcfirst($s)` MUST convert to the helpers `php_ucfirst(s)` and
+  `php_lcfirst(s)`, which change the first byte when it is an ASCII letter.
+- **P2R-184** `str_repeat($s, $n)` with a `string` and an int argument MUST
+  convert to `s.repeat(n)` for a literal count from 0 up, which stays a
+  plain literal (an exception to P2R-49), and to `s.repeat(n as usize)` for
+  any other count. Mago reports a count that may be negative (P2R-11), so a
+  plain `int` count stops and a count from `count()` or `strlen()`
+  converts; a negative literal count stops too. A count that is negative
+  at run time anyway is a P2R-60 difference: PHP throws a `ValueError`, Rust
+  panics, or gives an empty string when `$s` is empty.
+- **P2R-185** `str_replace($search, $replace, $subject)` with three `string`
+  arguments MUST convert to `php_replace(search, replace, subject)`, in
+  PHP's order, a helper that gives the subject unchanged for an empty
+  search, as PHP does, where Rust's `replace` inserts the replacement
+  between every character. An array argument and a fourth argument stop
+  the conversion.
+- **P2R-186** `implode($glue, $list)` with a `string` and a `list<string>`
+  argument MUST convert to `list.join(glue)`, of type `String`, where the
+  list is a variable, parameter, property read, call or list literal of
+  string literals. A glue that is not a literal, variable, parameter,
+  property read or constant stops the conversion, because Rust evaluates
+  the list first. `explode($separator, $s)` with two `string` arguments
+  MUST convert to `php_explode(separator, s)`, a helper that gives a
+  `Vec<String>` as PHP gives the list, and panics on an empty separator
+  where PHP throws a `ValueError` (a P2R-60 difference). These stop the
+  conversion: `implode` with one argument or with a list of another element
+  type, `explode` with a third argument (a limit), and an empty literal
+  separator, which Mago does not report.
+- **P2R-187** `sprintf($format, ...)` with a format that is a string literal
+  without interpolation MUST convert to `format!(..)` when every `%` in the
+  format starts `%s`, `%d` or `%%`, and the call passes exactly one argument
+  for each `%s` and `%d`: a `%s` takes a string or int argument, a `%d` an
+  int argument, and `%%` gives `%`. The text's braces are doubled (P2R-45).
+  These stop the conversion: any other `%`, among them a width, a flag, a
+  position, a length modifier, another conversion and a `%` at the end,
+  which PHP reads as other specifiers or rejects with a `ValueError` and
+  Mago does not report; an argument count that does not match, which PHP
+  rejects or ignores; and an argument of another type.
+- **P2R-188** The helpers of P2R-160 MUST include, after `php_substr` and in
+  this order, `php_trim`, `php_ltrim`, `php_rtrim`, `php_ucfirst`,
+  `php_lcfirst`, `php_replace` and `php_explode`, each written only when the
+  output calls it, and P2R-31 covers their names. A case folder runs each of
+  them on many values against PHP (P2R-72).
 
 ## Spec checklist
 

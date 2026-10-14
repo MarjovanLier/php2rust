@@ -52,11 +52,23 @@ converts:
   `unwrap_or` (or `unwrap_or_else` when `$b` could have an effect). Inside
   `if ($v !== null)`, and after an `if ($v === null)` whose body always leaves, `$v` is
   a plain value (`if let` and `let ... else`).
-- enums declared at the top level, pure or backed by `int` or `string`, whose body holds
-  only cases: a Copy Rust enum with UpperCamelCase names (`IN_REVIEW` becomes
-  `InReview`). Cases, `===` and `==` comparisons, `?Suit`, lists of enums, `->name`,
+- one `namespace Acme\Shop;` right after the `declare`, and `use` imports of classes,
+  functions and constants, with or without `as`, grouped or not. They give no Rust: names
+  resolve as PHP resolves them, and calls such as `\strlen()` and `namespace\helper()`
+  find their function.
+- enums declared at the top level, pure or backed by `int` or `string`: a Copy Rust enum
+  with UpperCamelCase names (`IN_REVIEW` becomes `InReview`). Cases (also `self::Case`
+  inside the enum), `===` and `==` comparisons, `?Suit`, lists of enums, `->name`,
   `->value`, `Suit::from()`, `Suit::tryFrom()` (an `Option`) and `Suit::cases()`
-  convert. The Rust enum holds only the helper methods the file uses.
+  convert. The Rust enum holds only the helper methods the file uses. An enum may hold
+  methods (`pub fn name(self, ...)`, with `match ($this)` as `match self`) and static
+  methods.
+- static methods in classes and enums (`pub fn` without `self`), called as `C::m()`,
+  `self::m()` or `static::m()`; the types `self` and `static`, and `new self` and
+  `new static`.
+- class and enum constants whose value is a literal or an enum case
+  (`private const string TAG = 'x';` becomes `pub const TAG: &str = "x";`), read as
+  `C::NAME`, `self::NAME` or `static::NAME`. Constant names become SCREAMING_SNAKE_CASE.
 - readonly classes declared at the top level whose constructor only promotes typed
   properties (`public function __construct(public int $x) {}`): a `#[derive(Clone,
   Debug)]` struct with a `new` function and `&self` methods. `new C(...)`, property reads
@@ -104,16 +116,26 @@ Anything not listed above stops the conversion. php2rust then prints every probl
 its line and column, and writes nothing. Its own messages end with the requirement ID;
 the others are findings of the Mago analyser. In short:
 
-- PHP that version 1 does not convert, for example closures, interfaces, `namespace`,
-  `use`, casts, `print`, `printf`, `exit`, heredoc, constants other than `true` and
-  `false`, and built-in functions other than the four above.
+- PHP that version 1 does not convert, for example closures, interfaces, casts, `print`,
+  `printf`, `exit`, heredoc, global constants other than `true` and `false`, and
+  built-in functions other than the four above.
+- A namespace with braces, a second namespace, or one after other code. Imports that PHP
+  rejects (two imports with one name, an import named like a class or function of the
+  file, `as self`) or warns about (`use Foo;` outside a namespace).
 - A class that is abstract, extends a class, implements an interface, uses a trait, or
-  holds a constant, a static member, a constructor with a body or a method whose name
-  starts with `__`. A declared property without a type or a literal default, or that is
-  static, readonly or hooked. A nullable object type (`?Point`), a nullable type that
-  holds objects whose class changes them (`?list<Cell>`), the types `self` and
-  `static`, a class that holds itself, a method named `clone` or `new`, and a function
-  that assigns to its own object parameter.
+  holds a static property, a constructor with a body or a method whose name starts with
+  `__`. A declared property without a type or a literal default, or that is static,
+  readonly or hooked. A nullable object type (`?Point`), a nullable type that holds
+  objects whose class changes them (`?list<Cell>`), the type `parent` and `parent::`,
+  a class that holds itself, a method named `clone` or `new`, a `final private` method,
+  two methods whose names differ only in letter case, and a function that assigns to
+  its own object parameter.
+- A static method called through an object, a method that is not static called with
+  `::`, `$this` in a static method, and `self::` outside a class or enum.
+- A constant whose value is not a literal or an enum case, two constants in one
+  `const`, a constant named like a case or another constant of its type, `C::class`, and
+  a constant as a `match` condition. An enum method named `name`, `value`, `from`,
+  `tryFrom` or `cases`.
 - Comparing, printing, cloning or testing an object (`==`, `===`, `echo`, `clone`,
   `instanceof`, `if ($object)`), `?->`, and `??` on a property or a method call.
 - A copy of an object whose class changes its objects: `$b = $a;` followed by a read of
@@ -134,10 +156,10 @@ the others are findings of the Mago analyser. In short:
   null, with a condition that is not a literal or an enum case, with two `default`
   arms or two conditions of the same value, or without `default` where its arms leave a
   value out (every int or string `match` needs `default`).
-- An enum with a method, a constant, an interface, an attribute or a backing value that
-  is not a plain literal, an enum declared inside a function or a block, and an enum
-  declared after other code outside functions: PHP declares an enum only when execution
-  reaches it.
+- An enum with an interface, a trait, an attribute or a backing value that is not a
+  plain literal, an enum declared inside a function or a block, and an enum declared
+  after other code outside functions: PHP declares an enum only when execution reaches
+  it.
 - A type with no single Rust type: `mixed`, `null` on its own, `array` without a list
   element type, or a union of different types other than `T|null`. A missing parameter or
   return type.
@@ -190,7 +212,11 @@ php2rust refuses some valid PHP that version 1 converts in other forms:
 - `Nothing::from($v)` on an enum without cases stops: the call never returns, and rustc
   rejects the code after it.
 - An enum helper line with non-ASCII text that is longer than 100 bytes stops, also
-  where it fits in 100 columns, for example a long backing value with accents.
+  where it fits in 100 columns, for example a long backing value with accents. The same
+  holds for a `match` pattern with non-ASCII text longer than 95 bytes.
+- Visibility is not copied: private methods and constants become `pub` in Rust.
+- Only one file converts at a time, so a class from another file of a library is
+  unknown (Mago reports it).
 - A `match` on a value that Mago narrows stops where PHP never fails. After
   `if ($s === Suit::Hearts) { return 0; }`, a `match` with arms for every other case
   stops: without `default` because Rust needs every case, and with `default` because

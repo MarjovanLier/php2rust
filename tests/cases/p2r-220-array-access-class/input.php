@@ -55,7 +55,7 @@ final class Counts implements ArrayAccess
 {
     public int $total = 0;
 
-    public function offsetExists(mixed $offset): bool
+    public function OffsetExists(mixed $offset): bool
     {
         return $offset >= 0 && $offset < 3;
     }
@@ -74,6 +74,13 @@ final class Counts implements ArrayAccess
     {
         $this->total -= $offset;
     }
+}
+
+function shout(string $s): string
+{
+    $u = (string) $s;
+    $s .= '!';
+    return $u . $s;
 }
 
 $p = new Parts('Ann', 'Lee');
@@ -101,3 +108,4 @@ echo $c->offsetGet(2), ' ', $c->offsetExists(4) ? 'in' : 'out', "\n";
 $w = 'xyz';
 $u = (string) $w;
 echo $u, $w, "\n";
+echo shout('hey'), "\n";

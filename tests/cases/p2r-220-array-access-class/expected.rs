@@ -79,6 +79,13 @@ impl Counts {
     }
 }
 
+pub fn shout(s: &str) -> String {
+    let mut s = s.to_string();
+    let u = s.clone();
+    s += "!";
+    return format!("{}{}", u, s);
+}
+
 #[derive(Clone, Debug)]
 pub struct PhpException {
     pub class: &'static str,
@@ -213,5 +220,7 @@ fn main() {
     let u = w.clone();
     print!("{}", u);
     print!("{}", w);
+    print!("\n");
+    print!("{}", shout("hey"));
     print!("\n");
 }

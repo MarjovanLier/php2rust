@@ -51,9 +51,14 @@ P2R-184, and the `%` grammar of P2R-187. Section 20 (layout by rustfmt)
 was written on 14 Oct 2026; it changes P2R-04, P2R-06, P2R-51, P2R-82,
 P2R-83 and P2R-176, and P2R-191 lists the requirements whose layout rules
 it removes. Section 21 (array shapes and nullable objects) was written on
-14 Oct 2026; it changes P2R-20, P2R-22, P2R-23, P2R-33, P2R-75, P2R-104,
-P2R-105, P2R-106, P2R-130, P2R-132, P2R-133, P2R-134, P2R-172, P2R-173,
-P2R-174 and P2R-180.
+14 Oct 2026; it changes P2R-07, P2R-20, P2R-22, P2R-23, P2R-33, P2R-72,
+P2R-75, P2R-104, P2R-105, P2R-106, P2R-130, P2R-132, P2R-133, P2R-134,
+P2R-136, P2R-154, P2R-171, P2R-172, P2R-173, P2R-174 and P2R-180. The two
+spec reviewers added the self-holding and empty-enum stops of P2R-130 and
+P2R-200, the int-for-float stop and the lent literal argument of P2R-202,
+the `null` comparison exception of P2R-136 and P2R-201, the owned `??` of
+P2R-204, the struct literal `use` rule of P2R-174 and the literal read
+stop of P2R-203; the build added `??` on a shape element (P2R-203).
 
 php2rust converts typed PHP source into normal, readable Rust (`Vec`,
 `String`, `i64`), without AI. It reads PHP with the Mago crates, uses Mago's
@@ -96,8 +101,8 @@ requirement IDs.
 - **P2R-06** With the same rustfmt (P2R-190), the same input MUST always give
   the same stdout bytes, the same output file bytes and the same stderr
   bytes.
-- **P2R-07** Only the constructs that sections 3 to 5 and 11 to 19 list as
-  converting may convert. Any other construct MUST stop the conversion,
+- **P2R-07** Only the constructs that sections 3 to 5, 11 to 19 and 21
+  list as converting may convert. Any other construct MUST stop the conversion,
   which means it is reported as a problem under P2R-03. Examples that stop
   in version 1 (section 16 converts `namespace`, `use` and class
   constants, and section 17 two casts):
@@ -378,7 +383,7 @@ requirement IDs.
   stderr MUST be empty. A case without `fn main()` gets the checks of P2R-70
   and P2R-71 only. Review concern, not checked mechanically: each case's
   stdout depends on every construct the case covers, and every construct of
-  sections 3 to 5, 11 to 17 and 19 appears in at least one case with
+  sections 3 to 5, 11 to 17, 19 and 21 appears in at least one case with
   `fn main()`.
 - **P2R-73** Each stop folder `tests/stops/<id>-<slug>/` holds `input.php`
   and `expected.txt`. Run from inside the folder, once as
@@ -737,8 +742,9 @@ Sections 3 to 9 apply to nullable values unless this section says otherwise.
     declared inside a function or another statement;
   - a property whose type does not convert (P2R-20, P2R-22; a nullable
     class type converts by P2R-204), a property that holds its own class
-    directly or through other classes other than through a list, because
-    the Rust struct would have no size, and a property of an enum without
+    directly, as `?C` (P2R-204) or through other classes other than through
+    a list, because the Rust struct would have no size (`?Node $next` in
+    `Node` stops), and a property of an enum without
     cases, directly or through other classes other than through a list,
     because no value of the struct could exist and rustc rejects the code
     after its `new` (P2R-50).
@@ -821,8 +827,10 @@ Sections 3 to 9 apply to nullable values unless this section says otherwise.
   ignoring letter case, which PHP rejects and Mago does not report; and a
   call to a method the class does not declare (Mago reports it, P2R-11).
 - **P2R-136** These MUST stop the conversion: `===`, `!==`, `==`, `!=`, `<`,
-  `>`, `<=`, `>=` and `<=>` with an object operand, because Rust has no
-  object identity and PHP compares properties loosely; `echo` and string
+  `>`, `<=`, `>=` and `<=>` with an object operand, also of a nullable class
+  type (P2R-204), because Rust has no object identity and PHP compares
+  properties loosely, other than `===` and `!==` with the literal `null`
+  (P2R-103); `echo` and string
   joining of an object; `instanceof`; `clone`, also with new property
   values; a cast of an object; and an object as a condition.
 - **P2R-137** The struct MUST list one field per property
@@ -1081,7 +1089,7 @@ file. Converting several files together is a later slice.
 - **P2R-154** The type `self`, and the return type `static`, in a method's
   signature or a promoted parameter, MUST mean the class or enum whose body
   holds it: `self` in `Size` gives `Size`, and `?self` in an enum gives
-  `Option<Size>` (a nullable class type stops, P2R-132). Mago's type
+  `Option<Size>` (a nullable class type converts by P2R-204). Mago's type
   `C&static`, which `new self` and `new static` have, widens to `C`
   (P2R-21). `new self(args)` and `new static(args)` in the body of a class
   MUST convert as `new C(args)` does (P2R-133). These stop the conversion:
@@ -1306,7 +1314,7 @@ Rust module. One input file still converts as sections 1 to 17 say.
   span rule of P2R-03 compares problems of one file only. Mago analyses
   every input file together, so a class, enum or function of one file is
   known in every other file. For a directory input, "the file" in sections
-  1 to 17 and 19 means every input file together (P2R-31, P2R-43, P2R-48,
+  1 to 17, 19 and 21 means every input file together (P2R-31, P2R-43, P2R-48,
   P2R-111, P2R-115, P2R-120, P2R-131, P2R-151, P2R-153, P2R-156, P2R-160,
   P2R-163, P2R-168, P2R-169 and others), except in P2R-12, P2R-13, P2R-110
   and P2R-150, which apply to each file alone (a `use` in one file may name
@@ -1369,16 +1377,17 @@ Rust module. One input file still converts as sections 1 to 17 say.
   conversion, because a `use` line of that function would import the
   module too.
 - **P2R-174** A module whose Rust lines name an enum, class or function of
-  another module, or the struct of an array shape in a module other than
-  the crate root (P2R-200), as a type, as the first segment of a path (`Gender::Male`,
+  another module, as a type, as the first segment of a path (`Gender::Male`,
   `Item::new`) or as a called function, MUST hold one
   `use crate::<module path>::<Name>;` line for it (`use crate::<Name>;` for
   an item of the crate root), and no other `use` lines. The Rust lines
   count, not the PHP source: a default filled in at a call (P2R-168) names
   its enum, and a `default` arm left out (P2R-121) names nothing. An enum
   case, method, field or constant whose Rust name equals an item's is not
-  a use of it, and a name of the module's own items needs no line. rustfmt
-  sorts the `use` lines (P2R-190).
+  a use of it, and a name of the module's own items needs no line. A module
+  other than the crate root whose Rust lines name the struct of an array
+  shape (P2R-200), as a type or as a struct literal (`S { .. }`), MUST hold
+  `use crate::<Name>;` for it. rustfmt sorts the `use` lines (P2R-190).
 - **P2R-175** A directory input converts to a library: a statement outside
   functions other than the P2R-12 `declare`, the P2R-150 `namespace` and
   `use` statements, and enum and class declarations stops the conversion,
@@ -1421,8 +1430,9 @@ converts those forms.
   arm gets `_i64`, and a first write names the type (`let x: i64 = ..`,
   P2R-49). String arms are lent as `&str` (a literal, a constant, a
   parameter, an enum's `name` or `value`, or `??` on a variable or parameter
-  as it is; a `String` variable, or a property read or list element on a
-  variable, parameter or `$this`, as `v.as_str()`), so the `if` lends a
+  as it is; a `String` variable, or a property read, list element or shape
+  element (P2R-203) on a variable, parameter or `$this`, as `v.as_str()`),
+  so the `if` lends a
   `&str` as `??` does
   (P2R-105); where a `String` is needed (P2R-26) it is copied once:
   `(if c { "a" } else { "b" }).to_string()`. Each arm is its own path for
@@ -1577,17 +1587,21 @@ string}`), and keeps an object that may be missing in a nullable property
   by `Shape`, so `array{year: string, month: string, day: string}` gives
   `pub struct DayMonthYearShape` with the fields `day`, `month` and `year`,
   each a `String`, and `#[derive(Clone, Debug)]`. The output holds one
-  struct for each shape it uses, in byte order of their names: after the
-  P2R-52 line and before the enums, classes and functions (P2R-33), or for
-  a directory input in `lib.rs` after its `use` lines (P2R-172). The empty
-  array `array{}` keeps P2R-21. These stop the conversion: a shape with an
-  integer key, a key that names a class constant, an empty key, an optional
+  struct for each shape a type of the input maps to, the shape of a field
+  included, in byte order of their names: after the P2R-52 line and before
+  the enums, classes and functions (P2R-33), or for a directory input in
+  `lib.rs` after its `use` lines (P2R-172). The empty array `array{}` keeps
+  P2R-21. These stop the conversion, with a problem at a place whose type
+  maps to the shape: a shape with an integer key (PHP casts the key `'1'`
+  to an int), a key that names a class constant, an empty key, an optional
   key or a general type; a key whose snake_case name has no Rust form
   (P2R-30); two keys of one shape that give one field name; a value type
   that does not convert (P2R-22); a value type that is or holds a class (a
-  later slice); two shapes of one
-  Rust name with different keys or different field types (`array{a_b: int}`
-  and `array{a: int, b: int}` both give `ABShape`); and a shape whose Rust
+  later slice); a value of an enum without cases, because no value of the
+  shape could exist and rustc rejects the code after it (P2R-130); two
+  shapes of one Rust name with different keys or different field types
+  (`array{a_b: int}` and `array{a: int, b: int}` both give `ABShape`), at
+  the places of the shape the tool meets second; and a shape whose Rust
   name is the Rust name of an enum or class of the input (P2R-131,
   P2R-173).
 - **P2R-201** A value of a shape type MUST behave as a value of a readonly
@@ -1596,16 +1610,19 @@ string}`), and keeps an object that may be missing in a nullable property
   string copies a shape, with `.clone()` unless the source is an owned
   variable that is not read again. A docblock may give a parameter, return
   value or promoted property declared `array` or `?array` a shape type
-  (P2R-23). These stop the conversion: `===`, `!==`, `==`, `!=`, `<`, `>`,
-  `<=`, `>=` and `<=>` with a shape operand, because PHP's `===` on arrays
-  also compares the order of the keys, which a struct does not hold;
-  `echo`, interpolation and string joining of a shape; a shape as a
-  condition, as the operand of a cast, as the list of a `foreach` and as
-  the argument of a built-in function (`count`, `array_keys`); a change to a
-  shape: an assignment, a compound assignment, `++` or `--` on an element,
-  an append and `unset`; `isset` and `empty` of an element; and an
-  assignment to a function's own shape parameter, as P2R-132 stops one for
-  a class.
+  (P2R-23). A new value for a whole shape variable converts as for an
+  object (`$s = [...]`). These stop the conversion: `===`, `!==`, `==`,
+  `!=`, `<`, `>`, `<=`, `>=` and `<=>` with a shape operand, also of a
+  nullable shape type, other than `===` and `!==` with the literal `null`
+  (P2R-103), because PHP's `===` on arrays also compares the order of the
+  keys, which a struct does not hold, and its `==` compares the values
+  loosely (`['a' => '1'] == ['a' => 1]` is true); `echo`, interpolation and
+  string joining of a shape; a shape as a condition, as the operand of a
+  cast, as the list of a `foreach` and as the argument of a built-in
+  function (`count`, `array_keys`); a write to an element (`$s['k'] = v`, a
+  compound assignment, `++`, `--`, `??=`), an append and `unset`; `isset`
+  and `empty` of an element; and an assignment to a function's own shape
+  parameter, as P2R-132 stops one for a class.
 - **P2R-202** An array literal whose elements all have a key that is a
   string literal (single-quoted, or double-quoted without interpolation)
   MUST convert to a struct literal when its type is a shape (P2R-200):
@@ -1614,21 +1631,30 @@ string}`), and keeps an object that may be missing in a nullable property
   in the literal's source order, because Rust evaluates the fields of a
   struct literal in the order written, as PHP evaluates the elements. The
   literal has the shape of the place it flows into when that place declares
-  one: a return value, an argument for a parameter (of `new` too), or an
-  element of a list literal that has such a place, inside `Some` where the
-  place is nullable (P2R-102). Elsewhere it has the shape Mago gives it,
-  widened (P2R-21), so `['n' => null]` converts only where a declared shape
-  gives `n` a nullable type. Each value converts as a value assigned to a
-  variable of its field's type: P2R-25 (`1` for a `float` field gives
-  `1.0`), P2R-26 and P2R-132 (`.to_string()`, `.clone()` or a move), and
-  P2R-102 (`Some(..)` and `None`). Every field is written `field: value`,
-  also where the value is a variable of the field's name, because whether
-  that variable moves or is copied is known only at the end of the body
-  (P2R-26). These stop the conversion: a
-  key that appears twice, which PHP keeps once and rustc rejects; a literal
-  whose keys are not the keys of the shape it flows into; an element without
-  a key, with a key of another form (a variable, a constant, an int), a
-  spread element (`...$a`) or a by-reference element (`&$v`).
+  one: a return value, an argument for a parameter (of `new` too), an
+  assignment to a property (P2R-142), or an element of a list literal or an
+  arm of a `match` or `?:` (P2R-122, P2R-180) that stands in such a place.
+  Where the place is nullable the literal goes inside `Some` (P2R-102), and
+  as an argument it is lent as any owned value is: `&S { .. }` for an `&S`
+  parameter and `Some(&S { .. })` for an `Option<&S>` parameter (P2R-204).
+  Elsewhere, an assignment to a local variable included, it has the shape
+  Mago gives it, widened (P2R-21), so `['n' => null]` converts only where a
+  declared shape gives `n` a nullable type, and a variable that holds such
+  a literal stops where it goes to a place of a declared shape with other
+  field types (P2R-200). Each value converts as a value assigned to a
+  variable of its field's type: P2R-26 and P2R-132 (`.to_string()`,
+  `.clone()`, or a move when no later field of the literal and no later
+  statement reads the variable) and P2R-102 (`Some(..)` and `None`). Every
+  field is written `field: value`, also where the value is a variable of
+  the field's name, because whether that variable moves or is copied is
+  known only at the end of the body (P2R-26). These stop the conversion: an
+  int value for a `float` or `?float` field and a list with int elements
+  for a `list<float>` field, because PHP does not check a docblock shape and
+  keeps the int (P2R-25); a key that appears twice, which PHP keeps once and
+  rustc rejects; a literal whose keys are not the keys of the shape it flows
+  into; and an element without a key, with a key of another form (a
+  variable, a constant, an int), a spread element (`...$a`) or a
+  by-reference element (`&$v`).
 - **P2R-203** `$s['k']`, where `$s` has a shape type and `'k'` is a string
   literal key of that shape, MUST convert to the field read `s.k`, with the
   field's Rust type, lent as a property read is (P2R-134): a Copy field
@@ -1641,8 +1667,9 @@ string}`), and keeps an object that may be missing in a nullable property
   against null: `data.name.as_deref().unwrap_or("unknown")`, and a field
   that is not Copy is copied first (`data.when.clone().unwrap_or(..)`).
   These stop the conversion: a key that is not a string literal, a key the
-  shape does not have (Mago reports it, P2R-11), and a read on a shape that
-  may be null (P2R-106), also on the left of `??`.
+  shape does not have (Mago reports it, P2R-11), a read on an array literal
+  (Rust rejects a struct literal there in an `if` condition), and a read on
+  a shape that may be null (P2R-106), also on the left of `??`.
 - **P2R-204** A nullable class type (`?C`, `C|null`) and a nullable shape
   type MUST map to `Option<S>` as P2R-100 maps other types, where `S` is the
   struct; such a type is a nullable struct type below. A parameter of a
@@ -1650,25 +1677,30 @@ string}`), and keeps an object that may be missing in a nullable property
   becomes `Option<&str>` (P2R-101). An argument for an `Option<&S>`
   parameter MUST be `None` for `null`; `x.as_ref()` for an owned `Option<S>`
   value (a local variable, a property read, a call result, a `?:`); the
-  parameter itself for an `Option<&S>` parameter; `Some(&x)` for an `S`
-  local variable, property read, list element, call result or `new`; and
-  `Some(x)` for an `S` parameter, a binding of P2R-104 and `$this`
-  (`Some(self)`). `new` stores an `Option<&S>` parameter as
+  parameter itself for an `Option<&S>` parameter; `Some(x)` for an `S`
+  parameter, a binding of P2R-104 and `$this` (`Some(self)`); and
+  `Some(&x)` for any other `S` value (a local variable, a property read, a
+  list element, a shape literal of P2R-202, a call result, `new`, a `?:` or
+  a `??`). `new` stores an `Option<&S>` parameter as
   `s.map(ToOwned::to_owned)` (P2R-133), and a property read of type
   `Option<S>` lends `.as_ref()` as an argument where a string property
   lends `.as_deref()` (P2R-134). Where P2R-26 copies, an owned `Option<S>`
   copies with `.clone()` unless it moves, and an `Option<&S>` parameter
   with `.map(ToOwned::to_owned)`. P2R-102 to P2R-105 apply: `$o === null`
   gives `o.is_none()`, `null` gives `None`, an `S` value where an
-  `Option<S>` is needed gives `Some(..)`, and `??` converts by P2R-105. The
+  `Option<S>` is needed gives `Some(..)`, and `$o ?? $b` gives an owned `S`
+  (`o.unwrap_or_else(|| S::new(..))`, after `.map(ToOwned::to_owned)` for
+  an `Option<&S>` parameter), lent with `&(..)` where a reference is needed
+  (P2R-105). The
   binding of a check against null (P2R-104) has the type `&S`, as an `S`
   parameter has: `let Some(o) = o.as_ref()` for an owned variable and
   `let Some(o) = o` for a parameter. These stop the conversion: a nullable
   type that holds a changing type (P2R-141); a list of a nullable struct
   type (`list<?C>`); `?->` (P2R-134); a property read, a method call or a
-  shape element read on a value that may be null (P2R-106); and an
-  assignment to a function's own parameter of a nullable struct type
-  (P2R-132).
+  shape element read on a value that may be null (P2R-106); a comparison of
+  a value of a nullable struct type other than with the literal `null`
+  (P2R-136, P2R-201); and an assignment to a function's own parameter of a
+  nullable struct type (P2R-132).
 - **P2R-205** `$v !== null ? $a : $b` and `null !== $v ? $a : $b`, where
   `$v` is a variable or parameter of Rust type `Option<T>`, MUST convert to
   `if let Some(v) = .. { a } else { b }` with the pattern of P2R-104 when

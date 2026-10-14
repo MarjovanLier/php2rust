@@ -53,6 +53,14 @@ final class Cell
     public int $n = 0;
 }
 
+final readonly class Node
+{
+    public function __construct(
+        public int $value,
+        public ?Node $next,
+    ) {}
+}
+
 function cell(?Cell $c): bool
 {
     return $c === null;

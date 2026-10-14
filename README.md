@@ -182,10 +182,12 @@ the others are findings of the Mago analyser. In short:
   nullable string or list, or with a string arm that is a call, a joined string, or a
   property read or list element on a call or `new`.
 - For array shapes: an optional key (`key?:`), an int key, a shape open to other keys
-  (`...`), a key with no Rust name, a shape that holds an object, two shapes that give
-  one struct name, comparing, printing or changing a shape, `isset` of an element, a
-  key that is not a string literal, a literal with a repeated key, a spread or an
-  element without a key, and a list of nullable objects (`list<?Point>`).
+  (`...`), a key with no Rust name, a shape that holds an object or an enum without
+  cases, two shapes that give one struct name, comparing, printing or changing a shape,
+  `isset` of an element, a key that is not a string literal, a read on an array
+  literal, a literal with a repeated key, a spread or an element without a key, an int
+  for a `float` field (PHP keeps the int), a list of nullable objects (`list<?Point>`),
+  and a class that holds itself through `?C` (`?Node $next` in `Node`).
 - A namespace with braces, a second namespace, or one after other code. Imports that PHP
   rejects (two imports with one name, an import named like a class or function of the
   file, `as self`) or warns about (`use Foo;` outside a namespace).

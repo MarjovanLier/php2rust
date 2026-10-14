@@ -20,4 +20,12 @@ final readonly class Maker
     {
         return Parts::fromArray(self::make($day));
     }
+
+    /**
+     * @param array{day: string} $d
+     */
+    public static function show(array $d): string
+    {
+        return $d['day'];
+    }
 }

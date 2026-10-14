@@ -1118,7 +1118,12 @@ impl Converter<'_> {
         let mut problem = None;
         while let Some(at) = pending.pop() {
             for field in self.properties(at) {
-                match &field.ty {
+                // `?C` holds its object inline too (P2R-204).
+                let ty = match &field.ty {
+                    RustType::Option(inner) if matches!(**inner, RustType::Class(_)) => inner,
+                    other => other,
+                };
+                match ty {
                     RustType::Class(name) => match self.class_named(name) {
                         Some(found) if found == index => {
                             problem = Some(

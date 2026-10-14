@@ -70,7 +70,7 @@ function maybe(string $s): ?array
  */
 function person(string $name, int $age): array
 {
-    return ['name' => $name, 'age' => $age, 'score' => 1, 'tags' => ['a', 'b'], 'note' => null];
+    return ['name' => $name, 'age' => $age, 'score' => 1.5, 'tags' => ['a', 'b'], 'note' => null];
 }
 
 /**

@@ -90,7 +90,7 @@ pub fn person(name: &str, age: i64) -> AgeNameNoteScoreTagsShape {
     return AgeNameNoteScoreTagsShape {
         name: name.to_string(),
         age: age,
-        score: 1.0,
+        score: 1.5,
         tags: vec![String::from("a"), String::from("b")],
         note: None,
     };

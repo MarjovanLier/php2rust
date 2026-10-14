@@ -14,6 +14,18 @@ enum DayShape
     case One;
 }
 
+enum Hollow
+{
+}
+
+/**
+ * @param array{h: Hollow} $s
+ */
+function hollow(array $s): int
+{
+    return 1;
+}
+
 /**
  * @param array{a?: int} $s
  */

@@ -18,3 +18,11 @@ function maybe(?array $s): int
 {
     return $s['a'];
 }
+
+function literal(): int
+{
+    if (['a' => 1]['a'] > 0) {
+        return 1;
+    }
+    return 0;
+}

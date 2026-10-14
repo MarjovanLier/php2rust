@@ -114,6 +114,14 @@ impl Converter<'_> {
                     );
                     return None;
                 }
+                // PHP does not check a docblock shape, so the field keeps the int.
+                if *found.inner() == RustType::I64 && *field.ty.inner() == RustType::F64 {
+                    self.refuse(
+                        value,
+                        "an int cannot go into a float field of an array shape, because PHP keeps the int (P2R-202)",
+                    );
+                    return None;
+                }
                 let expr = self.declared_value(value, expr, &found, &field.ty)?;
                 let expr = self.stored(value, expr, &found, array.span())?;
                 Some((field.name.clone(), nulls::wrapped(expr, &found, &field.ty)))
@@ -131,6 +139,12 @@ impl Converter<'_> {
         object: RExpr,
         name: &str,
     ) -> Option<(RExpr, RustType)> {
+        // Rust does not accept a struct literal as the object of a field read everywhere,
+        // such as in an `if` condition.
+        if matches!(unparenthesized(access.array), Expression::Array(_)) {
+            self.refuse(access, "an array literal cannot be read by key (P2R-203)");
+            return None;
+        }
         let Some(key) = literal_key(access.index) else {
             self.record_refused(access.index);
             self.refuse(

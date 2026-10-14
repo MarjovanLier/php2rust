@@ -2,7 +2,7 @@
 //! P2R-132, P2R-200).
 
 use std::cell::RefCell;
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::ops::{Deref, DerefMut};
 
 use heck::ToUpperCamelCase;
@@ -27,9 +27,16 @@ pub struct TypeNames {
     names: HashMap<Vec<u8>, RustType>,
     /// The fields of each array shape, by the Rust name of its struct.
     shapes: RefCell<BTreeMap<String, Vec<ShapeField>>>,
+    /// The Rust names of the enums without cases, which no shape may hold (P2R-200).
+    empty: HashSet<String>,
 }
 
 impl TypeNames {
+    /// Records that the enum `name` has no cases (P2R-200).
+    pub fn without_cases(&mut self, name: &str) {
+        self.empty.insert(name.to_owned());
+    }
+
     /// The fields of the array shape whose struct is `name`, in struct order (P2R-200).
     pub fn shape(&self, name: &str) -> Option<Vec<ShapeField>> {
         self.shapes.borrow().get(name).cloned()
@@ -251,6 +258,13 @@ fn shape_type(keyed: &TKeyedArray, enums: &TypeNames) -> Result<RustType, String
         if ty.holds_class() {
             return Err(
                 "an array shape that holds an object is not supported yet (P2R-200)".into(),
+            );
+        }
+        // No value of such a shape could exist, so rustc rejects the code after it.
+        if matches!(&ty, RustType::Enum(name) if enums.empty.contains(name)) {
+            return Err(
+                "an array shape that holds an enum without cases cannot have a value (P2R-200)"
+                    .into(),
             );
         }
         rust_name.push_str(&text.to_upper_camel_case());

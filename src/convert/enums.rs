@@ -76,6 +76,9 @@ impl Converter<'_> {
             }
             self.type_names
                 .insert(info.key.clone(), RustType::Enum(info.rust_name.clone()));
+            if info.cases.is_empty() {
+                self.type_names.without_cases(&info.rust_name);
+            }
             // Its methods and constants live with those of the classes (P2R-155).
             self.classes.push(ClassInfo::new(
                 info.key.clone(),

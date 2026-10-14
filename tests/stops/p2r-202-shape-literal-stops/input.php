@@ -35,3 +35,11 @@ function spread(array $s): array
 {
     return ['a' => 1, ...$s];
 }
+
+/**
+ * @return array{x: float}
+ */
+function widened(): array
+{
+    return ['x' => 1];
+}

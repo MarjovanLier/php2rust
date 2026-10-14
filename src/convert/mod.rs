@@ -24,7 +24,7 @@ use mago_span::{HasSpan, Span};
 use mago_syntax::cst::*;
 use mago_syntax::parser::parse_file;
 
-use crate::printer::RExpr;
+use crate::printer::{self, RExpr};
 use crate::problem::{self, Origin, Problem};
 use crate::types::{RustType, TypeNames};
 use variables::Variables;
@@ -49,6 +49,7 @@ mod recursion;
 mod shapes;
 mod statements;
 mod strings;
+mod throws;
 mod uses;
 mod variables;
 
@@ -347,6 +348,24 @@ struct Signature {
     rust_name: String,
     parameters: Vec<ParameterSignature>,
     returns: Option<RustType>,
+    /// True when it returns a `Result` because it throws (P2R-211).
+    throws: bool,
+}
+
+impl Signature {
+    /// The ` -> R` of its Rust signature, empty for `void`; a function that throws returns
+    /// `Result<R, PhpException>` (P2R-211).
+    fn returns_text(&self) -> String {
+        let returns = self.returns.as_ref().map(RustType::owned);
+        match (self.throws, returns) {
+            (true, returns) => format!(
+                " -> Result<{}, PhpException>",
+                returns.as_deref().unwrap_or("()")
+            ),
+            (false, Some(returns)) => format!(" -> {returns}"),
+            (false, None) => String::new(),
+        }
+    }
 }
 
 #[derive(Clone)]
@@ -462,6 +481,21 @@ struct Converter<'c> {
     /// The path of each module below the crate root, in Rust names; the root's is empty
     /// and comes first. One input file has only the root (P2R-172).
     module_paths: Vec<Vec<String>>,
+    /// Where the error of a call that throws goes here; `None` inside a closure the output
+    /// writes, where it cannot go anywhere (P2R-213).
+    raise: Option<printer::Raise>,
+    /// The flow blocks of the `throw`s and calls that throw so far in the body of the `try`
+    /// that is converting, which lead to its handlers (P2R-214).
+    attempt: Option<Vec<usize>>,
+    /// True while the body of a function that throws converts (P2R-211).
+    throwing: bool,
+    /// The number of `try` statements around the statement converting (P2R-214).
+    trying: usize,
+    /// True once a `throw` converts, so the output holds the exception struct (P2R-210).
+    uses_exceptions: bool,
+    /// The variables of the open `catch` clauses: PHP name with `$`, Rust name, and
+    /// whether a handler read it (P2R-214).
+    caught: Vec<(Vec<u8>, String, bool)>,
 }
 
 impl<'c> Converter<'c> {
@@ -487,6 +521,13 @@ impl<'c> Converter<'c> {
             library: false,
             current_module: 0,
             module_paths: vec![Vec::new()],
+            // Statements outside functions are `fn main()` (P2R-213).
+            raise: Some(printer::Raise::Abort),
+            attempt: None,
+            throwing: false,
+            trying: 0,
+            uses_exceptions: false,
+            caught: Vec::new(),
         }
     }
 
@@ -609,6 +650,7 @@ impl<'c> Converter<'c> {
         self.register_class_names(&program);
         self.register(&program);
         self.register_class_members(&program);
+        self.decide_throws(&program);
         self.decide_modes(&program);
         for (span, message) in std::mem::take(&mut self.loops.problems) {
             self.refuse(&span, message);
@@ -744,16 +786,26 @@ impl<'c> Converter<'c> {
         // Every body has converted, so every array shape the output uses is known; their
         // structs come first, in the crate root for a directory (P2R-200, P2R-172).
         let shapes = self.shape_items();
+        // The exception struct follows the shapes in the crate root, and the items of one
+        // file (P2R-210).
+        let exception = self.uses_exceptions.then(throws::exception_lines);
         if self.library {
-            for (name, _) in &shapes {
-                owners.insert(name.clone(), (0, crates::ItemKind::Type));
+            let mut root = Vec::new();
+            for (name, lines) in shapes {
+                owners.insert(name, (0, crates::ItemKind::Type));
+                root.push(lines);
             }
-            items[0].splice(0..0, shapes.into_iter().map(|(_, lines)| lines));
+            if let Some(lines) = exception {
+                owners.insert("PhpException".to_owned(), (0, crates::ItemKind::Type));
+                root.push(lines);
+            }
+            items[0].splice(0..0, root);
             return self.crate_files(items, &owners);
         }
         // Every body has converted, so every helper call is known (P2R-160).
         let mut items = items.remove(0);
         items.splice(0..0, shapes.into_iter().map(|(_, lines)| lines));
+        items.extend(exception);
         items.extend(self.helpers.iter().map(|(_, helper)| helper.lines()));
         vec![(String::new(), assemble(items, main))]
     }

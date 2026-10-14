@@ -2,13 +2,13 @@
 //! and between `Option` values, the bindings of null checks, and `??` (P2R-102 to
 //! P2R-105).
 
-use mago_span::HasSpan;
+use mago_span::{HasSpan, Span};
 use mago_syntax::cst::*;
 
 use super::flow::Var;
 use super::variables::Part;
 use super::{Converter, booleans, lists, shapes};
-use crate::printer::{self, BinOp, RExpr};
+use crate::printer::{self, BinOp, RExpr, Raise};
 use crate::types::RustType;
 
 /// The problem of a value that may be null as an element of a list of plain values
@@ -290,9 +290,15 @@ impl Converter<'_> {
             self.refuse(binary, message);
             return None;
         }
-        // Both sides convert first, so problems on both sides are reported.
+        if let Expression::Throw(throw) = lists::unparenthesized(binary.rhs) {
+            return self.coalesce_throw(binary, left_node, throw);
+        }
+        // Both sides convert first, so problems on both sides are reported. A lazy default
+        // runs in a closure, where a call that throws has nowhere to go (P2R-213).
         let left = self.expression(binary.lhs);
+        let outer = self.raise.take();
         let right = self.expression(binary.rhs);
+        self.raise = outer;
         let ((left, left_type), (right, right_type)) = (left?, right?);
         let RustType::Option(inner) = &left_type else {
             self.refuse(binary, "the left side of ?? cannot be null here (P2R-105)");
@@ -327,21 +333,7 @@ impl Converter<'_> {
                 lazy,
             }
         } else {
-            // `unwrap_or` takes the option, so a variable moves unless it is read again, and
-            // a field, which Rust cannot move out of its struct, is copied.
-            let option = match (left, left_node) {
-                (field @ RExpr::Field(..), _) => RExpr::Method(Box::new(field), "clone"),
-                (RExpr::Var(name), _) if self.variables.is_borrowed(&name) => {
-                    RExpr::MapOwned(Box::new(RExpr::Var(name)))
-                }
-                (RExpr::Var(name), Expression::Variable(Variable::Direct(variable))) => {
-                    let mark = self
-                        .variables
-                        .copy_mark(variable.span, binary.span(), false);
-                    RExpr::Var(format!("{name}{mark}"))
-                }
-                (other, _) => other,
-            };
+            let option = self.owned_option(left, left_node, binary.span());
             let default = self.stored(binary.rhs, right, &right_type, binary.span())?;
             RExpr::Unwrap {
                 option: Box::new(option),
@@ -350,6 +342,50 @@ impl Converter<'_> {
             }
         };
         Some((expr, (**inner).clone()))
+    }
+
+    /// `$a ?? throw new C(..)` as `a.ok_or_else(|| PhpException::new(..))?` (P2R-215).
+    fn coalesce_throw(
+        &mut self,
+        binary: &Binary<'_>,
+        left_node: &Expression<'_>,
+        throw: &Throw<'_>,
+    ) -> Option<(RExpr, RustType)> {
+        let left = self.expression(binary.lhs);
+        let exception = self.thrown_lazily(throw);
+        let ((left, left_type), exception) = (left?, exception?);
+        let RustType::Option(inner) = &left_type else {
+            self.refuse(binary, "the left side of ?? cannot be null here (P2R-105)");
+            return None;
+        };
+        let option = if inner.is_copy() {
+            left
+        } else {
+            self.owned_option(left, left_node, binary.span())
+        };
+        let closure = RExpr::Raw(format!("|| {}", printer::expr(&exception, false)));
+        let call = RExpr::MethodCall(Box::new(option), "ok_or_else".to_owned(), vec![closure]);
+        Some((
+            RExpr::Raised(Box::new(call), Raise::Propagate),
+            (**inner).clone(),
+        ))
+    }
+
+    /// The owned option that a method taking it by value needs: a variable moves unless it
+    /// is read again, a parameter `Option<&T>` is copied, and a field, which Rust cannot
+    /// move out of its struct, is copied (P2R-26, P2R-105).
+    fn owned_option(&mut self, left: RExpr, left_node: &Expression<'_>, statement: Span) -> RExpr {
+        match (left, left_node) {
+            (field @ RExpr::Field(..), _) => RExpr::Method(Box::new(field), "clone"),
+            (RExpr::Var(name), _) if self.variables.is_borrowed(&name) => {
+                RExpr::MapOwned(Box::new(RExpr::Var(name)))
+            }
+            (RExpr::Var(name), Expression::Variable(Variable::Direct(variable))) => {
+                let mark = self.variables.copy_mark(variable.span, statement, false);
+                RExpr::Var(format!("{name}{mark}"))
+            }
+            (other, _) => other,
+        }
     }
 
     /// True for a string value that Rust holds as a `&str`: the result of `??` when both

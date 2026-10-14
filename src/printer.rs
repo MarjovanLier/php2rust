@@ -133,6 +133,21 @@ pub enum RExpr {
     /// `S { field: value }`, a struct literal of an array shape, fields in PHP's order
     /// (P2R-202).
     Struct(String, Vec<(String, RExpr)>),
+    /// A call of a function that throws, with the way its error leaves (P2R-213).
+    Raised(Box<RExpr>, Raise),
+    /// Rust text written as it is: a `throw` as an arm result (P2R-215).
+    Raw(String),
+}
+
+/// Where the error of a call that throws goes (P2R-213).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Raise {
+    /// `f()?` in a function that throws.
+    Propagate,
+    /// To the handlers of the `try` whose body holds the call.
+    Attempt,
+    /// `fn main()` outside a `try`: PHP's uncaught exception.
+    Abort,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -383,6 +398,23 @@ fn render(expr: &RExpr, anchor: bool, min_precedence: u8) -> String {
                 .collect();
             format!("{name} {{ {} }}", parts.join(", "))
         }
+        RExpr::Raised(inner, Raise::Propagate) => format!("{}?", render(inner, false, POSTFIX)),
+        RExpr::Raised(inner, Raise::Attempt) => {
+            let text = format!(
+                "match {} {{ Ok(v) => v, Err(e) => break 'throw e }}",
+                render(inner, false, 0)
+            );
+            if min_precedence > 0 {
+                format!("({text})")
+            } else {
+                text
+            }
+        }
+        RExpr::Raised(inner, Raise::Abort) => format!(
+            "{}.unwrap_or_else(|e| e.uncaught())",
+            render(inner, false, POSTFIX)
+        ),
+        RExpr::Raw(text) => text.clone(),
     }
 }
 
@@ -443,7 +475,7 @@ pub fn anchored(expr: &RExpr) -> bool {
         RExpr::Field(..) | RExpr::MethodCall(..) => true,
         RExpr::Contains(..) => true,
         RExpr::If(_, then, otherwise) => anchored(then) || anchored(otherwise),
-        RExpr::Let(_) | RExpr::Struct(..) => true,
+        RExpr::Let(_) | RExpr::Struct(..) | RExpr::Raised(..) | RExpr::Raw(_) => true,
     }
 }
 
@@ -485,6 +517,7 @@ pub fn literal_value(expr: &RExpr) -> Option<i64> {
         RExpr::None | RExpr::Some(_) | RExpr::MapOwned(_) | RExpr::Unwrap { .. } => None,
         RExpr::Path(_) | RExpr::Field(..) | RExpr::MethodCall(..) => None,
         RExpr::Contains(..) | RExpr::If(..) | RExpr::Let(_) | RExpr::Struct(..) => None,
+        RExpr::Raised(..) | RExpr::Raw(_) => None,
     }
 }
 

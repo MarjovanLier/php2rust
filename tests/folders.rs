@@ -234,7 +234,16 @@ fn case(dir: &Path, scratch: &Path) -> Result<(), String> {
     let mut flags = php_flags();
     flags.push("input.php");
     let php = run("php", &flags, dir);
-    if php.status.code() != Some(0) || !php.stderr.is_empty() {
+    // An uncaught exception exits 255 with only its fatal message on stderr, which names
+    // the input path, so stderr is not compared (P2R-216).
+    let uncaught = php.status.code() == Some(255) && {
+        let stderr = text(&php.stderr);
+        stderr.contains("Uncaught ")
+            && !["Warning:", "Notice:", "Deprecated:"]
+                .iter()
+                .any(|kind| stderr.contains(kind))
+    };
+    if !uncaught && (php.status.code() != Some(0) || !php.stderr.is_empty()) {
         return Err(format!(
             "PHP run failed, exit {:?}:\n{}",
             php.status.code(),
@@ -242,14 +251,15 @@ fn case(dir: &Path, scratch: &Path) -> Result<(), String> {
         ));
     }
     let rust = run(target, &[], dir);
-    if rust.status.code() != Some(0) {
+    let wanted = if uncaught { 255 } else { 0 };
+    if rust.status.code() != Some(wanted) {
         return Err(format!(
             "Rust run failed, exit {:?}:\n{}",
             rust.status.code(),
             text(&rust.stderr)
         ));
     }
-    if php.stdout.is_empty() {
+    if php.stdout.is_empty() && !uncaught {
         return Err("the case prints nothing (P2R-72)".into());
     }
     if php.stdout != rust.stdout {

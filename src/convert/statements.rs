@@ -7,7 +7,7 @@ use super::control::emit;
 use super::lists::unparenthesized;
 use super::variables::changes_variable;
 use super::{Context, Converter, nulls, statement_kind};
-use crate::printer::{self, RExpr};
+use crate::printer::{self, RExpr, Raise};
 use crate::types::RustType;
 
 impl Converter<'_> {
@@ -31,6 +31,19 @@ impl Converter<'_> {
                     self.leave("return");
                 }
             }
+            // A `throw` leaves its block as `return` does (P2R-212).
+            Statement::Expression(expression)
+                if let Expression::Throw(throw) = expression.expression =>
+            {
+                let converted = self.throw_text(throw);
+                if let Some(text) = &converted {
+                    body.push(emit(depth, format!("{text};")));
+                }
+                if converted.is_some() || matches!(context, Context::Function(_)) {
+                    self.leave("throw");
+                }
+            }
+            Statement::Try(node) => self.try_statement(node, depth, context, body),
             Statement::Expression(expression) if changes_variable(expression.expression) => {
                 if !self.match_assignment(expression.expression, depth, body) {
                     self.assignment_statement(expression.expression, depth, body)
@@ -88,6 +101,8 @@ impl Converter<'_> {
                 self.refuse(ret, "return outside a function is not supported (P2R-07)");
                 return;
             }
+            // A function that throws returns a `Result` (P2R-211).
+            (Context::Function(None), None) if self.throwing => "return Ok(());".to_owned(),
             (Context::Function(None), None) => "return;".to_owned(),
             (Context::Function(Some(returns)), Some(value)) => {
                 // Mago reports a value that does not match the declared return type (P2R-11).
@@ -108,7 +123,11 @@ impl Converter<'_> {
                     return;
                 };
                 let expr = nulls::wrapped(expr, &ty, returns);
-                format!("return {};", printer::expr(&expr, false))
+                if self.throwing {
+                    format!("return Ok({});", printer::expr(&expr, false))
+                } else {
+                    format!("return {};", printer::expr(&expr, false))
+                }
             }
             _ => {
                 self.refuse(
@@ -142,9 +161,16 @@ impl Converter<'_> {
                 return;
             }
         };
-        if let Some((expr, _)) = converted {
-            body.push(emit(depth, format!("{};", printer::expr(&expr, false))));
-        }
+        let text = match converted {
+            // A `void` call that throws, in a `try` body (P2R-213).
+            Some((RExpr::Raised(call, Raise::Attempt), None)) => format!(
+                "if let Err(e) = {} {{ break 'throw e; }}",
+                printer::expr(&call, false)
+            ),
+            Some((expr, _)) => format!("{};", printer::expr(&expr, false)),
+            None => return,
+        };
+        body.push(emit(depth, text));
     }
 
     pub(super) fn echo(&mut self, echo: &Echo<'_>, depth: usize, body: &mut Vec<String>) {

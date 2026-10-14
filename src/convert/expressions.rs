@@ -26,6 +26,23 @@ impl Converter<'_> {
             Expression::Literal(Literal::String(string)) => {
                 Some((RExpr::Str(self.string_literal(string)?), RustType::String))
             }
+            Expression::Throw(throw) => {
+                self.record_refused(throw.exception);
+                self.refuse(
+                    throw,
+                    "a throw converts only as a statement, a match arm or the right side of ?? (P2R-215)",
+                );
+                None
+            }
+            Expression::Variable(Variable::Direct(variable))
+                if self.caught.iter().any(|(name, ..)| *name == variable.name) =>
+            {
+                self.refuse(
+                    variable,
+                    "a caught exception converts only in getMessage(), getCode() and throw (P2R-214)",
+                );
+                None
+            }
             Expression::Variable(Variable::Direct(variable)) => self.variable(variable),
             Expression::UnaryPrefix(unary)
                 if matches!(unary.operator, UnaryPrefixOperator::Negation(_)) =>
@@ -296,8 +313,9 @@ impl Converter<'_> {
         if self.current_function.as_ref() == Some(&key) {
             self.self_calls.push(call.span());
         }
+        let call = RExpr::Call(signature.rust_name, arguments);
         Some((
-            RExpr::Call(signature.rust_name, arguments),
+            self.raised(node, call, signature.throws)?,
             signature.returns,
         ))
     }

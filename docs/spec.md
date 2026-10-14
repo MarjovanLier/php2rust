@@ -62,8 +62,12 @@ stop of P2R-203; the build added `??` on a shape element (P2R-203). The
 final review of the build added the `?:` arm stop of P2R-202, the list
 read stop of P2R-203, the narrowed shape rule of P2R-200 and the lent
 string arm of P2R-205. Section 22 (exceptions as `Result`) was written on
-14 Oct 2026; it changes P2R-07, P2R-33, P2R-60, P2R-72, P2R-104,
-P2R-105, P2R-120, P2R-160, P2R-171, P2R-172, P2R-174 and P2R-175.
+14 Oct 2026; it changes P2R-07, P2R-33, P2R-43, P2R-60, P2R-72, P2R-104,
+P2R-105, P2R-120, P2R-160, P2R-171, P2R-172, P2R-174 and P2R-175. The two
+spec reviewers replaced the first `if let` form of P2R-214 with the
+labelled blocks that rustc follows as PHP does, and added the flow rule of
+P2R-212, the catch-all, naming and nesting rules of P2R-214, the
+all-throw stop of P2R-215 and the exit rules of P2R-216.
 
 php2rust converts typed PHP source into normal, readable Rust (`Vec`,
 `String`, `i64`), without AI. It reads PHP with the Mago crates, uses Mago's
@@ -266,9 +270,9 @@ requirement IDs.
 
   Parentheses in the output MUST follow Rust precedence, not the source text.
   An expression statement converts only when it is an assignment, an
-  append, `++` or `--`, a call to a function declared in the file, or a
-  method call (P2R-135); any other expression statement stops the
-  conversion.
+  append, `++` or `--`, a call to a function declared in the file, a
+  method call (P2R-135) or a `throw` (P2R-212); any other expression
+  statement stops the conversion.
 - **P2R-44** These MUST stop the conversion in version 1, because the Rust
   result would differ or needs more design: `/` (the result is `int` or
   `float` depending on the values), `**`, `<=>`, `==` or `!=` on strings
@@ -388,8 +392,8 @@ requirement IDs.
   shared extension, which `-n` skips) and
   the Rust program built with `rustc --edition 2024` (debug) MUST print the
   same stdout. Both MUST exit 0, the stdout MUST NOT be empty, and PHP's
-  stderr MUST be empty, except for an uncaught exception (P2R-216). A case
-  without `fn main()` gets the checks of P2R-70
+  stderr MUST be empty; a case that ends in an uncaught exception follows
+  P2R-216 instead. A case without `fn main()` gets the checks of P2R-70
   and P2R-71 only. Review concern, not checked mechanically: each case's
   stdout depends on every construct the case covers, and every construct of
   sections 3 to 5, 11 to 17, 19, 21 and 22 appears in at least one case with
@@ -1761,15 +1765,16 @@ slice.
   &'static str, message: &str, code: i64) -> PhpException`, which stores a
   copy of the message (P2R-133); `pub fn is_a(&self, class: &str) -> bool`,
   true when the exception's class is that class or extends it in PHP's
-  class tree; and `pub fn uncaught(self) -> !`, which writes
-  `PHP Fatal error:  Uncaught <class>: <message>` to stderr and exits with
-  code 255, as PHP does. The classes are PHP's `Exception`,
-  `ErrorException`, `JsonException`, `LogicException` with
-  `BadFunctionCallException`, `BadMethodCallException`, `DomainException`,
-  `InvalidArgumentException`, `LengthException` and `OutOfRangeException`,
-  and `RuntimeException` with `OutOfBoundsException`, `OverflowException`,
-  `RangeException`, `UnderflowException` and `UnexpectedValueException`,
-  each under its PHP parent. A class name is resolved as PHP resolves it
+  class tree; and `pub fn uncaught(self) -> !`, which flushes stdout,
+  writes `PHP Fatal error:  Uncaught <class>: <message>` to stderr and
+  exits with code 255, the exit code PHP gives an uncaught exception (PHP's
+  own message also names the file and a stack trace). The classes are
+  PHP's `Exception`, `ErrorException`, `JsonException`, `LogicException`
+  with `BadFunctionCallException` (and `BadMethodCallException` under it),
+  `DomainException`, `InvalidArgumentException`, `LengthException` and
+  `OutOfRangeException`, and `RuntimeException` with
+  `OutOfBoundsException`, `OverflowException`, `RangeException`,
+  `UnderflowException` and `UnexpectedValueException`. A class name is resolved as PHP resolves it
   (P2R-151), so an unimported `RuntimeException` inside a namespace, which
   names a class of that namespace, stops. The struct comes after the
   enums, classes and functions and before the helpers (P2R-33, P2R-160),
@@ -1779,7 +1784,9 @@ slice.
 - **P2R-211** A function, method, static method or enum method MUST throw
   when its body holds a `throw`, or a call of a function or method that
   throws, outside the body of a `try` with a catch-all clause (P2R-214); a
-  `throw` or call in a `catch` body is outside its `try`. The tool decides
+  `throw` or call in a `catch` body is outside its `try`, and one in a
+  `default` arm that P2R-121 leaves out does not count, because that arm
+  never runs. The tool decides
   this for the whole input as a least fixed point, as it decides the forms
   of P2R-143. A function that throws returns `Result<T, PhpException>`, or
   `Result<(), PhpException>` for `void`: `return $v;` gives `return
@@ -1793,62 +1800,81 @@ slice.
   second, an `int` (`0` when left out); named arguments `message:` and
   `code:` convert by P2R-169. In `fn main()` it converts to
   `PhpException::new(..).uncaught();`, and inside a `try` body to
-  `break 'attempt Some(PhpException::new(..));` (P2R-214). `throw $e;`,
-  where `$e` is the variable of the `catch` it stands in, converts the same
-  way with `e`. For P2R-34, P2R-50 and P2R-104 a `throw` leaves its block as
-  `return` does. These stop the conversion: a third argument (`previous`),
-  `new` of any other class, a `throw` of any other expression, and an
-  exception object used in any other way.
+  `break 'throw PhpException::new(..);` (P2R-214). `throw $e;`, where `$e`
+  is the variable of the `catch` it stands in, converts the same way with
+  `e`. A `throw` statement converts where P2R-43 lists the expression
+  statements. For every rule that follows control flow (P2R-26, P2R-34,
+  P2R-35, P2R-40, P2R-50, P2R-104, P2R-106, P2R-145 and the end rule of
+  P2R-211), a `throw` leaves its block as `return` does, and each `throw`
+  and each call that throws in a `try` body is a path to its handlers
+  (P2R-214). These stop the conversion: any argument other than `message`
+  and `code`, positional or named; `new` of any other class; a `throw` of
+  any other expression; and an exception object used in any other way.
 - **P2R-213** A call of a function or method that throws MUST convert with
   `?` after it (`f(x)?`) in a function that throws, to
   `f(x).unwrap_or_else(|e| e.uncaught())` in `fn main()` outside a `try`
   body, and inside a `try` body to `match f(x) { Ok(v) => v, Err(e) =>
-  break 'attempt Some(e) }`, or `if let Err(e) = f(x) { break 'attempt
-  Some(e); }` for a call statement of a `void` function. A call that throws
+  break 'throw e }`, or `if let Err(e) = f(x) { break 'throw e; }` for a
+  call statement of a `void` function. A call that throws
   inside a closure that the output writes stops the conversion: the lazy
   default of `??` (P2R-105) and the message of `?? throw` (P2R-215).
 - **P2R-214** `try { body } catch (C $e) { handler } ...` MUST convert to
-  `if let Some(e) = 'attempt: { body; None } { handlers }`: each `throw` and
-  each call that throws in the body leaves the block with
-  `break 'attempt Some(..)`, and `None` ends the body only when a path
-  reaches its end. The handlers are one `if e.is_a("C") { .. } else if ..`
-  chain in source order, a union `catch (A | B $e)` testing
-  `e.is_a("A") || e.is_a("B")`; a clause for `Exception` or `Throwable` is a
-  catch-all and ends the chain as `else { .. }` (or is the whole body of
-  the `if let` when it comes first). Without a catch-all the chain ends
-  with `else { return Err(e); }` in a function that throws, so it throws
-  (P2R-211), or `else { e.uncaught(); }` in `fn main()`. A catch-all that
-  never reads `$e`, and `catch (C)` without a variable, bind `_` where
-  nothing else reads `e`. The variable of a `catch` is a new variable that
-  holds only inside its handler, as a `foreach` value does (P2R-41):
-  `$e->getMessage()` gives `e.message`, lent as a `String` field
-  (P2R-134), and `$e->getCode()` gives `e.code`. For P2R-34 and P2R-35 each
-  `throw` and each call that throws in the body is a path to the handlers,
-  and the handlers join the path after the body. These stop the
-  conversion: `finally`; a `try` inside a `try`; a `try` whose body holds
-  no `throw` and no call that throws; a `break` or `continue` in the body
-  that leaves it, which Rust rejects inside a labelled block; a class in a
-  `catch` that is not in P2R-210 (`Error`, `TypeError` and the input's own
-  classes included); and a read of `$e` after its handler, or any other use
-  of `$e` than `getMessage()`, `getCode()` and `throw $e`.
+  `'attempt: { let e = 'throw: { body; break 'attempt; }; handlers }` when a
+  path reaches the end of the body, and to `let e = 'throw: { body };`
+  followed by the handlers when none does, because rustc rejects a label
+  that nothing names. Each `throw` and each call that throws in the body
+  leaves `'throw` with its exception (P2R-212, P2R-213), so the handlers
+  run only after a throw and the end of the body skips them; rustc follows
+  these paths as PHP does, so a variable that the body and a handler both
+  assign is assigned once on each path. The handlers are one
+  `if e.is_a("C") { .. } else if ..` chain in source order, a union
+  `catch (A | B $e)` testing `e.is_a("A") || e.is_a("B")`. A clause that
+  names `Exception` or `Throwable`, alone or in a union, is a catch-all: it
+  ends the chain as `else { .. }`, or stands alone after the `let` when it
+  is the only clause. Without a catch-all the chain ends with
+  `else { return Err(e); }` in a function that throws, so it throws
+  (P2R-211), or `else { e.uncaught(); }` in `fn main()`. The binding has
+  the Rust name of the variable of the clauses; a clause without a variable
+  takes the name of the others, and `_` is bound when there is no `is_a`
+  test and no handler reads the variable. The variable of a `catch` is a
+  new variable that holds only inside its handler, as a `foreach` value
+  does (P2R-41): `$e->getMessage()` gives `e.message`, lent as a `String`
+  field (P2R-134), and `$e->getCode()` gives `e.code`, of Rust type `i64`
+  whatever type Mago gives it. These stop the conversion: `finally`; a
+  `try` inside another `try`, its catch bodies included, whose labels
+  would shadow the outer ones; a `try` whose body holds no `throw` and no
+  call that throws that converts (a `default` arm that P2R-121 leaves out
+  does not count); a `break` or `continue` in the body that leaves it,
+  which Rust rejects inside a labelled block; a class in a `catch` that is
+  not in P2R-210 (`Error`, `TypeError` and the input's own classes
+  included); a clause after a catch-all, which PHP never runs; clauses of
+  one `try` with different variable names; a clause that tests a class
+  when no clause has a variable; a catch variable whose name the function
+  already uses before the `try`, because PHP overwrites it; and a read of
+  `$e` after its handler, or any other use of `$e` than `getMessage()`,
+  `getCode()` and `throw $e`.
 - **P2R-215** A `throw` expression MUST convert in two more places: as the
-  arm result of a `match` (P2R-120), where it gives the arm
-  `_ => return Err(PhpException::new(..)),` (or the forms of P2R-212 in
+  arm result of a `match` (P2R-120), where the arm result is
+  `return Err(PhpException::new(..))` (or the forms of P2R-212 in
   `fn main()` and a `try` body), and as the right side of `$a ?? throw new
   C(..)` on an `$a` that P2R-105 accepts, where it gives
-  `a.ok_or_else(|| PhpException::new(..))?` in a function that throws. Mago
-  types a `throw` as `never`, so neither the arm type rules of P2R-122 nor
-  the type rule of P2R-105 applies to it. `?? throw` in `fn main()` or a
-  `try` body, and a `throw` expression anywhere else (an operand, an
-  argument, a `?:` arm), stop the conversion.
+  `a.ok_or_else(|| PhpException::new(..))?` in a function that throws,
+  with `$a` taken as `unwrap_or` takes it in P2R-105 (a parameter
+  `Option<&T>` copied with `.map(ToOwned::to_owned)`, a field copied with
+  `.clone()`). Mago types a `throw` as `never`, so neither the arm type
+  rules of P2R-122 nor the type rule of P2R-105 applies to it. These stop
+  the conversion: a `match` whose every converted arm is a `throw`, because
+  rustc finds the code around it unreachable (P2R-50); `?? throw` in
+  `fn main()` or a `try` body; and a `throw` expression anywhere else (an
+  operand, an argument, a `?:` arm).
 - **P2R-216** A case folder whose PHP run exits with code 255 and writes
-  `Uncaught ` to stderr, as PHP does for an uncaught exception, MUST give a
-  Rust run that exits with code 255 and the same stdout, and stdout written
-  before the exception MUST reach the output (P2R-72 is amended for such a
-  case; PHP may write its fatal message twice under `-n`, so stderr is not
-  compared). The README lists, under P2R-60, that a `catch (Throwable $e)`
-  does not catch the errors that P2R-60 lists as panics (division by zero,
-  `ValueError` of `explode()` and `str_repeat()`, `E::from()`).
+  only the fatal message of an uncaught exception to stderr (it holds
+  `Uncaught `) MUST give a Rust run that exits with code 255 and the same
+  stdout, and stdout written before the exception MUST reach the output;
+  for such a case P2R-72's exit 0 and non-empty stdout are lifted, and
+  stderr is not compared, because PHP's message names the input path and a
+  stack trace. The README lists, under P2R-60, that a `catch (Throwable
+  $e)` does not catch the errors that P2R-60 lists as panics.
 
 ## Spec checklist
 

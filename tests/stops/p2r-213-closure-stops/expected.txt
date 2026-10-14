@@ -1,0 +1,2 @@
+input.php:23:18: a call that throws cannot stand in the default of ?? or the message of ?? throw, which Rust runs in a closure (P2R-213)
+input.php:28:44: a call that throws cannot stand in the default of ?? or the message of ?? throw, which Rust runs in a closure (P2R-213)

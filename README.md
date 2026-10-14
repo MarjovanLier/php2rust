@@ -155,6 +155,14 @@ converts:
   `php_replace`, `php_explode`, `ctype_digit`), only when it calls one.
 - integer literals in every PHP form, float literals, and single-quoted and
   double-quoted strings.
+- exceptions of PHP's built-in classes (`Exception`, `RuntimeException`,
+  `InvalidArgumentException` and the other SPL exceptions): `throw new
+  RuntimeException('msg', 3)` becomes `Err(PhpException::new(..))`, a function that
+  throws returns `Result<T, PhpException>`, and a call of one ends in `?`.
+  `try`/`catch` (also `catch (A | B $e)`, `Exception` and `Throwable`) becomes labelled
+  blocks that test the class with PHP's class tree; `$e->getMessage()`,
+  `$e->getCode()` and `throw $e` convert, and so do `default => throw ..` in a `match`
+  and `$x ?? throw ..`. An uncaught exception in `fn main()` exits with code 255.
 
 ## What stops the conversion
 
@@ -191,6 +199,14 @@ the others are findings of the Mago analyser. In short:
   literal, a literal with a repeated key, a spread or an element without a key, an int
   for a `float` field (PHP keeps the int), a list of nullable objects (`list<?Point>`),
   and a class that holds itself through `?C` (`?Node $next` in `Node`).
+- For exceptions: the input's own exception classes (they need `extends`), `Error` and
+  `TypeError`, an unimported `RuntimeException` inside a namespace, a constructor
+  argument other than the message and the code, an exception object kept or passed
+  on, `finally`, a `try` inside a `try` or its catch, `break` or `continue` that leaves
+  a `try` body, a `try` body that throws nothing, catches with different variable
+  names, a catch after `Exception` or `Throwable`, a catch variable the function
+  already uses, a `match` whose every arm throws, a `throw` in a `?:` arm, and a call
+  that throws in the default of `??`.
 - A namespace with braces, a second namespace, or one after other code. Imports that PHP
   rejects (two imports with one name, an import named like a class or function of the
   file, `as self`) or warns about (`use Foo;` outside a namespace).
@@ -337,6 +353,10 @@ php2rust refuses some valid PHP that version 1 converts in other forms:
   separator that is empty at run time: PHP throws a `ValueError` (exit code 255 when
   uncaught), Rust panics (exit code 101), or `str_repeat()` of an empty string gives an
   empty string.
+- The errors above that Rust turns into panics are not exceptions, so a
+  `catch (Throwable $e)` does not catch them.
+- An uncaught exception writes a shorter message than PHP's (no file, line or stack
+  trace); the exit code is 255, as in PHP.
 - Comments and docblocks are not copied (version 1).
 
 ## Development

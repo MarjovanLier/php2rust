@@ -869,6 +869,7 @@ impl Converter<'_> {
                         rust_name,
                         parameters,
                         returns,
+                        throws: false,
                     },
                     self_mode: Mode::Shared,
                     is_static: method
@@ -1265,6 +1266,7 @@ impl Converter<'_> {
         self.variables.list_types = sites.lists;
         self.variables.null_types = sites.nulls;
         let mut body = Vec::new();
+        let outer_body = self.begin_body(signature.throws);
         for statement in block.statements.iter() {
             self.statement(
                 statement,
@@ -1273,6 +1275,7 @@ impl Converter<'_> {
                 &mut body,
             );
         }
+        self.end_body(signature.returns.is_none(), 2, &mut body, outer_body);
         if signature.returns.is_some() && self.variables.left.is_none() {
             self.refuse(
                 &method.name,
@@ -1299,15 +1302,11 @@ impl Converter<'_> {
         self.current_method = outer_method;
         self.current_class = outer_class;
         self.self_calls = outer_calls;
-        let returns = signature
-            .returns
-            .as_ref()
-            .map(|t| format!(" -> {}", t.owned()))
-            .unwrap_or_default();
         let open = format!(
-            "pub fn {}({}){returns} {{",
+            "pub fn {}({}){} {{",
             signature.rust_name,
-            parameters.join(", ")
+            parameters.join(", "),
+            signature.returns_text()
         );
         if body.is_empty() {
             // rustfmt writes an empty body as `{}` on the same line.
@@ -1399,6 +1398,9 @@ impl Converter<'_> {
         call: &MethodCall<'_>,
         node: &Expression<'_>,
     ) -> Option<(RExpr, Option<RustType>)> {
+        if let Some(converted) = self.caught_call(call, node) {
+            return converted;
+        }
         let Some((object, ty)) = self.expression(call.object) else {
             self.record_refused_arguments(&call.argument_list);
             return None;
@@ -1455,8 +1457,9 @@ impl Converter<'_> {
         if self.current_method == Some((index, at)) {
             self.self_calls.push(call.span());
         }
+        let call = RExpr::MethodCall(Box::new(object), signature.rust_name, arguments);
         Some((
-            RExpr::MethodCall(Box::new(object), signature.rust_name, arguments),
+            self.raised(node, call, signature.throws)?,
             signature.returns,
         ))
     }
@@ -1529,7 +1532,11 @@ impl Converter<'_> {
             self.self_calls.push(call.span());
         }
         let path = format!("{}::{}", self.classes[index].rust_name, signature.rust_name);
-        Some((RExpr::Call(path, arguments), signature.returns))
+        let call = RExpr::Call(path, arguments);
+        Some((
+            self.raised(node, call, signature.throws)?,
+            signature.returns,
+        ))
     }
 
     fn record_refused_arguments(&mut self, list: &ArgumentList<'_>) {

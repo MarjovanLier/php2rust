@@ -125,6 +125,7 @@ impl Converter<'_> {
                 rust_name,
                 parameters,
                 returns,
+                throws: false,
             }),
             _ => None,
         }
@@ -369,6 +370,7 @@ impl Converter<'_> {
         self.variables.list_types = sites.lists;
         self.variables.null_types = sites.nulls;
         let mut body = Vec::new();
+        let outer_body = self.begin_body(signature.throws);
         for statement in function.body.statements.iter() {
             self.statement(
                 statement,
@@ -377,6 +379,7 @@ impl Converter<'_> {
                 &mut body,
             );
         }
+        self.end_body(signature.returns.is_none(), 1, &mut body, outer_body);
         // rustc rejects a function with a return type whose end a path reaches.
         if signature.returns.is_some() && self.variables.left.is_none() {
             self.refuse(
@@ -400,15 +403,11 @@ impl Converter<'_> {
         self.variables = outer;
         self.current_function = outer_function;
         self.self_calls = outer_calls;
-        let returns = signature
-            .returns
-            .as_ref()
-            .map(|t| format!(" -> {}", t.owned()))
-            .unwrap_or_default();
         let open = format!(
-            "pub fn {}({}){returns} {{",
+            "pub fn {}({}){} {{",
             signature.rust_name,
-            parameters.join(", ")
+            parameters.join(", "),
+            signature.returns_text()
         );
         if body.is_empty() {
             // rustfmt writes an empty body as `{}` on the same line.

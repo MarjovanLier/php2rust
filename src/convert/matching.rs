@@ -12,11 +12,12 @@ use crate::printer::{self, RExpr};
 use crate::types::RustType;
 
 /// Writes the opening line, one line per arm one level deeper (conditions joined with
-/// ` | `, P2R-157) and `};` (P2R-123).
+/// ` | `, P2R-157) and the closing line, `};` (P2R-123).
 fn push_match(
     open: String,
     arms: Vec<(Vec<String>, String)>,
     depth: usize,
+    close: &str,
     body: &mut Vec<String>,
 ) {
     body.push(open);
@@ -26,7 +27,7 @@ fn push_match(
             format!("{} => {value},", pattern.join(" | ")),
         ));
     }
-    body.push(emit(depth, "};".to_owned()));
+    body.push(emit(depth, close.to_owned()));
 }
 
 /// True when an arm of type `ty` converts to `expected`: the same type, a value where an
@@ -66,6 +67,10 @@ impl Converter<'_> {
         let mut lines = Vec::new();
         let mut fine = true;
         for arm in converted.arms {
+            if let RExpr::Raw(text) = arm.expr {
+                lines.push((arm.pattern, text));
+                continue;
+            }
             if nulls::null_for_plain(&arm.ty, returns) {
                 self.refuse(
                     arm.node,
@@ -84,8 +89,13 @@ impl Converter<'_> {
             }
         }
         if fine {
-            let open = emit(depth, format!("return match {} {{", converted.subject));
-            push_match(open, lines, depth, body);
+            // A function that throws returns `Ok(..)` (P2R-211).
+            let (open, close) = if self.throwing {
+                (format!("return Ok(match {} {{", converted.subject), "});")
+            } else {
+                (format!("return match {} {{", converted.subject), "};")
+            };
+            push_match(emit(depth, open), lines, depth, close, body);
         }
     }
 
@@ -122,23 +132,25 @@ impl Converter<'_> {
             self.record_write(variable);
             return true;
         };
-        // The value's type for the write: an `Option` arm makes every arm one (P2R-102).
-        let assigned = converted
-            .arms
-            .iter()
+        // The value's type for the write: an `Option` arm makes every arm one (P2R-102). A
+        // `throw` arm has no value (P2R-215).
+        let valued = || {
+            converted
+                .arms
+                .iter()
+                .filter(|arm| !matches!(arm.expr, RExpr::Raw(_)))
+        };
+        let assigned = valued()
             .map(|arm| &arm.ty)
             .find(|ty| matches!(ty, RustType::Option(_)))
-            .or(converted.arms.first().map(|arm| &arm.ty))
+            .or(valued().next().map(|arm| &arm.ty))
             .cloned();
         let Some(assigned) = assigned else {
             // A `match` without arms, which Mago reports (P2R-11).
             self.record_write(variable);
             return true;
         };
-        let other = converted
-            .arms
-            .iter()
-            .find(|arm| arm.ty != assigned && arm.ty != *assigned.inner());
+        let other = valued().find(|arm| arm.ty != assigned && arm.ty != *assigned.inner());
         if let Some(arm) = other {
             self.record_write(variable);
             self.refuse(
@@ -160,6 +172,10 @@ impl Converter<'_> {
         let mut lines = Vec::new();
         let mut anchored = false;
         for arm in converted.arms {
+            if let RExpr::Raw(text) = arm.expr {
+                lines.push((arm.pattern, text));
+                continue;
+            }
             let Some(stored) = self.stored(arm.node, arm.expr, &arm.ty, expression.span()) else {
                 return true;
             };
@@ -178,7 +194,7 @@ impl Converter<'_> {
         } else {
             emit(depth, format!("{} = {open}", self.variables.name_of(var)))
         };
-        push_match(open, lines, depth, body);
+        push_match(open, lines, depth, "};", body);
         true
     }
 
@@ -253,6 +269,20 @@ impl Converter<'_> {
             let block = self.variables.flow.block();
             self.variables.flow.edge(start, block);
             self.variables.flow.enter(block);
+            if converted && let Expression::Throw(throw) = unparenthesized(result) {
+                // Mago types a `throw` as `never`; it leaves, so its arm reaches no join
+                // (P2R-215).
+                match self.throw_text(throw) {
+                    Some(text) => arms.push(Arm {
+                        pattern,
+                        node: result,
+                        expr: RExpr::Raw(text),
+                        ty: RustType::Bool,
+                    }),
+                    None => fine = false,
+                }
+                continue;
+            }
             if !converted {
                 // The condition's problem is the one reported for this arm.
                 self.record_refused(result);
@@ -277,6 +307,13 @@ impl Converter<'_> {
             self.variables.flow.edge(end, join);
         }
         self.variables.flow.enter(join);
+        if fine && !arms.is_empty() && arms.iter().all(|arm| matches!(arm.expr, RExpr::Raw(_))) {
+            self.refuse(
+                node,
+                "a match whose every arm throws has no value, and rustc rejects the code around it (P2R-215)",
+            );
+            fine = false;
+        }
         let (subject, _) = subject?;
         fine.then_some(Converted { subject, arms })
     }

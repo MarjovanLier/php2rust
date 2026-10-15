@@ -473,9 +473,34 @@ impl Converter<'_> {
             .position(|m| m.key == key)
     }
 
+    /// True when the class extends Spatie's `Data`, which the struct leaves out (P2R-350).
+    pub(super) fn extends_data(&self, declaration: &Class<'_>) -> bool {
+        declaration.extends.as_ref().is_some_and(|extends| {
+            extends
+                .types
+                .iter()
+                .all(|parent| self.identifier_key(parent) == b"spatie\\laraveldata\\data")
+        })
+    }
+
+    /// True when the attribute is one of laravel-data's, which only the methods of `Data`
+    /// read (P2R-351).
+    fn data_attribute(&self, attribute: &Attribute<'_>) -> bool {
+        self.identifier_key(&attribute.name)
+            .starts_with(b"spatie\\laraveldata\\attributes\\")
+    }
+
     /// Refuses everything a class of these slices may not hold (P2R-130, P2R-140).
     fn class_shape(&mut self, declaration: &Class<'_>) {
-        if let Some(attributes) = declaration.attribute_lists.first() {
+        let data = self.extends_data(declaration);
+        if let Some(attributes) = declaration.attribute_lists.first()
+            && !(data
+                && declaration
+                    .attribute_lists
+                    .iter()
+                    .flat_map(|list| list.attributes.iter())
+                    .all(|attribute| self.data_attribute(attribute)))
+        {
             self.refuse(attributes, "attributes are not supported (P2R-07)");
         }
         let readonly = is_readonly(declaration);
@@ -489,7 +514,9 @@ impl Converter<'_> {
                 "only readonly and final may stand on a class (P2R-130)",
             );
         }
-        if let Some(extends) = &declaration.extends {
+        if let Some(extends) = &declaration.extends
+            && !data
+        {
             self.refuse(
                 extends,
                 "a class that extends another is not supported (P2R-130)",
@@ -553,7 +580,7 @@ impl Converter<'_> {
                         "a class can have one constructor only (P2R-130)",
                     );
                 }
-                self.constructor_shape(method);
+                self.constructor_shape(method, data);
             }
         }
     }
@@ -705,8 +732,9 @@ impl Converter<'_> {
     }
 
     /// A constructor converts only when every parameter promotes to a typed property and
-    /// its body is empty (P2R-130).
-    fn constructor_shape(&mut self, method: &Method<'_>) {
+    /// its body is empty (P2R-130). In a class that extends `data`, laravel-data's
+    /// attributes are left out (P2R-351).
+    fn constructor_shape(&mut self, method: &Method<'_>, data: bool) {
         match &method.body {
             MethodBody::Concrete(block) if block.statements.is_empty() => {}
             _ => self.refuse(
@@ -728,8 +756,17 @@ impl Converter<'_> {
                 )
             } else if parameter.ampersand.is_some() || parameter.ellipsis.is_some() {
                 Some("a promoted property cannot be by reference or variadic (P2R-130)")
-            } else if !parameter.attribute_lists.is_empty() {
+            } else if !parameter.attribute_lists.is_empty()
+                && !(data
+                    && parameter
+                        .attribute_lists
+                        .iter()
+                        .flat_map(|list| list.attributes.iter())
+                        .all(|attribute| self.data_attribute(attribute)))
+            {
                 Some("attributes are not supported (P2R-07)")
+            } else if data && DATA_PROPERTIES.contains(&&parameter.variable.name[1..]) {
+                Some(DATA_PROPERTY)
             } else {
                 None
             };
@@ -864,6 +901,11 @@ impl Converter<'_> {
             }
             for item in plain.items.iter() {
                 match item {
+                    _ if self.extends_data(declaration)
+                        && DATA_PROPERTIES.contains(&&item.variable().name[1..]) =>
+                    {
+                        self.refuse(item, DATA_PROPERTY);
+                    }
                     PropertyItem::Concrete(item) if plain.hint.is_some() => {
                         self.declared_property(declaration, index, item, plain.hint.as_ref());
                     }
@@ -1980,6 +2022,13 @@ pub(super) const NULLABLE_CHANGING: &str = "a nullable, union or map type that h
 
 /// The problem of a declared property without a type or a default (P2R-140).
 const NEEDS_DEFAULT: &str = "a declared property needs a type and a default value (P2R-140)";
+
+/// The properties laravel-data 4.18 declares on `Data` (P2R-350).
+const DATA_PROPERTIES: [&[u8]; 2] = [b"_additional", b"_dataContext"];
+
+/// The problem of a property that `Data` already declares (P2R-350).
+const DATA_PROPERTY: &str =
+    "Spatie\\LaravelData\\Data already declares a property of this name (P2R-350)";
 
 /// True for a class declared `readonly` (P2R-130).
 fn is_readonly(declaration: &Class<'_>) -> bool {

@@ -496,14 +496,14 @@ impl Converter<'_> {
     /// Refuses everything a class of these slices may not hold (P2R-130, P2R-140).
     fn class_shape(&mut self, declaration: &Class<'_>) {
         let data = self.extends_data(declaration);
-        if let Some(attributes) = declaration.attribute_lists.first()
-            && !(data
-                && declaration
-                    .attribute_lists
+        // The first group that holds an attribute this class may not leave out.
+        if let Some(attributes) = declaration.attribute_lists.iter().find(|list| {
+            !data
+                || !list
+                    .attributes
                     .iter()
-                    .flat_map(|list| list.attributes.iter())
-                    .all(|attribute| self.data_attribute(attribute)))
-        {
+                    .all(|attribute| self.data_attribute(attribute))
+        }) {
             self.refuse(attributes, "attributes are not supported (P2R-07)");
         }
         let readonly = is_readonly(declaration);
@@ -523,6 +523,25 @@ impl Converter<'_> {
             self.refuse(
                 extends,
                 "a class that extends another is not supported (P2R-130)",
+            );
+        }
+        // The override check below needs every method of Data, also those of its traits.
+        if data
+            && let Some(extends) = &declaration.extends
+            && self
+                .codebase
+                .get_class_like(b"spatie\\laraveldata\\data")
+                .is_some_and(|parent| {
+                    parent
+                        .used_traits
+                        .iter()
+                        .chain(parent.all_parent_interfaces.iter())
+                        .any(|name| !self.codebase.class_like_exists(name.as_bytes()))
+                })
+        {
+            self.refuse(
+                extends,
+                "Spatie\\LaravelData\\Data names a trait or interface that no included file declares, so its methods are not all known; include the whole package (P2R-350)",
             );
         }
         if let Some(implements) = &declaration.implements {

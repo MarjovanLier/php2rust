@@ -2979,11 +2979,13 @@ one tested form; general look-around waits for an engine.
   change the answer (P2R-60). These stop the conversion: a pattern with
   `u` of any other form, in `preg_match` or elsewhere (another
   look-around or class, a word with other characters, a look-around in
-  the middle, a missing look-around); a delimiter that also stands in
-  the look-around, as in `<(?<!\p{L})mc(?! )>u`, whose `<` nests so that
-  it has no closing delimiter (P2R-260), and `!(?<!\p{L})mc(?! )!u`,
-  which ends at the `!` of the look-behind, as in PHP, where both give
-  `false` with a warning; `u` with another flag; and a pattern with `u` in `preg_replace` and
+  the middle, a missing look-around); a delimiter that ends the pattern
+  early or leaves it unclosed, as `<(?<!\p{L})mc(?! )>u`, whose `<` nests
+  so that it has no closing delimiter (P2R-260), and
+  `!(?<!\p{L})mc(?! )!u`, which ends at the `!` of the look-behind (also
+  `?`, `)` and `}`), as in PHP, where each gives `false` with a warning,
+  while `(..)`, `{..}` and `[..]` nest as PHP counts them and convert;
+  `u` with another flag; and a pattern with `u` in `preg_replace` and
   `preg_replace_callback`, which P2R-260 still stops for them.
 
 ## Spec checklist

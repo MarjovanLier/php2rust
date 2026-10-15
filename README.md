@@ -238,8 +238,9 @@ converts:
   with ranges and POSIX names, `( )`, `(?: )`, `|`, the quantifiers and their lazy
   forms (a count `{n}` not after a group), `^`, `\A`, `\z`, and `$` with the `m` flag;
   the flags `i`, `m` and `s`. One form with `u` converts in `preg_match()` read as a
-  bool: `'#(?<!\p{L})mc(?! )#u'`, with any delimiter above, `u` once or more, and any
-  word of ASCII letters and digits in place of `mc`, becomes
+  bool: `'#(?<!\p{L})mc(?! )#u'`, with another delimiter that does not end the
+  pattern early (such as `/`, `~` or `{ }`), `u` once or more, and any word of ASCII
+  letters and digits in place of `mc`, becomes
   `r"(?:^|\P{L})mc(?:[^ ]|$)"`, which matches when the look-around does.
 - traits that hold only constants: `use T;` in a class or enum copies the trait's
   constants into it, and the trait itself writes nothing. A constant whose value is an

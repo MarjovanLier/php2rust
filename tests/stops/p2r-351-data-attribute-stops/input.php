@@ -30,6 +30,21 @@ final class Dynamic extends Data
 {
 }
 
+// PHP rejects a call in an attribute argument when it compiles the file.
+final class Computed extends Data
+{
+    public function __construct(
+        #[MapInputName(strtoupper('code'))]
+        public string $code,
+    ) {}
+}
+
+// static::class cannot be resolved when PHP compiles the file.
+#[MapInputName(static::class)]
+final class Late extends Data
+{
+}
+
 // laravel-data's attributes on a class that does not extend Data stop.
 final class Plain
 {

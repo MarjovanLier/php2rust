@@ -26,6 +26,11 @@ class Deeper extends Point
 {
 }
 
+// PHP rejects a list of parents; Mago's parser accepts it.
+class Twice extends Data, Data
+{
+}
+
 function parentCall(Point $p): int
 {
     $p->toArray();
@@ -45,4 +50,21 @@ function anyData(Data $d): int
 function isData(Point $p): bool
 {
     return $p instanceof Data;
+}
+
+// A method of Data's own name would override it.
+class Own extends Data
+{
+    /** @return array<string, mixed> */
+    public function toArray(): array
+    {
+        return [];
+    }
+}
+
+echo "x\n";
+
+// With Composer's autoloader PHP declares it only when execution gets here.
+class Late extends Data
+{
 }

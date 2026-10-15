@@ -144,8 +144,13 @@ P2R-341 now leaves out. The break reviewer found that a skipped
 included file hides such a function, now a P2R-60 difference, and that
 a cycle of docblock type aliases crashes Mago, now an exception in
 P2R-04. Section 36 (Spatie `Data` classes as plain structs) was
-written on 15 Oct 2026; it changes P2R-07, P2R-73, P2R-130 and the
-roadmap of section 10.
+written on 15 Oct 2026; it changes P2R-07, P2R-73, P2R-130, P2R-135,
+P2R-153, P2R-221, P2R-340, P2R-341 and the roadmap of section 10. Its
+spec reviewers found that PHP rejects attribute arguments that are not
+constant expressions, a list of parents and an incompatible override
+when it compiles the file, where Mago does not always report them, and
+that with Composer's autoloader PHP declares such a class only when
+execution reaches it.
 
 php2rust converts typed PHP source into normal, readable Rust (`Vec`,
 `String`, `i64`), without AI. It reads PHP with the Mago crates, uses Mago's
@@ -554,11 +559,14 @@ requirement IDs.
   MUST be empty, and `out.rs` MUST NOT exist afterwards. A case, stop or
   error folder that holds a directory `include/` runs the tool with the
   added option `--include` naming that directory (P2R-340); the PHP run
-  of P2R-72 does not load it, so an included file that changes what the
-  input does belongs in a stop folder. A case folder that holds
-  `prepend.php` runs PHP with that file loaded before `input.php`
-  (`-d auto_prepend_file=prepend.php`), for the classes of a package that
-  the input names (P2R-350); the tool never reads it.
+  of P2R-72 does not load it, other than through `prepend.php` below, so
+  an included file that changes what the input does belongs in a stop
+  folder. A case folder that holds
+  `prepend.php` runs PHP from inside the folder with that file loaded
+  before `input.php` (`-d auto_prepend_file=prepend.php`); it loads the
+  files of `include/` that declare a package's classes the input names
+  (P2R-350), so PHP and the tool see the same declarations, and the tool
+  never reads it.
 - **P2R-74** Each error folder `tests/errors/<slug>/` holds `args.txt` (the
   command-line arguments, one per line), an optional `input.php` and
   `expected.txt`. Run from inside the folder, the tool MUST exit 2, its
@@ -1038,7 +1046,8 @@ Sections 3 to 9 apply to nullable values unless this section says otherwise.
   private` method other than the constructor, for which PHP prints a
   warning and Mago reports nothing; two methods whose PHP names are equal
   ignoring letter case, which PHP rejects and Mago does not report; and a
-  call to a method the class does not declare (Mago reports it, P2R-11).
+  call to a method the class does not declare itself (Mago reports it,
+  P2R-11, other than one the parent of P2R-350 declares).
 - **P2R-136** These MUST stop the conversion: `===`, `!==`, `==`, `!=`, `<`,
   `>`, `<=`, `>=` and `<=>` with an object operand, also of a nullable class
   type (P2R-204), because Rust has no object identity and PHP compares
@@ -1286,7 +1295,8 @@ file. Converting several files together is a later slice.
   (P2R-24, P2R-25, P2R-102, P2R-144), and the call has the Rust type of the
   declared return type (P2R-134). `self` and `static` name the class or
   enum whose body holds the call; `static` names the same class as `self`,
-  because no class of the file can extend another (P2R-130), and both are
+  because no class of the file can extend another class of the file
+  (P2R-130, P2R-350), and both are
   read whatever their letter case (`SELF::`). In the body of an enum,
   `self::Case` and `static::Case` convert as `E::Case` (P2R-112), also as
   a `match` condition (P2R-120), and `self::from()`, `self::tryFrom()` and
@@ -2146,7 +2156,8 @@ interfaces and inheritance are later slices.
   method of `ArrayAccess`: PHP checks the attribute when it compiles the
   class, and the Rust output has nothing left to check. Every other
   attribute stops the conversion (P2R-07), `#[Override]` on any other
-  method included, because no inheritance converts yet and PHP rejects an
+  method included, because no method that overrides a parent's converts
+  (P2R-350 stops one with a name of `Data`'s) and PHP rejects an
   `#[Override]` on a method that overrides nothing.
 - **P2R-222** `is_scalar($v)` MUST convert to `true` when `$v` has PHP type
   int, float, bool or string (Rust `i64`, `f64`, `bool`, `String` or
@@ -3252,7 +3263,8 @@ later sections.
   P2R-60 lists as a difference. An attribute stops by P2R-07 whether or
   not an included file declares its class, on a function, a parameter or
   an arrow function as on a class or a member, other than the one of
-  P2R-341. The option works for a file input and for a directory input.
+  P2R-341 and those of P2R-351. The option works for a file input and
+  for a directory input.
   An include path that does not exist, that is neither a file nor a
   directory (a named pipe), or below which a directory cannot be listed
   exits 2 with its reason (P2R-04).
@@ -3264,7 +3276,7 @@ later sections.
   hide the argument's value in a stack trace, and the Rust output prints
   no stack trace. `StringManipulation::nameFix` carries it, so that
   package converts in full only with this rule. Every other attribute on
-  a parameter stops (P2R-07).
+  a parameter stops (P2R-07), other than those of P2R-351.
 
 ## 36. Spatie Data classes as plain structs (milestone 2, slice 26)
 
@@ -3274,40 +3286,59 @@ of the 375 files of the `finance-accounting-api` app on 15 Oct 2026,
 each a constructor of promoted properties, most with attributes such as
 `#[MapInputName('data.name')]` or `#[Max(255)]` on the parameters. In
 the installed version 4.18.0, `Data` is an abstract class with no
-constructor, no `__get`, `__set`, `__call` or `__isset`, two protected
-properties of its own (`$_additional` and `$_dataContext`) and the
-interfaces `Responsable` and nine of the package's own. Its methods
-(`from()`, `toArray()`, `validate()` and the rest), and Laravel when it
-builds such a class from a request, are the only code that reads the
-attributes or those two properties. This section converts such a class
-as a plain struct and leaves every use of the parent to a later
-section.
+constructor, no `__get`, `__set`, `__call` or `__isset` (its one magic
+method is `__sleep`), two protected properties of its own
+(`$_additional` and `$_dataContext`) and the interfaces `Responsable`
+and nine of the package's own, which bring `JsonSerializable`,
+`Arrayable`, `Jsonable` and `Castable` with them. Its methods (`from()`,
+`toArray()`, `validate()` and the rest), and Laravel when it builds
+such a class from a request, are the only code that reads the
+attributes or those two properties; the engine reads the properties
+too for `var_dump`, `(array)`, `==`, `clone` and `serialize`, which
+all stop in the converted code (P2R-48, P2R-136). This section converts
+such a class as a plain struct and leaves every use of the parent to a
+later section.
 
-- **P2R-350** A class whose `extends` names a class that PHP resolves to
-  `\Spatie\LaravelData\Data` MUST convert as a class without `extends`
-  by the rules of sections 14 to 16: nothing of the parent enters the
-  Rust output. Only that direct parent qualifies; a class that extends
-  such a class, or extends anything else, still stops (P2R-130).
-  Everything the parent brings stops: a call of a method that the class
-  does not declare itself (`$dto->toArray()` by P2R-135, `Dto::from()`
-  by P2R-153), a type that names `Data` or one of its interfaces
-  (P2R-22), an `instanceof` of them (P2R-333), and the class's object
-  where a value of such a type is due. A property or promoted parameter
-  named `_additional` or `_dataContext` stops, because the parent
-  declares one of that name.
-  Without `--include` of the package, Mago does not know the parent and
-  reports the class, so the conversion stops (P2R-340).
+- **P2R-350** A class whose `extends` names one class, which PHP
+  resolves in any letter case to `\Spatie\LaravelData\Data`, MUST
+  convert as the same class without `extends` converts: nothing of the
+  parent enters the Rust output. A list of parents stops, because PHP
+  rejects it and Mago's parser accepts it. Only that direct parent
+  qualifies; a class that extends such a class, or extends anything
+  else, still stops (P2R-130), and so does a `readonly` one, which PHP
+  rejects because `Data` is not readonly. Everything the parent brings
+  stops: a call of a method that the class does not declare itself
+  (`$dto->toArray()` by P2R-135, `Dto::from()` by P2R-153), a read of
+  the parent's properties (`$this->_additional`, P2R-134), a type that
+  names `Data` or one of its interfaces (P2R-22), an `instanceof` of
+  them (P2R-333), and the class's object where a value of such a type
+  is due. These stop too: a property or promoted parameter named
+  `_additional` or `_dataContext`, because the parent declares one of
+  that name; a method whose name, in any letter case, is a method of
+  `Data` in Mago's codebase, because PHP checks an override against the
+  parent and Mago does not catch every form; and such a class after a
+  statement outside functions, because PHP declares it before any
+  statement runs only when `Data` is loaded before the file compiles,
+  which Composer's autoloader does not do. Without `--include` of the
+  package, Mago does not know the parent and reports the class, so the
+  conversion stops (P2R-340).
 - **P2R-351** On a class of P2R-350, an attribute whose class PHP
-  resolves to a name in the namespace `\Spatie\LaravelData\Attributes`
-  or below it (`MapInputName`, `MapOutputName`, `Validation\Max`,
-  `Validation\Required`, `Validation\Unique` and the others), on the
-  class or on a promoted parameter of its constructor, MUST be left out
-  with its arguments: PHP builds an attribute and evaluates its arguments
-  only when reflection asks for them (`ReflectionAttribute::newInstance()`),
-  and only the parent's methods and Laravel's resolving of the class do
-  that, which never run in the converted code. Every other attribute
-  there stops (P2R-07), and an attribute group (`#[A, B]`) that holds
-  any other attribute stops as a whole.
+  resolves, in any letter case, to a name that starts with
+  `\Spatie\LaravelData\Attributes\` (`MapInputName`, `MapOutputName`,
+  `Validation\Max`, `Validation\Required`, `Validation\Unique` and the
+  others), on the class or on a promoted parameter of its constructor,
+  MUST be left out with its arguments: PHP builds an attribute and
+  evaluates its arguments only when reflection reads them
+  (`ReflectionAttribute::getArguments()` or `newInstance()`), and only
+  the parent's methods and Laravel's resolving of the class do that,
+  which never run in the converted code. Each argument of such an
+  attribute must be a string or int literal or `Name::class`, with
+  named arguments after the positional ones and each name once: PHP
+  compiles the arguments as constant expressions and rejects other
+  forms, such as a call or `static::class`, when it compiles the file,
+  and Mago does not report them all. Every other attribute there, and
+  one with another argument, stops (P2R-07), and an attribute group
+  (`#[A, B]`) that holds such an attribute stops as a whole.
 
 ## Spec checklist
 

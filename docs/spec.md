@@ -3316,7 +3316,12 @@ later section.
   `_additional` or `_dataContext`, because the parent declares one of
   that name; a method whose name, in any letter case, is a method of
   `Data` in Mago's codebase, because PHP checks an override against the
-  parent and Mago does not catch every form; and such a class after a
+  parent and Mago does not catch every form (the names of its `@method`
+  tags count too, which stops some methods PHP accepts, such as a static
+  `rules()`); a class whose parent, as Mago knows it, names a trait or
+  interface that no included file declares (an `--include` of
+  `Data.php` alone), because then the methods of `Data` are not all
+  known; and such a class after a
   statement outside functions, because PHP declares it before any
   statement runs only when `Data` is loaded before the file compiles,
   which Composer's autoloader does not do. Without `--include` of the

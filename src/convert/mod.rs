@@ -228,13 +228,16 @@ fn analyse(
         };
         // The declaration Mago names in a duplicate depends on how the path is written, so
         // the tool reports duplicates itself (P2R-173).
+        // A finding whose span lies in an included file, such as a parent class, has no
+        // input line to print (P2R-340).
         problems.extend(
             result
                 .issues
                 .iter()
                 .filter(|issue| reported(issue))
                 .filter(|issue| !library || issue.code.as_deref() != Some("duplicate-definition"))
-                .filter_map(mago_problem),
+                .filter_map(mago_problem)
+                .filter(|problem| files.iter().any(|input| input.id == problem.file)),
         );
         analysed.push(Analysed {
             file: file.id,
@@ -669,9 +672,20 @@ impl<'c> Converter<'c> {
     }
 
     /// True for an unqualified name that no import maps, which PHP looks up in the global
-    /// namespace when the current namespace has no function of that name (P2R-151).
+    /// namespace when the current namespace has no function of that name (P2R-151), also
+    /// none of an included file (P2R-340).
     fn falls_back(&self, identifier: &Identifier<'_>) -> bool {
+        let key = self.identifier_key(identifier);
+        let namespaced = key.as_slice() != short_name(&key);
+        let included = namespaced
+            && self.codebase.get_function(&key).is_some_and(|function| {
+                !self
+                    .files
+                    .iter()
+                    .any(|analysed| analysed.file == function.span.file_id)
+            });
         matches!(identifier, Identifier::Local(_))
+            && !included
             && !self
                 .analysed(identifier)
                 .resolved

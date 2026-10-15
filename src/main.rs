@@ -159,14 +159,12 @@ fn convert_directory(
     }
 }
 
-/// Adds the path below `dir` of every regular `.php` file under it to `found`, without
-/// following symbolic links (P2R-170).
 /// The `.php` files under each `--include` path, in byte order of their paths, read for
 /// their symbols only; a file that cannot be read or is not UTF-8 is skipped. A path that
-/// does not exist is refused (P2R-340).
+/// does not exist, or is neither a file nor a directory, is refused (P2R-340).
 fn included_files(paths: &[PathBuf]) -> Result<Vec<convert::Included>, String> {
     let mut included = Vec::new();
-    for root in paths {
+    for (index, root) in paths.iter().enumerate() {
         let shown = root.display().to_string();
         let mut relative = Vec::new();
         if root.is_dir() {
@@ -174,6 +172,10 @@ fn included_files(paths: &[PathBuf]) -> Result<Vec<convert::Included>, String> {
                 .map_err(|err| format!("{shown}: cannot read the include path: {err}"))?;
         } else if root.is_file() {
             relative.push(PathBuf::new());
+        } else if root.exists() {
+            return Err(format!(
+                "{shown}: the include path is neither a file nor a directory"
+            ));
         } else {
             return Err(format!("{shown}: the include path does not exist"));
         }
@@ -183,19 +185,33 @@ fn included_files(paths: &[PathBuf]) -> Result<Vec<convert::Included>, String> {
                 .cmp(b.as_os_str().as_encoded_bytes())
         });
         for path in relative {
-            let Ok(source) = fs::read(root.join(&path)) else {
+            let file = if path.as_os_str().is_empty() {
+                root.clone()
+            } else {
+                root.join(&path)
+            };
+            let Ok(source) = fs::read(&file) else {
                 continue;
             };
             if std::str::from_utf8(&source).is_err() {
                 continue;
             }
-            let name = Path::new(&shown).join(&path).display().to_string();
+            // Mago knows the file by a name no input can have, the same on every machine:
+            // the option's position and the path below it.
+            let below = path
+                .components()
+                .map(|part| part.as_os_str().to_string_lossy())
+                .collect::<Vec<_>>()
+                .join("/");
+            let name = format!("\0include {index}/{below}");
             included.push(convert::Included { name, source });
         }
     }
     Ok(included)
 }
 
+/// Adds the path below `dir` of every regular `.php` file under it to `found`, without
+/// following symbolic links (P2R-170).
 fn php_files(root: &Path, dir: &Path, found: &mut Vec<PathBuf>) -> std::io::Result<()> {
     for entry in fs::read_dir(root.join(dir))? {
         let entry = entry?;

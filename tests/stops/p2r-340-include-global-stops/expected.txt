@@ -1,0 +1,1 @@
+input/show.php:9:12: calls to helper are not supported (P2R-48)

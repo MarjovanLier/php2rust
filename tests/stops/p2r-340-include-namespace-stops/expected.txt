@@ -1,0 +1,2 @@
+input.php:9:12: calls to strlen are not supported (P2R-48)
+input.php:14:12: this expression is not supported in version 1 (P2R-07)

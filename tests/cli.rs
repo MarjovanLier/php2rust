@@ -222,3 +222,77 @@ fn failing_rustfmt_exits_2_with_a_fixed_message() {
     }
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// An input that names the class `Lib\Money`, and the file that declares it (P2R-340).
+fn money(dir: &std::path::Path, library: &std::path::Path) {
+    std::fs::write(
+        dir.join("in.php"),
+        "<?php\n\ndeclare(strict_types=1);\n\nfunction one(\\Lib\\Money $m): int\n{\n    return 1;\n}\n",
+    )
+    .unwrap();
+    std::fs::create_dir_all(library.parent().unwrap()).unwrap();
+    std::fs::write(
+        library,
+        "<?php\n\nnamespace Lib;\n\nfinal class Money\n{\n}\n",
+    )
+    .unwrap();
+}
+
+fn stderr_of(dir: &std::path::Path, args: &[&str]) -> String {
+    let out = Command::new(env!("CARGO_BIN_EXE_php2rust"))
+        .args(args)
+        .current_dir(dir)
+        .output()
+        .unwrap();
+    String::from_utf8_lossy(&out.stderr).into_owned()
+}
+
+/// P2R-340: an include path may name one file, whatever its place.
+#[test]
+fn an_include_path_may_be_a_file() {
+    let dir = scratch("include-file");
+    money(&dir, &dir.join("lib/money.php"));
+    let known = "in.php:5:14: the type Lib\\Money has no Rust type (P2R-22)\n";
+    assert_eq!(
+        stderr_of(&dir, &["in.php", "--include", "lib/money.php"]),
+        known
+    );
+    assert!(stderr_of(&dir, &["in.php"]).contains("unknown-ref(Lib\\Money)"));
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// P2R-340: an input file under an include path is read as input only.
+#[test]
+fn an_input_under_an_include_path_stays_input() {
+    let dir = scratch("include-input");
+    std::fs::write(
+        dir.join("in.php"),
+        "<?php\n\ndeclare(strict_types=1);\n\necho \"x\\n\";\n",
+    )
+    .unwrap();
+    let run = |args: &[&str]| {
+        Command::new(env!("CARGO_BIN_EXE_php2rust"))
+            .args(args)
+            .current_dir(&dir)
+            .output()
+            .unwrap()
+    };
+    let alone = run(&["in.php"]);
+    let included = run(&["in.php", "--include", "."]);
+    assert_eq!(alone.status.code(), Some(0));
+    assert_eq!(included.status.code(), Some(0));
+    assert_eq!(alone.stdout, included.stdout);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// P2R-340: the walk follows no symbolic link below an include path.
+#[cfg(unix)]
+#[test]
+fn an_include_walk_follows_no_symbolic_link() {
+    let dir = scratch("include-link");
+    money(&dir, &dir.join("elsewhere/money.php"));
+    std::fs::create_dir_all(dir.join("inc")).unwrap();
+    std::os::unix::fs::symlink(dir.join("elsewhere"), dir.join("inc/linked")).unwrap();
+    assert!(stderr_of(&dir, &["in.php", "--include", "inc"]).contains("unknown-ref(Lib\\Money)"));
+    let _ = std::fs::remove_dir_all(&dir);
+}

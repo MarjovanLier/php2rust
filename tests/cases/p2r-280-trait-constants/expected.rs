@@ -7,6 +7,7 @@ impl Cleaner {
     pub const GREEK: &[(&str, &str)] = &[("α", "a"), ("β", "b"), ("αβ", "ab!")];
     pub const NAME: &str = "greek";
     pub const MARKS: &[(&str, &str)] = &[(".", ""), (",", " "), ("\\", "/")];
+    pub const SWAP: &[(&str, &str)] = &[("a", "b"), ("b", "a")];
     pub const LIMIT: i64 = 3;
     pub const VERSION: &str = "v1";
 
@@ -22,6 +23,10 @@ impl Cleaner {
         return php_strtr(text, Cleaner::MARKS);
     }
 
+    pub fn swap(text: &str) -> String {
+        return php_strtr(text, Cleaner::SWAP);
+    }
+
     pub fn label() -> String {
         return format!("{} {} {}", Cleaner::NAME, Cleaner::VERSION, Cleaner::LIMIT);
     }
@@ -34,6 +39,7 @@ pub enum Level {
 
 impl Level {
     pub const MARKS: &[(&str, &str)] = &[(".", ""), (",", " "), ("\\", "/")];
+    pub const SWAP: &[(&str, &str)] = &[("a", "b"), ("b", "a")];
     pub const LIMIT: i64 = 3;
 
     pub fn value(self) -> &'static str {
@@ -82,6 +88,8 @@ fn main() {
     print!("{}", Cleaner::greek("xα"));
     print!("]\n");
     print!("{}", Cleaner::label());
+    print!(" ");
+    print!("{}", Cleaner::swap("abba"));
     print!("\n");
     print!("{}", Level::tidy("x.y,z"));
     print!(" ");

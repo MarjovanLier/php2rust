@@ -14,6 +14,9 @@ trait Marks
 {
     private const array MARKS = ['.' => '', ',' => ' ', '\\' => '/'];
 
+    // A value that is also a key is not read again.
+    private const array SWAP = ['a' => 'b', 'b' => 'a'];
+
     final public const int LIMIT = 3;
 }
 
@@ -31,6 +34,11 @@ final class Cleaner
     public static function marks(string $text): string
     {
         return strtr($text, static::MARKS);
+    }
+
+    public static function swap(string $text): string
+    {
+        return strtr($text, self::SWAP);
     }
 
     public static function label(): string
@@ -54,5 +62,5 @@ enum Level: string
 echo Cleaner::greek("\u{03b1}\u{03b2}\u{03b3} \u{03b2}\u{03b1}"), "\n";
 echo Cleaner::marks('a.b,c\\d'), "\n";
 echo '[', Cleaner::greek(''), '] [', Cleaner::marks(',.,'), '] [', Cleaner::greek("x\u{03b1}"), "]\n";
-echo Cleaner::label(), "\n";
+echo Cleaner::label(), ' ', Cleaner::swap('abba'), "\n";
 echo Level::tidy('x.y,z'), ' ', Level::Low->value, ' ', Level::LIMIT, "\n";

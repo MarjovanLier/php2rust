@@ -3381,34 +3381,39 @@ needs the check to narrow the type, waits for a later section.
   the members, where `PhpOptional` is the generic enum
   `pub enum PhpOptional<T> { Absent, Present(T) }` with
   `#[derive(Clone, Debug, PartialEq, Eq)]`, written once at the crate
-  root after the shapes and unions when an item names it, with the `use`
-  line of every module that names it (P2R-174). A parameter of that type
-  is borrowed as `&PhpOptional<T>` and its value cloned where it is
-  stored, as a union is (P2R-232). A read of a variable, parameter or
-  property of that type keeps that type also where Mago narrows it
+  root after the shapes, the unions and the `DateTime` struct when an
+  item names it, with the `use` line of every module that names it
+  (P2R-174). A parameter of that type is borrowed as `&PhpOptional<T>`,
+  its value cloned where it is stored, as a union is (P2R-232), and it
+  cannot be assigned, as an object parameter cannot (P2R-132). A read of
+  a property of that type keeps that type also where Mago narrows it
   (after `instanceof Optional`, a check against `null` or a write), as
-  P2R-104 and P2R-232 say for an `Option` and a union. This holds only
-  when an included file declares `Optional` with the shape of 4.18.0:
-  no parent, interface, trait, property or constant, and none of the
-  methods PHP calls by itself (P2R-350); an `Optional` that the input
+  P2R-104 and P2R-232 say for an `Option` and a union; a read of a
+  variable or parameter that Mago narrows stops, because its type
+  changes (P2R-34), as P2R-361 says for a write. This holds only
+  when an included file declares `Optional` with the shape of 4.18.0: a
+  class that is not abstract, with no parent, interface, trait, property
+  or constant, none of the methods PHP calls by itself (P2R-350), and a
+  public static `create()` without parameters; an `Optional` that the input
   declares is a class of the input (P2R-230), and one of another shape,
   or no included `Optional`, gives the union no Rust type (P2R-22). These
   stop too: `Optional` alone, also with `null` (`Optional|null`,
   `?Optional`); with members of more than one Rust type; with `true` or
   `false` as `T`, which P2R-21 would widen to a `bool` PHP's type does
-  not take whole; with `T` a `DateTime`, which P2R-330 makes `None`
-  mean `false`, also with `false` or `null`; with `T` a class that
-  changes its objects or holds one (P2R-141), which is never cloned;
-  as a list or map element or a shape field; and a class that holds
-  itself through `PhpOptional`, as through `?C` (P2R-130). A class or
+  not take whole; with `T` a `DateTime` together with `false` or
+  `null`, because P2R-330 makes `None` mean `false`; with `T` a class
+  that changes its objects or holds one (P2R-141), which is never
+  cloned; as a list or map element or a shape field; and a class that holds itself through
+  `PhpOptional`, as through `?C` (P2R-130). A class or
   enum whose Rust name is `PhpOptional` stops (P2R-111, P2R-131),
   because the helper takes that name.
 - **P2R-361** Where a value of type `PhpOptional<T>` is due (an argument,
-  a return value, a property write, or a variable whose type Mago gives
-  as such a union), `new Optional`, `new Optional()` and
+  a return value or a property write), `new Optional`, `new Optional()` and
   `Optional::create()`, with a name that PHP resolves, in any letter
   case, to `\Spatie\LaravelData\Optional` and without arguments, MUST
-  convert to `PhpOptional::Absent`; a value that goes where `T` is
+  convert to `PhpOptional::Absent`, the call to `create()` only where
+  Mago types it as `Optional` alone, as the declared return type of
+  4.18.0 gives; a value that goes where `T` is
   declared to `PhpOptional::Present(v)`, converted as for a place of type
   `T` (P2R-25, P2R-26, P2R-102: an int is a float for `float|Optional`, a
   `?T` value goes into `Present` of `T|Optional|null` as it is); `null`
@@ -3417,7 +3422,12 @@ needs the check to narrow the type, waits for a later section.
   `&PhpOptional<T>` parameter is lent: `&PhpOptional::Absent`,
   `&PhpOptional::Present(v)` with `v` owned, `&v` for a variable, and a
   parameter as it is. Each arm of a `match` in such a place converts as
-  such a value (P2R-121). These stop: `new Optional` or
+  such a value (P2R-121). A variable keeps one Rust type (P2R-34), and
+  Mago gives it the type of each value written, so a variable of type
+  `PhpOptional<T>` takes only a value of that type: a later write of
+  `new Optional`, a `T` value or `null` stops, as does a first write of
+  a `match` whose arms give `Optional::create()` and a `T` value
+  (P2R-122). These stop: `new Optional` or
   `Optional::create()` anywhere else, because its PHP type is `Optional`
   alone; `new Optional(...)` with an argument, which PHP runs; a value of
   another `PhpOptional` type; and the arms of `?:` (P2R-180) and the
@@ -3447,6 +3457,8 @@ needs the check to narrow the type, waits for a later section.
   coverage, P2R-176 calls between files checked by rustc only, and in
   P2R-340 the dropped Mago findings in an included file, which no known
   input reaches, and which of two included declarations of one name
-  wins, which no output shows) are the only parts not checked
-  mechanically.
+  wins, which no output shows, and in P2R-361 that the included
+  `create()` returns a new `Optional` and does nothing else, as 4.18.0's
+  does, which Mago's metadata does not show) are the only parts not
+  checked mechanically.
 - [x] No speculative features: later milestones carry no requirements yet.

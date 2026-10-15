@@ -287,6 +287,10 @@ fn case(dir: &Path, scratch: &Path) -> Result<(), String> {
         return Ok(());
     }
     let mut flags = php_flags();
+    // A package's classes that PHP needs and the tool reads by --include only (P2R-73).
+    if dir.join("prepend.php").is_file() {
+        flags.extend(["-d", "auto_prepend_file=prepend.php"]);
+    }
     flags.push("input.php");
     let php = run("php", &flags, dir);
     // An uncaught exception exits 255 with only its fatal message on stderr, which names

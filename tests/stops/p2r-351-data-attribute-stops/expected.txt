@@ -1,0 +1,3 @@
+input.php:23:9: attributes are not supported (P2R-07)
+input.php:28:1: attributes are not supported (P2R-07)
+input.php:37:9: attributes are not supported (P2R-07)

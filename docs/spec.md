@@ -442,11 +442,13 @@ requirement IDs.
     empty string when the string is empty.
   - `explode()` with an empty separator that is not a literal: PHP throws a
     `ValueError`, Rust panics (exit code 101).
-  - `str_replace()` of P2R-310 with a string search and a union
-    replacement that holds a list or map at run time: PHP throws a
-    `TypeError`, Rust panics (exit code 101).
-  - `strtr()` of P2R-311 with a key that is empty at run time: PHP warns
-    and ignores the key, Rust ignores it without the warning.
+  - `str_replace()` of P2R-310 where the search is a string at run time
+    (a string, or a union that holds one) and the replacement is a list or
+    map at run time (a list, a map, a list literal, or a union that holds
+    one): PHP throws a `TypeError`, Rust panics (exit code 101).
+  - `strtr()` of P2R-311 with a key that is empty at run time and a text
+    that is not empty: PHP warns and ignores the key, Rust ignores it
+    without the warning.
   - `trim()`, `ltrim()` or `rtrim()` with a second argument whose value
     the tool does not know (P2R-291): where it holds a `..` that starts no range, PHP
     warns and Rust does not, and both remove the same bytes; where its mask
@@ -2669,7 +2671,8 @@ forms unblock `searchWords`, `utf8Ansi` and `removeAccents`.
   constant's Rust path, giving an owned `String`. The output then holds
   `fn php_strtr(text: &str, pairs: &[(&str, &str)]) -> String`, which
   walks the text from the start: where one or more keys match, it appends
-  the value of the longest of them and moves past that key; where none
+  the value of the longest of them, the last in the slice when several
+  are equally long, and moves past that key; where none
   matches, it appends the next character and moves past it. Because every
   key is valid UTF-8 (P2R-49 stops a string literal that is not) and
   `text` is a `&str`, stepping by characters gives PHP's byte result.
@@ -2894,14 +2897,21 @@ array replacement.
   a value of a union of P2R-230 whose members are a string and one list
   or map of strings gives a `match` with one arm per member and
   `matches!(v, U::String(_))`. A union argument is read twice, so it must
-  be a variable, a parameter or a chain of property reads on one of them
-  (P2R-186), and this is an exception to P2R-232. Three strings still
-  convert by P2R-185. These stop the conversion: a string search with a
-  list, map or list literal replacement, which PHP always rejects with a
+  be a literal, a constant, a variable, a parameter or a chain of property
+  reads on one of them or on `$this` (P2R-186), and this is an exception
+  to P2R-232. Three strings still convert by P2R-185. The helper panics,
+  before it looks at the subject, where the search is a string at run
+  time (a string, or a union that holds one) and the replacement is a
+  list or map at run time (a list, a map, a list literal, or a union that
+  holds one): PHP throws a `TypeError` there, also for an empty subject
+  (P2R-60). These stop the conversion: a string search with a list, map
+  or list literal replacement, which PHP always rejects with that
   `TypeError`; a subject that is not a string; an element that is not a
-  string or a spread in a list literal; a union with other members; and a
-  fourth argument. A string search with a union replacement that holds a
-  list or map at run time panics where PHP throws a `TypeError` (P2R-60).
+  string or a spread in a list literal; an array literal with keys, which
+  P2R-202 stops (passing its values in order would differ where two keys
+  are equal at run time); a union with other members; and a fourth
+  argument. P2R-188 places `php_str_replace` after
+  `php_preg_replace_callback`, and P2R-31 covers its name.
 - **P2R-311** `strtr($s, [k1 => v1, ..])`, with an array literal whose
   every element has a key and a value of type string, MUST convert to
   `php_strtr(s, &[(k1, v1), ..])` with each key and value lent as a
@@ -2910,9 +2920,8 @@ array replacement.
   equal longest keys. These stop the conversion: an element without a
   key, a key of type int (a literal or not), a key or value of another
   type, a literal empty key (for P2R-281's reason), and a spread. A key
-  that is empty at run time: PHP warns and ignores it, Rust ignores it
-  without the warning (P2R-60). P2R-188 places `php_str_replace` after
-  `php_preg_replace_callback`, and P2R-31 covers its name.
+  that is empty at run time, with a text that is not empty: PHP warns and
+  ignores it, Rust ignores it without the warning (P2R-60).
 
 ## Spec checklist
 

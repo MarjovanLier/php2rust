@@ -2900,10 +2900,10 @@ array replacement.
   one list or map of strings gives `&match &v { U::String(text) =>
   vec![text.as_str()], U::List(list) => list.iter().map(String::as_str)
   .collect() }`, with `U::Map(map) => map.values()` in the second arm for
-  a map, and `matches!(&v, U::String(_))`. A union argument is read twice, so it must
-  be a literal, a constant, a variable, a parameter or a chain of property
-  reads on one of them or on `$this` (P2R-186), and this is an exception
-  to P2R-232. Three strings still convert by P2R-185. The helper panics,
+  a map, and `matches!(&v, U::String(_))`. A union argument is read
+  twice, so it must be a literal, a constant, a variable, a parameter or
+  a chain of property reads on one of them or on `$this` (P2R-186), and
+  this is an exception to P2R-232. Three strings still convert by P2R-185. The helper panics,
   before it looks at the subject, where the search is a string at run
   time (a string, or a union that holds one) and the replacement is a
   list or map at run time (a list, a map, a list literal, or a union that
@@ -2913,8 +2913,9 @@ array replacement.
   `TypeError`; a subject that is not a string; an element that is not a
   string or a spread in a list literal; an array literal with keys, which
   P2R-202 stops, or this rule where P2R-202 reads it as a shape (passing
-  its values in order would differ where two keys are equal at run time); a legacy `array(..)` literal, which P2R-07
-  stops; a union with other members; a union argument of any other form;
+  its values in order would differ where two keys are equal at run
+  time); a legacy `array(..)` literal, which P2R-07 stops; a union with
+  other members; a union argument of any other form;
   and a fourth argument. P2R-188 places `php_str_replace` after
   `php_preg_replace_callback`, and P2R-31 covers its name.
 - **P2R-311** `strtr($s, [k1 => v1, ..])`, with an array literal whose

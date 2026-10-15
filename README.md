@@ -269,8 +269,8 @@ the others are findings of the Mago analyser. In short:
   `7F`, a `str_repeat()` count that may be negative, a `str_replace()` with a string
   search and an array replacement (PHP throws a `TypeError`), a subject that is not a
   string, a list of other elements or with a spread, an array literal with keys, or a
-  union with other members or of another form than a variable, a parameter or a
-  property read on one of them,
+  union with other members or of another form than a literal, constant, variable,
+  parameter or property read on one of them or on `$this`,
   `implode()` with one argument or
   with a glue other than a literal, constant, variable, parameter or property read on
   one of them, `explode()` with a limit or an empty separator, and any

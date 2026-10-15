@@ -627,7 +627,7 @@ impl Converter<'_> {
         if !no_effect(&expr) {
             self.refuse(
                 value,
-                "a union in str_replace() must be a variable, a parameter or a chain of property reads on one of them, because the conversion reads it twice (P2R-310)",
+                "a union in str_replace() must be a variable, a parameter or a chain of property reads on one of them or on $this, because the conversion reads it twice (P2R-310)",
             );
             return None;
         }

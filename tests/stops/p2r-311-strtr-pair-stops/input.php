@@ -13,5 +13,6 @@ function forms(string $s, int $n, array $xs): string
     $d = strtr($s, ['a' => $n]);
     $e = strtr($s, ['' => 'x', 'a' => 'b']);
     $f = strtr($s, ['a' => 'b', ...$xs]);
-    return $a . $b . $c . $d . $e . $f;
+    $g = strtr($s, array('a' => 'b'));
+    return $a . $b . $c . $d . $e . $f . $g;
 }

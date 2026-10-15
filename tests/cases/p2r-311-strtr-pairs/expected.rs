@@ -45,4 +45,6 @@ fn main() {
     print!("\n");
     print!("{}", php_strtr("héllo", &[("é", "e"), ("l", "L")]));
     print!("\n");
+    print!("{}", php_strtr("same", &[]));
+    print!("\n");
 }

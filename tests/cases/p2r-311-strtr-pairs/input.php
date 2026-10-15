@@ -22,3 +22,4 @@ echo swap('a1b2', '1', '2'), "\n";
 echo longest('abcabxab'), "\n";
 echo repeated('xyz', 'y'), "\n";
 echo strtr('héllo', ['é' => 'e', 'l' => 'L']), "\n";
+echo strtr('same', []), "\n";

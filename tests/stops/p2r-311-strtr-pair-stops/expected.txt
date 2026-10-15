@@ -4,3 +4,4 @@ input.php:12:20: Invalid argument type for argument #2 of `strtr`: expected `arr
 input.php:13:20: Possible argument type mismatch for argument #2 of `strtr`: expected `array<string, string>|string`, but possibly received `array{'a': int}`. (possibly-invalid-argument)
 input.php:14:21: an empty key in strtr() is not supported, because PHP ignores it with a warning (P2R-311)
 input.php:15:33: an array literal in strtr() converts only with a string key and a string value on every element (P2R-311)
+input.php:16:20: strtr() converts only with a string map constant as its second argument (P2R-282)

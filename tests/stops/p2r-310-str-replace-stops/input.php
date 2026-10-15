@@ -35,5 +35,6 @@ function forms(string $s, array $xs, array $ns, int|array $odd, bool $flag): str
     $h = str_replace(either($flag), 'b', $s);
     $i = str_replace($xs, 'b', $s, $count);
     $j = str_replace([$s => 'a', 'k' => 'b'], ['1', '2'], $s);
-    return $a . $b . $d . $e . $f . $g . $h . $i . count($c) . $count . $j;
+    $k = str_replace(array('a'), 'b', $s);
+    return $a . $b . $d . $e . $f . $g . $h . $i . count($c) . $count . $j . $k;
 }

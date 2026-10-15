@@ -94,6 +94,9 @@ placement. The build added `$m = []` on a variable, Mago's shape types
 of a map variable after writes by literal keys, and the stop for map
 property writes; the two final reviewers added the stop for a map of
 other values and the stop for a module named `indexmap` at any depth.
+Section 26 (unions as map values, type tests and their narrowing) was
+written on 15 Oct 2026; it changes P2R-07, P2R-230, P2R-240 and the
+roadmap of section 10.
 
 php2rust converts typed PHP source into normal, readable Rust (`Vec`,
 `String`, `i64`), without AI. It reads PHP with the Mago crates, uses Mago's
@@ -137,7 +140,7 @@ requirement IDs.
   the same stdout bytes, the same output file bytes and the same stderr
   bytes.
 - **P2R-07** Only the constructs that sections 3 to 5, 11 to 19 and 21 to
-  25 list as converting may convert. Any other construct MUST stop the conversion,
+  26 list as converting may convert. Any other construct MUST stop the conversion,
   which means it is reported as a problem under P2R-03. Examples that stop
   in version 1 (section 16 converts `namespace`, `use` and class
   constants, and section 17 two casts):
@@ -506,8 +509,9 @@ Each milestone gets its own requirements in this file when its work starts.
   (section 21); exceptions as `Result` (section 22); `ArrayAccess` classes
   as plain methods (section 23, not Rust's `Index`, which cannot throw);
   declared unions as generated enums and `?->` (section 24); maps on
-  `indexmap` (section 25); narrowing a union value with `is_string()` and
-  its kin, and unions as list and map values; `preg_*`; interfaces and
+  `indexmap` (section 25); unions as map values, narrowing a union value
+  with `is_string()` and its kin (section 26), and unions as list values
+  and maps as union members; `preg_*`; interfaces and
   inheritance; closures; then the
   `StringManipulation` library, which `SouthAfricanIDValidator` calls.
   `SouthAfricanIDValidator` calls `StringManipulation::isValidDate`, which
@@ -2043,7 +2047,8 @@ inside a list or a shape field waits for a later slice.
   the input, whichever the tool meets first (P2R-131, P2R-200); a class that holds itself through
   a union enum other than through a list (P2R-130), because rustc rejects
   a type of infinite size; a union type as a list element type, a shape
-  field type or the member of another union (a later slice); a declared
+  field type or the member of another union (a later slice; the value
+  type of a declared map converts by P2R-250); a declared
   type whose written PHP type holds `float` and not `int` while its Mago
   type holds `int` (`@param int|string` on `float|string`), because PHP
   stores the int as a float; the stops of P2R-25; and a written type that
@@ -2186,8 +2191,8 @@ application's `array<string, mixed>` values keep P2R-22.
   conversion: a key type other than those; a value type with no Rust type
   (P2R-22, `array<string, mixed>` included); a value type that is or holds
   a class that changes its objects (P2R-141), because such a class derives
-  no `Clone`; a union value type, and a map as a union member (a later
-  slice); a value of a list or shape type where a map type is needed, a
+  no `Clone`; a union value type outside a declared type (P2R-250), and a
+  map as a union member (a later slice); a value of a list or shape type where a map type is needed, a
   map where a list or shape is needed, and a map where a map of another
   key or value type is needed (`array<string, int>` where
   `array<string, ?int>` or `array<string, float>` is declared, at any
@@ -2272,6 +2277,65 @@ application's `array<string, mixed>` values keep P2R-22.
   P2R-72 and P2R-176 hold for output that names `IndexMap`. The README MUST say that such output needs the dependency
   `indexmap = "2"` in the `Cargo.toml` that builds it; the tool writes no
   `Cargo.toml`.
+
+## 26. Unions as map values and narrowing by type tests (milestone 2, slice 16)
+
+Real code takes a map of mixed scalar values and keeps the ones of one
+type: the validator's `batchValidate(array $idNumbers)` declares
+`array<int|string, scalar>` and skips each value for which
+`!\is_string($idNumber)` holds. This section converts a union as the value
+type of a declared map, the four scalar type tests on a union value, and
+the narrowing those tests give, in the forms P2R-104 gives a check against
+`null`. In the validator it moves the `batchValidate` line; its `toArray`
+puts a shape where a union's map member is needed, and a map as a member
+of a union still stops, because a shape converts to a map only in PHP's
+key order, which Mago does not keep (P2R-200).
+
+- **P2R-250** A declared type (P2R-230) that is a map (P2R-240) whose value
+  type has two or more members, other than `null`, of different Rust types
+  MUST map to `IndexMap<K, U>`, or `IndexMap<K, Option<U>>` with a `null`
+  member, where `U` is the union enum that P2R-230 builds for the value type,
+  `scalar` and `array-key` included (`array<int|string, scalar>` gives
+  `IndexMap<String, BoolOrFloatOrIntOrString>`). A map type that Mago infers
+  inside a body keeps P2R-22, as P2R-230 keeps an inferred union. A value
+  goes into such a map, by a literal of P2R-241 or by `$m[k] = v;`, as into
+  a place of type `U` (P2R-231), and a read gives a value of type `U`
+  (P2R-232). The type Mago gives the variable or parameter that holds such
+  a map keeps the map type when each of its value types fits a member of
+  `U` (`array<string, int>` after `$m[$k] = 5`), as P2R-240 keeps a map
+  type. These stop the conversion: a union as a list element type or a
+  shape field type, and a map as a member of a union (P2R-230; a later
+  slice); a value of the union type that is not a member value (P2R-231).
+- **P2R-251** `is_int($v)`, `is_float($v)`, `is_bool($v)` and `is_string($v)`
+  (also written `\is_string`), with one positional argument whose Rust type
+  is a union enum `U` or `Option<U>`, MUST convert to
+  `matches!(v, U::Int(_))`, `U::Float(_)`, `U::Bool(_)` or `U::String(_)`,
+  wrapped in `Some(..)` for `Option<U>`, because PHP's test is false for
+  `null`. These stop the conversion: such a test whose union has no member
+  of that type, and such a test on a value of any other type (a later
+  slice).
+- **P2R-252** A test of P2R-251 on a variable or parameter `$v` MUST bind
+  the member value in the two forms P2R-104 gives `$v !== null` and
+  `if ($v === null)`, with their rules for the reads after it, for writes to
+  `$v` and for the step of a `for`:
+  - `is_T($v)` as the condition of an `if` or `elseif`, or as an operand of
+    the top-level `&&` chain of that condition, becomes
+    `let P = S` in an `if let` or `else if let`;
+  - `if (!is_T($v))` with no `elseif` or `else` and a body that always
+    leaves becomes `let P = S else { ... };`.
+
+  The pattern `P` is `U::V(v)`, or `Some(U::V(v))` for `Option<U>`, where
+  `V` is the variant of the member. The scrutinee `S` is `v` for an int,
+  float or bool member and `&v` for any other member when `$v` owns its
+  value, and `*v` for an int, float or bool member and `v` for any other
+  member when `$v` is a `&U` parameter; for a borrowed `Option<&U>`, the
+  pattern of an int, float or bool member is `Some(&U::V(v))` and `S` is
+  `v`. The binding has the member's Rust type, as a parameter of that type
+  has it (P2R-24, P2R-26) for a string, list or shape member, so a value of
+  the variable is never moved by the test. When nothing reads the binding,
+  or the body of `if (!is_T($v))` does not always leave, the test converts
+  by P2R-251 and nothing binds. A test in any other form (`!is_T($v) || ..`,
+  inside `?:`) converts by P2R-251 only.
 
 ## Spec checklist
 

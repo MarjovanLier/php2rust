@@ -9,15 +9,21 @@ final class Lists
     public const string WIDE = 'é';
 }
 
-function php_charmask(string $php_trim_chars): string
+function php_charmask(string $s): string
 {
-    $php_ltrim_chars = $php_trim_chars;
-    return $php_ltrim_chars;
+    return $s;
 }
 
 function php_rtrim_chars(string $s): string
 {
     return $s;
+}
+
+function locals(string $s): string
+{
+    $php_trim_chars = $s;
+    $php_ltrim_chars = $php_trim_chars;
+    return $php_ltrim_chars;
 }
 
 function run(string $s): void

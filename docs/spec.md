@@ -116,7 +116,9 @@ Oct 2026; it changes P2R-48, P2R-60, P2R-104, P2R-181, P2R-182, P2R-188
 and the roadmap of section 10. Section 31 (closures as callbacks of
 `array_map` and `preg_replace_callback`, and `ucwords`) was written on 15
 Oct 2026; it changes P2R-07, P2R-48, P2R-60, P2R-75, P2R-188 and the
-roadmap of section 10.
+roadmap of section 10. Section 32 (arrays in `str_replace` and `strtr`)
+was written on 15 Oct 2026; it changes P2R-07, P2R-48, P2R-60, P2R-185,
+P2R-188, P2R-232, P2R-282 and the roadmap of section 10.
 
 php2rust converts typed PHP source into normal, readable Rust (`Vec`,
 `String`, `i64`), without AI. It reads PHP with the Mago crates, uses Mago's
@@ -160,7 +162,7 @@ requirement IDs.
   the same stdout bytes, the same output file bytes and the same stderr
   bytes.
 - **P2R-07** Only the constructs that sections 3 to 5, 11 to 19 and 21 to
-  31 list as converting may convert. Any other construct MUST stop the conversion,
+  32 list as converting may convert. Any other construct MUST stop the conversion,
   which means it is reported as a problem under P2R-03. Examples that stop
   in version 1 (section 16 converts `namespace`, `use` and class
   constants, and section 17 two casts):
@@ -355,7 +357,7 @@ requirement IDs.
 - **P2R-48** These built-in functions MUST convert: `count()` on a list
   (length as `i64`), `strlen()` (byte length as `i64`), `intdiv()` (integer
   division towards zero) and `fdiv()` (IEEE float division), and the
-  functions of sections 17, 19, 23, 25, 26, 27, 29, 30 and 31. A call to any other function not
+  functions of sections 17, 19, 23, 25, 26, 27, 29, 30, 31 and 32. A call to any other function not
   declared in the file stops the conversion.
 - **P2R-49** Literals MUST convert by their PHP value and type, never by
   copying their text:
@@ -440,6 +442,11 @@ requirement IDs.
     empty string when the string is empty.
   - `explode()` with an empty separator that is not a literal: PHP throws a
     `ValueError`, Rust panics (exit code 101).
+  - `str_replace()` of P2R-310 with a string search and a union
+    replacement that holds a list or map at run time: PHP throws a
+    `TypeError`, Rust panics (exit code 101).
+  - `strtr()` of P2R-311 with a key that is empty at run time: PHP warns
+    and ignores the key, Rust ignores it without the warning.
   - `trim()`, `ltrim()` or `rtrim()` with a second argument whose value
     the tool does not know (P2R-291): where it holds a `..` that starts no range, PHP
     warns and Rust does not, and both remove the same bytes; where its mask
@@ -551,9 +558,10 @@ Each milestone gets its own requirements in this file when its work starts.
   constants and `strtr` (section 29); writes after a null check, `trim`
   with a character list and `checkdate` (section 30); closures as
   callbacks of `array_map` and `preg_replace_callback`, and `ucwords`
-  (section 31); then the rest of the `StringManipulation` library, which
-  `SouthAfricanIDValidator` calls (`str_replace` and `strtr` with arrays,
-  `date_parse`), with `DateTime` and patterns with `u` and look-around
+  (section 31); arrays in `str_replace` and `strtr` (section 32); then
+  the rest of the `StringManipulation` library, which
+  `SouthAfricanIDValidator` calls (`date_parse`), with `DateTime` and
+  patterns with `u` and look-around
   last;
   unions as list values; interfaces and inheritance; closures.
   `SouthAfricanIDValidator` calls `StringManipulation::isValidDate`, which
@@ -1626,8 +1634,8 @@ converts those forms.
   arguments MUST convert to `php_replace(search, replace, subject)`, in
   PHP's order, a helper that gives the subject unchanged for an empty
   search, as PHP does, where Rust's `replace` inserts the replacement
-  between every character. An array argument and a fourth argument stop
-  the conversion.
+  between every character. An array argument converts by P2R-310, and a
+  fourth argument stops the conversion.
 - **P2R-186** `implode($glue, $list)` with a `string` and a `list<string>`
   argument MUST convert to `list.join(glue)`, of type `String`. Rust
   evaluates the list first, so the glue must be a value whose reading has no
@@ -1656,7 +1664,7 @@ converts those forms.
   `php_preg_match` (P2R-261, P2R-262), `php_strtr` (P2R-282), `php_charmask`,
   `php_trim_chars`, `php_ltrim_chars`, `php_rtrim_chars` (P2R-291),
   `php_checkdate` (P2R-292), `php_ucwords` (P2R-303) and
-  `php_preg_replace_callback` (P2R-302), each written only when the
+  `php_preg_replace_callback` (P2R-302), `php_str_replace` (P2R-310), each written only when the
   output calls it, and P2R-31 covers their names. A case folder runs each of
   them on many values against PHP (P2R-72).
 
@@ -2157,7 +2165,7 @@ inside a list or a shape field waits for a later slice.
   convert by P2R-103 and P2R-104, whose binding has the type `&U`, and
   `$v ?? $w` with `$w` of type `U` converts by P2R-105. A union value
   converts into a place of its own union (P2R-231) and in the calls of
-  P2R-233 and P2R-251. Every other use stops the conversion: `echo`, interpolation and
+  P2R-233, P2R-251 and P2R-310. Every other use stops the conversion: `echo`, interpolation and
   joining, arithmetic, every comparison other than with the literal
   `null`, a condition, a cast other than `(string)`, the argument of a
   built-in function other than those of P2R-233 and P2R-251, `??` with a default of
@@ -2665,8 +2673,8 @@ forms unblock `searchWords`, `utf8Ansi` and `removeAccents`.
   matches, it appends the next character and moves past it. Because every
   key is valid UTF-8 (P2R-49 stops a string literal that is not) and
   `text` is a `&str`, stepping by characters gives PHP's byte result.
-  These stop the conversion: `strtr` with three arguments, with an array
-  literal or any array other than such a constant (a later slice), with a
+  An array literal converts by P2R-311. These stop the conversion:
+  `strtr` with three arguments, with any other array (a later slice), with a
   first argument that is not a string, and with a named or spread
   argument (P2R-169).
   A function, variable or parameter named `php_strtr` stops by P2R-31,
@@ -2858,6 +2866,53 @@ This section converts a closure only as such a callback.
   (P2R-169) stop the conversion. P2R-188 places
   `php_ucwords` and `php_preg_replace_callback` after `php_checkdate`, in
   this order, and P2R-31 covers their names.
+
+## 32. Arrays in str_replace and strtr (milestone 2, slice 22)
+
+`StringManipulation::strReplace` takes `array|string $search` and
+`array|string $replace`, which its docblock types `string|string[]`, a
+union of a string and a map of strings (P2R-230, P2R-270), and calls
+`str_replace($search, $replace, $subject)`, and for a one-byte search
+`strtr($subject, [$search => $replace])`. With arrays, PHP's `str_replace`
+replaces in order: for each search, where a later search sees what the
+earlier ones made, it puts in the replacement at the same position, `""`
+where the replacements run out, or the one string replacement for every
+search; it skips an empty search, whose replacement still counts, it
+ignores keys, and it throws a `TypeError` for a string search with an
+array replacement.
+
+- **P2R-310** `str_replace($search, $replace, $subject)` with a string
+  subject, where `$search` or `$replace` is not a string, MUST convert to
+  `php_str_replace(searches, search_is_text, replaces, replace_is_text,
+  subject)`, a helper with PHP's rule above on `&[&str]` slices. Each of
+  `$search` and `$replace` gives its slice and its flag: a string `s`
+  gives `&[s]` and `true`; a list literal without keys gives its
+  elements, each a string, as `&["a", s]` and `false`; a list
+  (`Vec<String>`) gives `&xs.iter().map(String::as_str).collect::<Vec<_>>()`
+  and `false`; a map of strings (P2R-240) gives its values in order,
+  `&m.values().map(String::as_str).collect::<Vec<_>>()`, and `false`; and
+  a value of a union of P2R-230 whose members are a string and one list
+  or map of strings gives a `match` with one arm per member and
+  `matches!(v, U::String(_))`. A union argument is read twice, so it must
+  be a variable, a parameter or a chain of property reads on one of them
+  (P2R-186), and this is an exception to P2R-232. Three strings still
+  convert by P2R-185. These stop the conversion: a string search with a
+  list, map or list literal replacement, which PHP always rejects with a
+  `TypeError`; a subject that is not a string; an element that is not a
+  string or a spread in a list literal; a union with other members; and a
+  fourth argument. A string search with a union replacement that holds a
+  list or map at run time panics where PHP throws a `TypeError` (P2R-60).
+- **P2R-311** `strtr($s, [k1 => v1, ..])`, with an array literal whose
+  every element has a key and a value of type string, MUST convert to
+  `php_strtr(s, &[(k1, v1), ..])` with each key and value lent as a
+  `&str`, a call of the helper of P2R-282. A key that repeats at run time
+  keeps its last value, as in PHP, because the helper takes the last of
+  equal longest keys. These stop the conversion: an element without a
+  key, a key of type int (a literal or not), a key or value of another
+  type, a literal empty key (for P2R-281's reason), and a spread. A key
+  that is empty at run time: PHP warns and ignores it, Rust ignores it
+  without the warning (P2R-60). P2R-188 places `php_str_replace` after
+  `php_preg_replace_callback`, and P2R-31 covers its name.
 
 ## Spec checklist
 

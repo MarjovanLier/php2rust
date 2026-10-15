@@ -212,6 +212,12 @@ converts:
   with ranges and POSIX names, `( )`, `(?: )`, `|`, the quantifiers and their lazy
   forms (a count `{n}` not after a group), `^`, `\A`, `\z`, and `$` with the `m` flag;
   the flags `i`, `m` and `s`.
+- traits that hold only constants: `use T;` in a class or enum copies the trait's
+  constants into it, and the trait itself writes nothing. A constant whose value is an
+  array of string keys and string values becomes a slice of pairs
+  (`pub const MAP: &[(&str, &str)] = &[("a", "b")];`) that `strtr($s, self::MAP)` reads
+  as `php_strtr(s, Name::MAP)`, a helper with PHP's rule: the longest key that matches
+  at each position wins, and replaced text is not read again.
 
 ## What stops the conversion
 
@@ -246,6 +252,12 @@ the others are findings of the Mago analyser. In short:
   a literal or a constant or that holds `$` or `\`, or with a subject that is not a
   string. `preg_match()` with matches, or with its result used any other way
   (`=== false`, `== 1`, stored).
+- For traits and `strtr`: a trait with a method, a property or a `use` of another
+  trait, a `use` with a block of conflict rules, a trait the input does not declare, a
+  trait constant whose name the class declares too, and a trait inside a function. A
+  string map constant with an empty or repeated key, a key or value that is not a string
+  literal, no pairs, or a use other than the second argument of `strtr`. `strtr` with
+  three arguments or with an array other than such a constant.
 - A `?:` without its middle part (`$a ?: $b`), inside another `?:`, of lists, of a
   nullable string or list, or with a string arm that is a call, a joined string, or a
   property read or list element on a call or `new`.

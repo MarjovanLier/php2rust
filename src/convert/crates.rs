@@ -201,6 +201,17 @@ impl Converter<'_> {
                     Statement::Function(function) => (&function.name, true),
                     Statement::Enum(declaration) => (&declaration.name, false),
                     Statement::Class(declaration) => (&declaration.name, false),
+                    // A trait writes nothing, so only its PHP name can clash (P2R-280).
+                    Statement::Trait(declaration) => {
+                        by_key
+                            .entry((
+                                false,
+                                self.name_key(&declaration.name, declaration.name.value),
+                            ))
+                            .or_default()
+                            .push(statement.span());
+                        continue;
+                    }
                     _ => continue,
                 };
                 let text = String::from_utf8_lossy(name.value);
@@ -232,7 +243,7 @@ impl Converter<'_> {
         for span in spans {
             self.refuse(
                 &span,
-                "another enum, class or function of the crate has the same Rust name or fully qualified name (P2R-173)",
+                "another enum, class, trait or function of the crate has the same Rust name or fully qualified name (P2R-173)",
             );
         }
         for (rust, module, span) in functions {

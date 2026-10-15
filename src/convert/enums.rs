@@ -183,12 +183,10 @@ impl Converter<'_> {
                     }
                     continue;
                 }
-                ClassLikeMember::Constant(_) => continue,
+                // A trait of constants adds them where the constants are read (P2R-280).
+                ClassLikeMember::Constant(_) | ClassLikeMember::TraitUse(_) => continue,
                 _ => {
-                    self.refuse(
-                        member,
-                        "an enum with a property or trait is not supported (P2R-110)",
-                    );
+                    self.refuse(member, "an enum with a property is not supported (P2R-110)");
                     continue;
                 }
             };
@@ -332,6 +330,13 @@ impl Converter<'_> {
                 RExpr::Path(format!("{enum_name}::{case_name}")),
                 RustType::Enum(enum_name),
             ));
+        }
+        if self.pairs_constant(access).is_some() {
+            self.refuse(
+                node,
+                "a string map constant converts only as the second argument of strtr (P2R-281)",
+            );
+            return None;
         }
         if let Some(found) = self.constant_read(access) {
             return Some(found);

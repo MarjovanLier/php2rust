@@ -137,7 +137,9 @@ fn analyse(inputs: Vec<Input>, library: bool) -> Result<Vec<(String, String)>, F
     for (statements, names) in flats.iter().zip(&resolved) {
         for statement in statements {
             match statement {
-                Statement::Enum(Enum { name, .. }) | Statement::Class(Class { name, .. }) => {
+                Statement::Enum(Enum { name, .. })
+                | Statement::Class(Class { name, .. })
+                | Statement::Trait(Trait { name, .. }) => {
                     let full = names.resolve(name).unwrap_or(name.value);
                     if codebase.get_class_like(full).is_some() {
                         built_in_classes.insert(full.to_ascii_lowercase());
@@ -760,6 +762,19 @@ impl<'c> Converter<'c> {
                             // PHP declares a readonly class before any statement runs, so it
                             // may come after them (P2R-130).
                             Statement::Class(declaration) => {
+                                // PHP declares a class with interfaces or traits only when
+                                // execution reaches it, as it declares an enum.
+                                let late = declaration.implements.is_some()
+                                    || declaration
+                                        .members
+                                        .iter()
+                                        .any(|m| matches!(m, ClassLikeMember::TraitUse(_)));
+                                if ran && late {
+                                    self.refuse(
+                                        &declaration.name,
+                                        "a class that implements an interface or uses a trait must come before the statements outside functions, because PHP declares it only when execution reaches it (P2R-130, P2R-280)",
+                                    );
+                                }
                                 if let Some(index) = self.class_index(declaration) {
                                     let name = self.classes[index].rust_name.clone();
                                     owners.insert(name, (module, crates::ItemKind::Type));
@@ -767,6 +782,8 @@ impl<'c> Converter<'c> {
                                     items.push(item);
                                 }
                             }
+                            // Its constants go into each class that uses it (P2R-280).
+                            Statement::Trait(declaration) => self.check_trait(declaration),
                             _ if self.library => self.refuse(
                                 other,
                                 "a directory converts to a library, which has no statements outside functions (P2R-175)",

@@ -113,6 +113,42 @@ impl Converter<'_> {
         ))
     }
 
+    /// `strtr($s, C)` with a string map constant `C`, as `php_strtr(s, Name::C)` (P2R-282).
+    pub(super) fn strtr(
+        &mut self,
+        call: &FunctionCall<'_>,
+        node: &Expression<'_>,
+    ) -> Option<(RExpr, RustType)> {
+        let arguments = self.built_in_arguments(
+            call,
+            node,
+            (2, 2),
+            "strtr() converts with two arguments only (P2R-282)",
+        )?;
+        let text = self.typed_argument(
+            arguments[0],
+            &RustType::String,
+            "strtr() converts on a string only (P2R-282)",
+        );
+        let pairs = match super::lists::unparenthesized(arguments[1]) {
+            Expression::Access(Access::ClassConstant(access)) => self.pairs_constant(access),
+            _ => None,
+        };
+        let Some(pairs) = pairs else {
+            self.record_refused(arguments[1]);
+            self.refuse(
+                arguments[1],
+                "strtr() converts only with a string map constant as its second argument (P2R-282)",
+            );
+            return None;
+        };
+        let text = self.borrowed(text?, &RustType::String);
+        Some((
+            self.helper_call(Helper::PhpStrtr, vec![text, RExpr::Path(pairs)]),
+            RustType::String,
+        ))
+    }
+
     /// `substr($s, $start)` and `substr($s, $start, $length)`, with PHP 8's rules for a
     /// start or length past either end (P2R-164).
     pub(super) fn substr(

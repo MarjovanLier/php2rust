@@ -20,10 +20,11 @@ pub(super) enum Helper {
     PhpExplode,
     PhpPregReplace,
     PhpPregMatch,
+    PhpStrtr,
 }
 
 impl Helper {
-    const ALL: [Helper; 13] = [
+    const ALL: [Helper; 14] = [
         Helper::CtypeDigit,
         Helper::PhpInt,
         Helper::PhpOffset,
@@ -37,6 +38,7 @@ impl Helper {
         Helper::PhpExplode,
         Helper::PhpPregReplace,
         Helper::PhpPregMatch,
+        Helper::PhpStrtr,
     ];
 
     fn name(self) -> &'static str {
@@ -54,6 +56,7 @@ impl Helper {
             Helper::PhpExplode => "php_explode",
             Helper::PhpPregReplace => "php_preg_replace",
             Helper::PhpPregMatch => "php_preg_match",
+            Helper::PhpStrtr => "php_strtr",
         }
     }
 
@@ -73,6 +76,7 @@ impl Helper {
             Helper::PhpExplode => PHP_EXPLODE,
             Helper::PhpPregReplace => PHP_PREG_REPLACE,
             Helper::PhpPregMatch => PHP_PREG_MATCH,
+            Helper::PhpStrtr => PHP_STRTR,
         }
     }
 
@@ -245,3 +249,28 @@ const PHP_PREG_MATCH: &str = r#"fn php_preg_match(pattern: &str, subject: &str) 
         .expect("php2rust checked this pattern")
         .is_match(subject.as_bytes())
 }"#;
+
+/// `strtr()` with a map: at each position the longest key that matches, whatever the order
+/// of the pairs, and no second look at a value it put in. Every key is valid UTF-8, so a
+/// step by characters where no key matches gives PHP's byte result (P2R-282).
+const PHP_STRTR: &str = r"fn php_strtr(text: &str, pairs: &[(&str, &str)]) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut rest = text;
+    while let Some(next) = rest.chars().next() {
+        let longest = pairs
+            .iter()
+            .filter(|(key, _)| !key.is_empty() && rest.starts_with(key))
+            .max_by_key(|(key, _)| key.len());
+        match longest {
+            Some((key, value)) => {
+                out.push_str(value);
+                rest = &rest[key.len()..];
+            }
+            None => {
+                out.push(next);
+                rest = &rest[next.len_utf8()..];
+            }
+        }
+    }
+    out
+}";

@@ -1,0 +1,1 @@
+input.php:13:13: a class that implements an interface or uses a trait must come before the statements outside functions, because PHP declares it only when execution reaches it (P2R-130, P2R-280)

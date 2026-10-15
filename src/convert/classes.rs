@@ -103,6 +103,8 @@ pub(super) struct ConstantInfo {
     known: Option<i64>,
     /// The value of a string constant, which a pattern reads (P2R-260).
     text: Option<String>,
+    /// True for a string map constant, a slice of pairs that only `strtr` reads (P2R-281).
+    pairs: bool,
 }
 
 impl Converter<'_> {
@@ -162,13 +164,94 @@ impl Converter<'_> {
                 self.declared_properties(declaration, index);
             }
             self.method_signatures(name, members, index, &taken);
-            self.constants(members, index);
+            let mut all = self.trait_members(program, members);
+            all.extend(members.iter());
+            self.constants(&all, index);
         }
         for index in 0..self.classes.len() {
             self.check_containment(program, index);
         }
         self.mark_changing();
         self.refuse_nullable_changing(program);
+    }
+
+    /// Refuses what a trait holds besides constants, which a later slice converts; the
+    /// trait itself writes nothing (P2R-280).
+    pub(super) fn check_trait(&mut self, declaration: &Trait<'_>) {
+        if let Some(attributes) = declaration.attribute_lists.first() {
+            self.refuse(attributes, "attributes are not supported (P2R-07)");
+        }
+        // PHP rejects a trait with the name of a class-like it has built in.
+        let key = self.name_key(&declaration.name, declaration.name.value);
+        if self.built_in_classes.contains(&key) {
+            self.refuse(
+                &declaration.name,
+                "a trait cannot take the name of a class, interface, enum or trait PHP has built in (P2R-280)",
+            );
+        }
+        for member in declaration.members.iter() {
+            if !matches!(member, ClassLikeMember::Constant(_)) {
+                self.refuse(
+                    member,
+                    "a trait may hold only constants; methods, properties and other traits are not supported yet (P2R-280)",
+                );
+            }
+        }
+    }
+
+    /// The members of the traits that `members` use, in the order of the `use` statements,
+    /// each trait in its own order (P2R-280). A `use` with a block of conflict rules, and a
+    /// trait the input does not declare, stop.
+    fn trait_members<'p, 'a>(
+        &mut self,
+        program: &'p Program<'a>,
+        members: &Sequence<'_, ClassLikeMember<'_>>,
+    ) -> Vec<&'p ClassLikeMember<'a>> {
+        let mut found = Vec::new();
+        let mut seen: Vec<Vec<u8>> = Vec::new();
+        for member in members.iter() {
+            let ClassLikeMember::TraitUse(trait_use) = member else {
+                continue;
+            };
+            if let TraitUseSpecification::Concrete(specification) = &trait_use.specification {
+                self.refuse(
+                    specification,
+                    "a use of a trait with a block of conflict rules is not supported (P2R-280)",
+                );
+                continue;
+            }
+            for name in trait_use.trait_names.iter() {
+                let key = self.identifier_key(name);
+                // PHP takes a trait named twice once, which would copy its constants twice.
+                if seen.contains(&key) {
+                    self.refuse(
+                        name,
+                        "a trait named twice in one class or enum is not supported (P2R-280)",
+                    );
+                    continue;
+                }
+                seen.push(key.clone());
+                let declared = program
+                    .statements
+                    .iter()
+                    .find_map(|statement| match statement {
+                        Statement::Trait(declaration)
+                            if self.name_key(&declaration.name, declaration.name.value) == key =>
+                        {
+                            Some(declaration)
+                        }
+                        _ => None,
+                    });
+                match declared {
+                    Some(declaration) => found.extend(declaration.members.iter()),
+                    None => self.refuse(
+                        name,
+                        "a use of a trait that the input does not declare is not supported (P2R-280)",
+                    ),
+                }
+            }
+        }
+        found
     }
 
     /// Refuses each declared parameter, return and property type that is nullable and
@@ -405,7 +488,8 @@ impl Converter<'_> {
         for member in declaration.members.iter() {
             let method = match member {
                 ClassLikeMember::Method(method) => method,
-                ClassLikeMember::Constant(_) => continue,
+                // Checked where the constants are read (P2R-280).
+                ClassLikeMember::Constant(_) | ClassLikeMember::TraitUse(_) => continue,
                 ClassLikeMember::Property(_) if !readonly => continue,
                 _ if readonly => {
                     self.refuse(
@@ -1042,11 +1126,12 @@ impl Converter<'_> {
         self.classes[index].methods = methods;
     }
 
-    /// The constants of the class or enum at `index`, from its `members` (P2R-156).
-    fn constants(&mut self, members: &Sequence<'_, ClassLikeMember<'_>>, index: usize) {
+    /// The constants of the class or enum at `index`, from its `members`, which start with
+    /// the members of the traits it uses (P2R-156, P2R-280).
+    fn constants(&mut self, members: &[&ClassLikeMember<'_>], index: usize) {
         let outer = self.current_class.replace(index);
         let mut constants: Vec<ConstantInfo> = Vec::new();
-        for member in members.iter() {
+        for &member in members {
             let ClassLikeMember::Constant(constant) = member else {
                 continue;
             };
@@ -1100,6 +1185,33 @@ impl Converter<'_> {
                 );
                 continue;
             }
+            if let Expression::Array(array) = item.value {
+                let typed = constant
+                    .hint
+                    .as_ref()
+                    .is_none_or(|hint| matches!(hint, Hint::Array(_)));
+                if !typed {
+                    self.refuse(
+                        item.value,
+                        "a string map constant converts only with the type array or none (P2R-281)",
+                    );
+                    continue;
+                }
+                let Some(pairs) = self.string_pairs(array) else {
+                    continue;
+                };
+                constants.push(ConstantInfo {
+                    php_name: item.name.value.to_vec(),
+                    line: format!("    pub const {rust_name}: &[(&str, &str)] = &[{pairs}];"),
+                    rust_name,
+                    // Its reads stop outside `strtr`, so this type is never read (P2R-281).
+                    ty: RustType::String,
+                    known: None,
+                    text: None,
+                    pairs: true,
+                });
+                continue;
+            }
             let Some((value, value_type)) = self.constant_value(item.value) else {
                 continue;
             };
@@ -1141,6 +1253,7 @@ impl Converter<'_> {
                 line,
                 known,
                 text,
+                pairs: false,
             });
         }
         let refused: Vec<Vec<u8>> = members
@@ -1206,6 +1319,83 @@ impl Converter<'_> {
                 None
             }
         }
+    }
+
+    /// The pairs of a string map constant's array literal, as Rust text in the literal's
+    /// order, or `None` with a problem recorded (P2R-281).
+    fn string_pairs(&mut self, array: &Array<'_>) -> Option<String> {
+        if array.elements.is_empty() {
+            self.refuse(
+                array,
+                "a string map constant needs at least one pair (P2R-281)",
+            );
+            return None;
+        }
+        let mut pairs: Vec<(String, String)> = Vec::new();
+        for element in array.elements.iter() {
+            let ArrayElement::KeyValue(pair) = element else {
+                self.refuse(
+                    element,
+                    "a string map constant needs a string literal key on every element (P2R-281)",
+                );
+                return None;
+            };
+            let (
+                Expression::Literal(Literal::String(key)),
+                Expression::Literal(Literal::String(value)),
+            ) = (pair.key, pair.value)
+            else {
+                self.refuse(
+                    pair,
+                    "a string map constant needs a string literal key and a string literal value on every element (P2R-281)",
+                );
+                return None;
+            };
+            let key = self.string_literal(key)?;
+            let value = self.string_literal(value)?;
+            // `strtr` ignores an empty key with a warning, which Rust does not print.
+            if key.is_empty() {
+                self.refuse(
+                    pair,
+                    "a string map constant cannot hold an empty key (P2R-281)",
+                );
+                return None;
+            }
+            if pairs.iter().any(|(seen, _)| *seen == key) {
+                self.refuse(
+                    pair,
+                    "a key appears twice in this string map constant (P2R-281)",
+                );
+                return None;
+            }
+            pairs.push((key, value));
+        }
+        Some(
+            pairs
+                .into_iter()
+                .map(|(key, value)| {
+                    format!(
+                        "({}, {})",
+                        printer::expr(&RExpr::Str(key), false),
+                        printer::expr(&RExpr::Str(value), false)
+                    )
+                })
+                .collect::<Vec<_>>()
+                .join(", "),
+        )
+    }
+
+    /// The Rust path of the string map constant that `access` reads, or `None` (P2R-281).
+    pub(super) fn pairs_constant(&self, access: &ClassConstantAccess<'_>) -> Option<String> {
+        let ClassLikeConstantSelector::Identifier(name) = &access.constant else {
+            return None;
+        };
+        let key = self.class_key(access.class)?;
+        let class = self.classes.iter().find(|c| c.key == key)?;
+        let constant = class.constants.iter().find(|c| c.php_name == name.value)?;
+        constant
+            .pairs
+            .then(|| format!("{}::{}", class.rust_name, constant.rust_name))
     }
 
     /// The Rust type of a constant's declared type (P2R-156).

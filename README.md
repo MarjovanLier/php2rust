@@ -238,9 +238,9 @@ converts:
   with ranges and POSIX names, `( )`, `(?: )`, `|`, the quantifiers and their lazy
   forms (a count `{n}` not after a group), `^`, `\A`, `\z`, and `$` with the `m` flag;
   the flags `i`, `m` and `s`. One form with `u` converts in `preg_match()` read as a
-  bool: `'#(?<!\p{L})mc(?! )#u'`, with any word of ASCII letters and digits in place
-  of `mc`, becomes `r"(?:^|\P{L})mc(?:[^ ]|$)"`, which matches where the look-around
-  does.
+  bool: `'#(?<!\p{L})mc(?! )#u'`, with any delimiter above, `u` once or more, and any
+  word of ASCII letters and digits in place of `mc`, becomes
+  `r"(?:^|\P{L})mc(?:[^ ]|$)"`, which matches when the look-around does.
 - traits that hold only constants: `use T;` in a class or enum copies the trait's
   constants into it, and the trait itself writes nothing. A constant whose value is an
   array of string keys and string values becomes a slice of pairs
@@ -284,7 +284,8 @@ the others are findings of the Mago analyser. In short:
   flag outside the one `preg_match()` form above (also that form with another flag, or
   in `preg_replace()` and `preg_replace_callback()`), every flag other than `i`, `m`
   and `s`, a byte that is not printable ASCII (a
-  real tab), `$` without `m`, `^` with `m`, look-around, backreferences, `\v`, `\Z`, a
+  real tab), `$` without `m`, `^` with `m`, `\p` and look-around outside the `u` form
+  above, backreferences, `\v`, `\Z`, a
   quantifier after a quantifier or an assertion, a count after a group, a repeat of a
   part that can match the empty string, and every form not listed above.
   `preg_replace()` without `??`, with a default that is not a string literal, with a

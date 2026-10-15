@@ -275,7 +275,8 @@ const PHP_PREG_REPLACE: &str = r#"fn php_preg_replace(pattern: &str, replacement
     String::from_utf8_lossy(&regex.replace_all(subject.as_bytes(), replacement)).into_owned()
 }"#;
 
-/// `preg_match()` of such a pattern where its result is read as a bool (P2R-262).
+/// `preg_match()` of a pattern of P2R-260 or P2R-320 where its result is read as a bool
+/// (P2R-262).
 const PHP_PREG_MATCH: &str = r#"fn php_preg_match(pattern: &str, subject: &str) -> bool {
     ::regex::bytes::Regex::new(pattern)
         .expect("php2rust checked this pattern")

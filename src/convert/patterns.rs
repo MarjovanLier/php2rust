@@ -329,8 +329,9 @@ pub(super) fn rust_pattern(php: &[u8]) -> Result<Pattern, String> {
 }
 
 /// The Rust pattern of `#(?<!\p{L})word(?! )#u`, or the problem of another pattern with the
-/// `u` flag, or `None` for a pattern without it (P2R-320). Read as a bool, each look-around
-/// tests one character next to the word, or the end, so a consuming alternative equals it.
+/// `u` flag, or `None` for a pattern without `u` or without delimiters (P2R-320). Read as a
+/// bool, each look-around tests one character next to the word, or the start or the end, so
+/// a consuming alternative equals it.
 fn lookaround(php: &[u8]) -> Option<Result<Pattern, String>> {
     let (body, flags) = split(php).ok()?;
     if !flags.contains(&b'u') {
@@ -773,7 +774,7 @@ mod tests {
             Some(Ok(r"(?:^|\P{L})mc(?:[^ ]|$)".to_owned()))
         );
         assert_eq!(text("/mc/"), None);
-        // PHP rejects a tab delimiter and a pattern too large to compile.
+        // P2R-320 keeps the printable and 4096-byte stops of P2R-260.
         assert!(matches!(text("\t(?<!\\p{L})mc(?! )\tu"), Some(Err(_))));
         let long = format!(r"#(?<!\p{{L}}){}(?! )#u", "a".repeat(5000));
         assert!(matches!(text(&long), Some(Err(_))));

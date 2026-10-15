@@ -2510,7 +2510,8 @@ those patterns; section 33 rewrites the two of them for `regex`.
   because PCRE ends the loop where that part matches empty and `regex`
   goes on; whitespace before the delimiter or among the flags, which PHP
   skips; `\Z`, `\G`, `\K`, `\Q..\E`,
-  `\p`, look-around, backreferences, `\k`, atomic groups, possessive
+  `\p` and look-around outside the form of P2R-320, backreferences,
+  `\k`, atomic groups, possessive
   quantifiers, conditionals, recursion and octal escapes; and a pattern
   that does not compile.
 - **P2R-261** `preg_replace(P, R, S) ?? $d`, where `P` converts by

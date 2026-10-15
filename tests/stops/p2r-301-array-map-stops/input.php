@@ -15,6 +15,32 @@ function pair(string $a, string $b): string
     return $a . $b;
 }
 
+function risky(string $s): string
+{
+    if ($s === '') {
+        throw new InvalidArgumentException('empty');
+    }
+    return $s;
+}
+
+function nothing(string $s): void
+{
+    echo $s;
+}
+
+/**
+ * @param list<?int> $maybe
+ * @param list<string> $words
+ */
+function others(array $maybe, array $words): int
+{
+    $a = array_map(fn(?int $x): int => $x ?? 0, $maybe);
+    $b = array_map(risky(...), $words);
+    $c = array_map(nothing(...), $words);
+    $d = array_map(...[trim(...), $words]);
+    return count($a) + count($b) + count($c) + count($d);
+}
+
 /**
  * @param array<string, int> $map
  * @param list<string> $words

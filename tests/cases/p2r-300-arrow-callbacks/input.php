@@ -62,6 +62,15 @@ function kept(array $words): array
 
 /**
  * @param list<int> $xs
+ * @return list<int>
+ */
+function keywords(array $xs): array
+{
+    return array_map(fn(int $type): int => 2, $xs);
+}
+
+/**
+ * @param list<int> $xs
  */
 function shown(array $xs): string
 {
@@ -73,4 +82,5 @@ echo shown(shifted([1, 2], 10, true, 5)), "\n";
 echo implode(',', labelled([3, 4], Unit::Foot)), "\n";
 echo count(halves([1, 2, 3])), "\n";
 echo shown(ones([7, 8])), "\n";
+echo shown(keywords([7, 8, 9])), "\n";
 echo implode(',', kept(['a', 'b'])), "\n";

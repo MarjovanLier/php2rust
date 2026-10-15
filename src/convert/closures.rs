@@ -35,6 +35,11 @@ impl Converter<'_> {
                 return None;
             }
         };
+        if self.variables.closure_start.is_some() {
+            self.record_refused(arrow.expression);
+            self.refuse(arrow, "a nested arrow function is not supported (P2R-300)");
+            return None;
+        }
         if let Some(ampersand) = arrow.ampersand {
             self.record_refused(arrow.expression);
             self.refuse(
@@ -76,12 +81,11 @@ impl Converter<'_> {
         self.variables.closure_start = outer;
         self.variables.close_bindings(&[var]);
         let (body, result) = (body?, returns);
-        let name = self.variables.name_of(var);
         // rustc warns about a closure parameter that nothing reads.
         let name = if mentions(arrow.expression, parameter.variable.name) {
-            name.to_owned()
+            self.variables.name_of(var).to_owned()
         } else {
-            format!("_{name}")
+            self.variables.unused_name(var)
         };
         let parameters = vec![format!("{name}: {}", ty.parameter())];
         Some((RExpr::Closure(parameters, Box::new(body)), result))
@@ -154,7 +158,14 @@ impl Converter<'_> {
         let list = self.expression(arguments[1]);
         let element = match &list {
             Some((_, RustType::Vec(element)))
-                if element.is_copy() || **element == RustType::String =>
+                if matches!(
+                    **element,
+                    RustType::I64
+                        | RustType::F64
+                        | RustType::Bool
+                        | RustType::Enum(_)
+                        | RustType::String
+                ) =>
             {
                 Some((**element).clone())
             }

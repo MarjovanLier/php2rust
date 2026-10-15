@@ -44,9 +44,11 @@ Output that holds a map uses the `indexmap` crate (`use indexmap::IndexMap;`). T
 `Cargo.toml` that builds it needs `indexmap = "2"` under `[dependencies]`; php2rust writes
 no `Cargo.toml`. With plain `rustc`, pass the built crate:
 `--extern indexmap=<path to libindexmap.rlib> -L dependency=<its deps directory>`.
-Output that calls `preg_replace()` or `preg_match()` uses the `regex` crate through
-`::regex::` paths, and needs `regex = "1.13"` in the same way (`--extern regex=<path to
-libregex.rlib>` with plain `rustc`); its patterns keep escapes that older versions reject.
+Output that calls `preg_replace()`, `preg_match()` or `preg_replace_callback()` uses the
+`regex` crate through `::regex::` paths, and needs `regex = "1.13"` in the same way
+(`--extern regex=<path to libregex.rlib>` with plain `rustc`); its patterns keep escapes
+that older versions reject. `preg_replace_callback()` also needs `indexmap`, because
+its callback takes the matches as an `IndexMap`.
 
 | Exit code | Meaning |
 |---|---|
@@ -174,13 +176,15 @@ converts:
   it at once: `array_map(fn(int $x): int => $x * $by, $xs)` becomes
   `xs.iter().copied().map(|x: i64| x * by).collect::<Vec<_>>()`, and a string list goes
   through `.map(String::as_str)` first. The callback takes one typed parameter and may
-  read int, float, bool and enum variables of the enclosing body. `array_map` also
+  read int, float, bool and enum variables of the enclosing body, and nullable ones
+  of these types. `array_map` also
   takes a first-class callable of a function of the input or of `trim`, `ltrim`,
   `rtrim`, `strtolower`, `strtoupper`, `ucfirst`, `lcfirst` or `ucwords`, as
   `array_map(ucwords(...), $words)`. `preg_replace_callback(P, fn(array $m): string =>
   .., S) ?? 'literal'` gives the callback the matches as an `IndexMap` with the keys
-  `"0"`, `"1"` and on, as PHP passes them, for a pattern of the kind above that cannot
-  match the empty string or a byte above `7F`.
+  `"0"`, `"1"` and on, as PHP passes them, for a pattern of the kind that
+  `preg_replace()` takes (see below) that cannot match the empty string or a byte above
+  `7F`.
 - integer literals in every PHP form, float literals, and single-quoted and
   double-quoted strings.
 - exceptions of PHP's built-in classes (`Exception`, `RuntimeException`,
@@ -282,6 +286,14 @@ the others are findings of the Mago analyser. In short:
   string map constant with an empty or repeated key, a key or value that is not a string
   literal, no pairs, or a use other than the second argument of `strtr`. `strtr` with
   three arguments or with an array other than such a constant.
+- For callbacks: an arrow function anywhere else, without a parameter type or with
+  more than one parameter, `fn&`, a read of a string, list, object or map of the
+  enclosing body, a write, a call that throws or `?? throw` in the body, `$this`, a
+  `match` body, a nested arrow function, and a long `function () { .. }` closure.
+  `array_map` over a map, a list of other elements or several lists, or with a
+  callback given as a string or a variable. A `preg_replace_callback` pattern that can
+  match the empty string or a byte above `7F`, and a callback without `array $m` and
+  the return type `string`. `ucwords()` with delimiters.
 - A `?:` without its middle part (`$a ?: $b`), inside another `?:`, of lists, of a
   nullable string or list, or with a string arm that is a call, a joined string, or a
   property read or list element on a call or `new`.

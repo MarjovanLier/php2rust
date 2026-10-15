@@ -16,5 +16,8 @@ function forms(string $s, string $d): string
     $i = preg_replace_callback('#a#', static fn(array $m): string => 'b', $s, 1) ?? '';
     $j = preg_replace_callback(pattern: '#a#', callback: static fn(array $m): string => 'b', subject: $s) ?? '';
     $k = preg_replace_callback('#.#', static fn(array $m): string => 'b', $s) ?? '';
-    return $a . $b . ($c ?? '') . $e . $f . $g . $h . $i . $j . $k;
+    $l = preg_replace_callback('#a#', static fn(array $m): ?string => 'b', $s) ?? '';
+    $n = preg_replace_callback('#a#', static fn(array $m): string => 'b', $s, 1, $count) ?? '';
+    $o = preg_replace_callback(...['#a#', static fn(array $m): string => 'b', $s]) ?? '';
+    return $a . $b . ($c ?? '') . $e . $f . $g . $h . $i . $j . $k . $l . $n . $o;
 }

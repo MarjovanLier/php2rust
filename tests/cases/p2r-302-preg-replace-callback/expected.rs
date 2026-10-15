@@ -34,6 +34,14 @@ pub fn doubled(text: &str, times: i64) -> String {
     );
 }
 
+pub fn dashed(text: &str) -> String {
+    return php_preg_replace_callback(
+        r"(?-u)[aeiou]",
+        |_match: &IndexMap<String, String>| String::from("-"),
+        text,
+    );
+}
+
 fn php_preg_replace_callback(
     pattern: &str,
     callback: impl Fn(&IndexMap<String, String>) -> String,
@@ -65,6 +73,8 @@ fn php_preg_replace_callback(
 
 fn main() {
     print!("{}", prefixes("Van Der Waals de la Cruz"));
+    print!("\n");
+    print!("{}", dashed("education"));
     print!("\n");
     print!("{}", prefixes("VAN\tDER Berg"));
     print!("\n");

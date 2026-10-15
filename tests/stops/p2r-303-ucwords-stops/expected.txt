@@ -2,3 +2,4 @@ input.php:5:10: this name is the Rust name of a helper the output may hold, whic
 input.php:12:5: this name is the Rust name of a helper the output may hold, which it would hide (P2R-31)
 input.php:12:34: ucwords() converts with one string argument only (P2R-303)
 input.php:13:41: a named or spread argument of a built-in function is not supported (P2R-169)
+input.php:13:63: a named or spread argument of a built-in function is not supported (P2R-169)

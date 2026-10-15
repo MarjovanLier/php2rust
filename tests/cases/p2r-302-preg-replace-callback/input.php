@@ -30,7 +30,13 @@ function doubled(string $text, int $times): string
     return preg_replace_callback('#[0-9]+#', fn(array $m): string => $m[0] . ($times > 1 ? '+' : '-'), $text) ?? '';
 }
 
+function dashed(string $text): string
+{
+    return preg_replace_callback('#[aeiou]#', static fn(array $match): string => '-', $text) ?? '';
+}
+
 echo prefixes('Van Der Waals de la Cruz'), "\n";
+echo dashed('education'), "\n";
 echo prefixes("VAN\tDER Berg"), "\n";
 echo prefixes('Vanessa Dupont'), "\n";
 echo shown('ab axb aby xyz'), "\n";

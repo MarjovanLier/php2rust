@@ -525,6 +525,13 @@ impl Variables {
         self.entries.len()
     }
 
+    /// The name of the binding `var` where nothing reads it: `_` and its snake_case name,
+    /// without `r#` (P2R-35).
+    pub(super) fn unused_name(&self, var: Var) -> String {
+        let snake = self.entries[var].binding.as_ref().map(|b| b.snake.as_str());
+        format!("_{}", snake.unwrap_or_default())
+    }
+
     /// The Rust name of `var`.
     pub(super) fn name_of(&self, var: Var) -> &str {
         &self.entries[var].rust_name

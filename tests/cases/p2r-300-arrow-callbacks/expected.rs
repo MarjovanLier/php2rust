@@ -60,6 +60,14 @@ pub fn kept(words: &[String]) -> Vec<String> {
     return copies;
 }
 
+pub fn keywords(xs: &[i64]) -> Vec<i64> {
+    return xs
+        .iter()
+        .copied()
+        .map(|_type: i64| 2_i64)
+        .collect::<Vec<_>>();
+}
+
 pub fn shown(xs: &[i64]) -> String {
     return xs
         .iter()
@@ -79,6 +87,8 @@ fn main() {
     print!("{}", halves(&[1, 2, 3]).len() as i64);
     print!("\n");
     print!("{}", shown(&ones(&[7, 8])));
+    print!("\n");
+    print!("{}", shown(&keywords(&[7, 8, 9])));
     print!("\n");
     print!(
         "{}",

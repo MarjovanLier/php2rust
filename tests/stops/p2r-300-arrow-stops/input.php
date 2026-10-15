@@ -60,3 +60,30 @@ function forms(array $xs, string $label): array
     return [apply(1), count($a), count($b), count($c), count($d), count($e), count($f), count($g),
         count($h), count($i), count($j), count($k), $stored(1)];
 }
+
+/**
+ * @param list<int> $xs
+ * @return list<int>
+ */
+function more(array $xs, int|string $u): array
+{
+    $a = array_map(fn(int $x): int => count(array_map(fn(int $y): int => $x + $y, [1, 2])), $xs);
+    $b = array_map(fn(int ...$x): int => count($x), $xs);
+    $c = array_map(fn(): int => 1, $xs);
+    $d = array_map(fn(int $x): int => is_int($u) ? $x : 0, $xs);
+    $e = array_map(function (int $x): int {
+        return $x;
+    }, $xs);
+    $f = array_filter($xs, fn(int $x): bool => $x > 1);
+    $g = array_map(fn(int $x): int => --$x, $xs);
+    $h = array_map(fn(int $x): int => $x = 2, $xs);
+    $i = array_map(fn(int $apply): int => $apply, $xs);
+    $j = array_map(fn(int $x): int => $x + $late, $xs);
+    $late = 1;
+    $k = array_map(fn(int $x): int => match ($x) {
+        1 => 2,
+        default => 3,
+    }, $xs);
+    return [count($a), count($b), count($c), count($d), count($e), count($f), count($g), count($h),
+        count($i), count($j), count($k), $late];
+}

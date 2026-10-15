@@ -8,3 +8,6 @@ input.php:13:39: the callback of preg_replace_callback() converts only as an arr
 input.php:16:10: preg_replace_callback() converts with three arguments only (P2R-302)
 input.php:17:10: a named or spread argument of a built-in function is not supported (P2R-169)
 input.php:18:32: a pattern that can match a byte above 7F is not supported in preg_replace_callback(), because a group could hold part of a character, which a Rust String cannot (P2R-302)
+input.php:19:39: the callback of preg_replace_callback() converts only as an arrow function that declares the return type string (P2R-302)
+input.php:20:10: preg_replace_callback() converts with three arguments only (P2R-302)
+input.php:21:10: a named or spread argument of a built-in function is not supported (P2R-169)

@@ -18,6 +18,18 @@ function square(int $n): int
     return $n * $n;
 }
 
+/**
+ * @param list<bool> $flags
+ */
+function flipped(array $flags): string
+{
+    $out = '';
+    foreach (array_map(fn(bool $b): bool => !$b, $flags) as $flag) {
+        $out .= $flag ? '1' : '0';
+    }
+    return $out;
+}
+
 function fullName(string $name): string
 {
     return implode('-', array_map(ucwords(...), explode('-', strtolower($name))));
@@ -70,3 +82,4 @@ echo numbers(array_map(square(...), [1, 2, 3])), "\n";
 echo fullName('JEAN-LUC smith'), "\n";
 echo big([Size::Small, Size::Large, Size::Large]), "\n";
 echo total([1.5, 2.25]) > 7.0 ? 'yes' : 'no', "\n";
+echo flipped([true, false, false]), "\n";

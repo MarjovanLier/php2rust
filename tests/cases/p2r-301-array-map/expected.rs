@@ -14,6 +14,14 @@ pub fn square(n: i64) -> i64 {
     return n * n;
 }
 
+pub fn flipped(flags: &[bool]) -> String {
+    let mut out = String::from("");
+    for flag in flags.iter().copied().map(|b: bool| !b).collect::<Vec<_>>() {
+        out += if flag { "1" } else { "0" };
+    }
+    return out;
+}
+
 pub fn full_name(name: &str) -> String {
     return php_explode("-", &name.to_ascii_lowercase())
         .iter()
@@ -227,5 +235,7 @@ fn main() {
             "no"
         }
     );
+    print!("\n");
+    print!("{}", flipped(&[true, false, false]));
     print!("\n");
 }

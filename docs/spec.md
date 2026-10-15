@@ -137,7 +137,9 @@ included function must block the built-in of its short name, that an
 included file needs a name no input can have, and that Mago's findings
 in an included file must not be printed; its Mago spec reviewer found
 that the same holds for a global function of the input, and that an
-attribute on a function or a parameter converted, against P2R-07.
+attribute on a function or a parameter converted, against P2R-07. The
+side-by-side measure then found that `StringManipulation` stopped on
+its `#[\SensitiveParameter]`, which P2R-341 now leaves out.
 
 php2rust converts typed PHP source into normal, readable Rust (`Vec`,
 `String`, `i64`), without AI. It reads PHP with the Mago crates, uses Mago's
@@ -3223,10 +3225,19 @@ later sections.
   built-in or a global function of the input, so it stops by P2R-48. An
   attribute stops by P2R-07 whether or not an included file declares its
   class, on a function, a parameter or an arrow function as on a class
-  or a member. The option works for a file input and
-  for a directory input. An include path that does not exist, that is
-  neither a file nor a directory (a named pipe), or below which a
-  directory cannot be listed exits 2 with its reason (P2R-04).
+  or a member, other than the one of P2R-341. The option works for a
+  file input and for a directory input. An include path that does not
+  exist, that is neither a file nor a directory (a named pipe), or below
+  which a directory cannot be listed exits 2 with its reason (P2R-04).
+- **P2R-341** The attribute `#[SensitiveParameter]` (any name PHP
+  resolves to `\SensitiveParameter`), written alone on a parameter that
+  is not promoted, of a function, a method or an arrow function, and
+  with no arguments (`#[\SensitiveParameter]` or
+  `#[\SensitiveParameter()]`), MUST be left out: PHP uses it only to
+  hide the argument's value in a stack trace, and the Rust output prints
+  no stack trace. `StringManipulation::nameFix` carries it, so that
+  package converts in full only with this rule. Every other attribute on
+  a parameter stops (P2R-07).
 
 ## Spec checklist
 

@@ -37,6 +37,14 @@ function one(string $a): array
 }
 
 /**
+ * @param string|list<string> $search
+ */
+function listed(array|string $search, string $s): string
+{
+    return str_replace($search, '_', $s);
+}
+
+/**
  * @param list<string> $xs
  * @param array<string, string> $map
  */
@@ -60,3 +68,4 @@ echo Text::strReplace(two('b', 'a'), one('1'), 'banana'), "\n";
 echo Text::strReplace('', 'x', 'banana'), "\n";
 echo '[', Text::strReplace('a', 'b', ''), "]\n";
 echo forms('abcab', ['a', 'b', 'c'], ['x' => 'c', 'y' => 'a']), "\n";
+echo listed(explode(',', 'a,n'), 'banana'), ' ', listed('na', 'banana'), "\n";

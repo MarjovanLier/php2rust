@@ -3,6 +3,12 @@
 use indexmap::IndexMap;
 
 #[derive(Clone, Debug)]
+pub enum ListOrString {
+    List(Vec<String>),
+    String(String),
+}
+
+#[derive(Clone, Debug)]
 pub enum MapOrString {
     Map(IndexMap<String, String>),
     String(String),
@@ -55,6 +61,19 @@ pub fn one(a: &str) -> IndexMap<String, String> {
     return IndexMap::from([(String::from("z"), a.to_string())]);
 }
 
+pub fn listed(search: &ListOrString, s: &str) -> String {
+    return php_str_replace(
+        &match &search {
+            ListOrString::String(text) => vec![text.as_str()],
+            ListOrString::List(list) => list.iter().map(String::as_str).collect(),
+        },
+        matches!(&search, ListOrString::String(_)),
+        &["_"],
+        true,
+        s,
+    );
+}
+
 pub fn forms(s: &str, xs: &[String], map: &IndexMap<String, String>) -> String {
     let mid = String::from("b");
     return format!(
@@ -79,6 +98,14 @@ pub fn forms(s: &str, xs: &[String], map: &IndexMap<String, String>) -> String {
         php_str_replace(&["é", "c"], false, &["e"], true, &format!("{}é", s)),
         php_str_replace(&[], false, &["x"], true, s)
     );
+}
+
+fn php_explode(separator: &str, text: &str) -> Vec<String> {
+    assert!(
+        !separator.is_empty(),
+        "explode(): separator must not be empty"
+    );
+    text.split(separator).map(str::to_owned).collect()
 }
 
 fn php_strtr(text: &str, pairs: &[(&str, &str)]) -> String {
@@ -204,6 +231,16 @@ fn main() {
                 (String::from("y"), String::from("a"))
             ])
         )
+    );
+    print!("\n");
+    print!(
+        "{}",
+        listed(&ListOrString::List(php_explode(",", "a,n")), "banana")
+    );
+    print!(" ");
+    print!(
+        "{}",
+        listed(&ListOrString::String(String::from("na")), "banana")
     );
     print!("\n");
 }

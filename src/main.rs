@@ -160,7 +160,8 @@ fn convert_directory(
 }
 
 /// The `.php` files under each `--include` path, in byte order of their paths, read for
-/// their symbols only; a file that cannot be read or is not UTF-8 is skipped. A path that
+/// their symbols only; a file that cannot be read, is not UTF-8 or has a path below the
+/// include path that is not UTF-8 is skipped. A path that
 /// does not exist, or is neither a file nor a directory, is refused (P2R-340).
 fn included_files(paths: &[PathBuf]) -> Result<Vec<convert::Included>, String> {
     let mut included = Vec::new();
@@ -185,6 +186,17 @@ fn included_files(paths: &[PathBuf]) -> Result<Vec<convert::Included>, String> {
                 .cmp(b.as_os_str().as_encoded_bytes())
         });
         for path in relative {
+            // Mago knows the file by a name no input can have, the same on every machine:
+            // the option's position and the path below it. A path that is not UTF-8 is
+            // skipped, because a lossy name could equal another file's.
+            let Some(below) = path
+                .components()
+                .map(|part| part.as_os_str().to_str())
+                .collect::<Option<Vec<_>>>()
+            else {
+                continue;
+            };
+            let name = format!("\0include {index}/{}", below.join("/"));
             let file = if path.as_os_str().is_empty() {
                 root.clone()
             } else {
@@ -196,14 +208,6 @@ fn included_files(paths: &[PathBuf]) -> Result<Vec<convert::Included>, String> {
             if std::str::from_utf8(&source).is_err() {
                 continue;
             }
-            // Mago knows the file by a name no input can have, the same on every machine:
-            // the option's position and the path below it.
-            let below = path
-                .components()
-                .map(|part| part.as_os_str().to_string_lossy())
-                .collect::<Vec<_>>()
-                .join("/");
-            let name = format!("\0include {index}/{below}");
             included.push(convert::Included { name, source });
         }
     }

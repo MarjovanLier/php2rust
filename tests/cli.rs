@@ -285,6 +285,19 @@ fn an_input_under_an_include_path_stays_input() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// P2R-340: a file whose path below the include path is not UTF-8 is skipped. macOS
+/// refuses such names, so Linux runs it.
+#[cfg(target_os = "linux")]
+#[test]
+fn an_include_skips_a_path_that_is_not_utf8() {
+    use std::os::unix::ffi::OsStrExt;
+    let dir = scratch("include-bytes");
+    let name = std::ffi::OsStr::from_bytes(b"m\xffoney.php");
+    money(&dir, &dir.join("inc").join(name));
+    assert!(stderr_of(&dir, &["in.php", "--include", "inc"]).contains("unknown-ref(Lib\\Money)"));
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 /// P2R-340: the walk follows no symbolic link below an include path.
 #[cfg(unix)]
 #[test]

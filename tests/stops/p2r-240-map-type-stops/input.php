@@ -35,14 +35,6 @@ function mixedValue(array $m): int
 }
 
 /**
- * @param array<string, int>|string $m
- */
-function unionMember(array|string $m): bool
-{
-    return is_string($m);
-}
-
-/**
  * @param array<string, Counter> $m
  */
 function changing(array $m): int

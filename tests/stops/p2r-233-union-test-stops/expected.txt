@@ -1,6 +1,6 @@
 input.php:7:21: (string) of a union value that may hold a float is not supported, because PHP prints a float its own way (P2R-233)
-input.php:13:21: (string) of a union value that may hold a list, a shape, an enum or an object converts only as the first arm of is_scalar() ? : (P2R-233)
-input.php:19:48: (string) of a union value that may hold a list, a shape, an enum or an object converts only as the first arm of is_scalar() ? : (P2R-233)
+input.php:13:21: (string) of a union value that may hold a list, a map, a shape, an enum or an object converts only as the first arm of is_scalar() ? : (P2R-233, P2R-270)
+input.php:19:48: (string) of a union value that may hold a list, a map, a shape, an enum or an object converts only as the first arm of is_scalar() ? : (P2R-233, P2R-270)
 input.php:35:20: is_scalar() and gettype() convert only on a variable or parameter whose type is known (P2R-222)
 input.php:40:26: a string arm of ?: must be a literal, a variable, a parameter, or a property read or list element on one of them, because Rust drops any other string at the end of the arm (P2R-180)
 input.php:40:48: the type never has no Rust type (P2R-22)

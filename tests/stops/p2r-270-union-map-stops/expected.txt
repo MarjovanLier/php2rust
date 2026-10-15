@@ -1,0 +1,7 @@
+input.php:10:21: (string) of a union value that may hold a list, a map, a shape, an enum or an object converts only as the first arm of is_scalar() ? : (P2R-233, P2R-270)
+input.php:18:9: this value is MapOrString, not bool, and PHP truthiness is not supported (P2R-42)
+input.php:29:12: calls to is_array are not supported (P2R-48)
+input.php:37:12: count() converts on a list or a map only (P2R-48, P2R-242)
+input.php:43:18: two members of this union give the variant name Map (P2R-230)
+input.php:59:17: two different unions give the Rust name BoolOrMap (P2R-230)
+input.php:69:12: an array literal cannot go where a union type is needed (P2R-231)

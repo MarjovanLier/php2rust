@@ -63,6 +63,20 @@ impl Converter<'_> {
             );
             return None;
         }
+        // Mago accepts a shape where a union's map member is declared (P2R-270, P2R-271).
+        if let RustType::Union(name) = declared.inner()
+            && !matches!(ty.inner(), RustType::Union(_))
+            && self
+                .type_names
+                .union(name)
+                .is_some_and(|members| !members.contains(ty.inner()))
+        {
+            self.refuse(
+                node,
+                "this value is no member of the union type it goes into (P2R-231)",
+            );
+            return None;
+        }
         if *ty == RustType::Option(Box::new(RustType::I64)) && *declared.inner() == RustType::F64 {
             self.refuse(
                 node,

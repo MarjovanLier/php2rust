@@ -295,7 +295,36 @@ impl Converter<'_> {
                 Some((RExpr::None, ty.clone()))
             }
             (Expression::Conditional(node), _) => self.conditional(node, expected),
-            (other, _) => self.expression(other),
+            (other, _) => {
+                let (expr, ty) = self.expression(other)?;
+                match expected.and_then(|wanted| self.map_for_shape(&ty, wanted)) {
+                    Some((key, value)) => self.shape_as_map(other, expr, &ty, (&key, &value)),
+                    None => Some((expr, ty)),
+                }
+            }
+        }
+    }
+
+    /// The key and value types of the map that a value of the shape type `ty` turns into
+    /// where `wanted` is needed: a map, or the `Map` variant of a union that has no
+    /// variant of that shape (P2R-270, P2R-271).
+    fn map_for_shape(&self, ty: &RustType, wanted: &RustType) -> Option<(RustType, RustType)> {
+        if !matches!(ty.inner(), RustType::Shape(_)) {
+            return None;
+        }
+        match wanted.inner() {
+            RustType::Map(key, value) => Some(((**key).clone(), (**value).clone())),
+            RustType::Union(name) => {
+                let members = self.type_names.union(name)?;
+                if members.contains(ty.inner()) {
+                    return None;
+                }
+                members.into_iter().find_map(|member| match member {
+                    RustType::Map(key, value) => Some((*key, *value)),
+                    _ => None,
+                })
+            }
+            _ => None,
         }
     }
 

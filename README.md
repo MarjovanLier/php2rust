@@ -195,7 +195,12 @@ converts:
   int key `5` and the key `'5'` are one key, as in PHP. A literal with a key on every
   element or none (keys 0, 1, 2), `$m = []`, `$m[k]`, `$m[k] = v`, `unset($m[k])`,
   `isset($m[k])`, `array_key_exists()`, `$m[k] ?? $d`, `count()` and `foreach` convert.
-  A declared map may hold a union (`array<int|string, scalar>`).
+  A declared map may hold a union (`array<int|string, scalar>`), and a declared union
+  may hold one map (`array<string, int>|string` gives `MapOrString { Map(..), String(..)
+  }`). An array shape value goes where a map with text keys is needed as
+  `IndexMap::from(shape)`: the output then holds a `From` impl that puts the PHP keys
+  in the order of the array literals that build the shape, which must all list them in
+  one order.
 - `preg_replace(P, R, S) ?? 'literal'` and `preg_match(P, S)` read as a bool (a
   condition, `!`, `&&`, `||`, or `=== 1`, `!== 0`, `=== 0` and `!== 1`), where `P` is a
   string literal, or a class or enum constant of the input with a literal value,
@@ -252,7 +257,11 @@ the others are findings of the Mago analyser. In short:
   a read on an array
   literal, a literal with a repeated key, a spread or an element without a key, an int
   for a `float` field (PHP keeps the int), a list of nullable objects (`list<?Point>`),
-  and a class that holds itself through `?C` (`?Node $next` in `Node`).
+  and a class that holds itself through `?C` (`?Node $next` in `Node`). A shape where a
+  map is needed when two literals build it in different key orders, when no literal
+  builds it, when a field has another type than the map's values, or when the map has
+  int keys. An array literal where a union is needed, and a union's map value used in a
+  condition, `count()`, `is_array()` or `(string)`.
 - For exceptions: the input's own exception classes (they need `extends`), `Error` and
   `TypeError`, an unimported `RuntimeException` inside a namespace, a constructor
   argument other than the message and the code, an exception object kept or passed
@@ -429,6 +438,9 @@ php2rust refuses some valid PHP that version 1 converts in other forms:
 - A pattern that runs past PCRE's backtrack, recursion or JIT stack limit: PHP's
   `preg_replace()` gives `null`, so `??` gives the default, and `preg_match()` gives
   `false`. Rust's `regex` has no such limit and gives the full result.
+- An array shape that becomes a map, where a PHP caller outside the converted code
+  built the array in another key order: the Rust map has the order of the converted
+  code's literals, because a struct has no order.
 - `Suit::from()` with a value that no case has: PHP throws a `ValueError` (exit code 255
   when uncaught), Rust panics (exit code 101).
 - An `int` property that overflows in `+=`, `-=`, `*=`, `++` or `--`: PHP throws a

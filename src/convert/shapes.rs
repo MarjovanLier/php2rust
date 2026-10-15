@@ -3,7 +3,7 @@
 
 use mago_codex::ttype::atomic::TAtomic;
 use mago_codex::ttype::atomic::scalar::TScalar;
-use mago_span::HasSpan;
+use mago_span::{HasSpan, Span};
 use mago_syntax::cst::*;
 
 use std::collections::BTreeMap;
@@ -12,7 +12,7 @@ use super::control::emit;
 use super::crates::{ItemKind, used_items};
 use super::lists::unparenthesized;
 use super::{Converter, nulls};
-use crate::printer::RExpr;
+use crate::printer::{self, RExpr};
 use crate::types::RustType;
 
 /// The problem of an array literal that is not a shape literal (P2R-202).
@@ -82,7 +82,9 @@ pub(super) fn named(
 }
 
 impl Converter<'_> {
-    /// The struct of each array shape the output uses, by name in byte order (P2R-200).
+    /// The struct of each array shape the output uses, by name in byte order (P2R-200),
+    /// followed by `impl From<S> for IndexMap<String, V>` for a shape that a place turns
+    /// into a map, in the one key order of the literals that build it (P2R-271).
     pub(super) fn shape_items(&self) -> Vec<(String, Vec<String>)> {
         self.type_names
             .shapes()
@@ -92,16 +94,116 @@ impl Converter<'_> {
                     "#[derive(Clone, Debug)]".to_owned(),
                     format!("pub struct {name} {{"),
                 ];
-                for field in fields {
+                for field in &fields {
                     lines.push(emit(
                         1,
                         format!("pub {}: {},", field.name, field.ty.owned()),
                     ));
                 }
                 lines.push("}".to_owned());
+                if let Some(order) = self.map_order(&name) {
+                    let value = fields
+                        .first()
+                        .map(|field| field.ty.owned())
+                        .unwrap_or_default();
+                    lines.push(String::new());
+                    lines.push(format!(
+                        "impl From<{name}> for IndexMap<String, {value}> {{"
+                    ));
+                    lines.push(emit(1, format!("fn from(shape: {name}) -> Self {{")));
+                    lines.push(emit(2, "IndexMap::from([".to_owned()));
+                    for key in order {
+                        let field = fields.iter().find(|field| field.key == *key);
+                        let text = printer::expr(
+                            &RExpr::Str(String::from_utf8_lossy(key).into_owned()),
+                            false,
+                        );
+                        let name = field.map(|field| field.name.as_str()).unwrap_or_default();
+                        lines.push(emit(3, format!("(String::from({text}), shape.{name}),")));
+                    }
+                    lines.push(emit(2, "])".to_owned()));
+                    lines.push(emit(1, "}".to_owned()));
+                    lines.push("}".to_owned());
+                }
                 (name, lines)
             })
             .collect()
+    }
+
+    /// The one key order of the literals that build the shape struct `name`, when a place
+    /// turns a value of it into a map (P2R-271).
+    fn map_order(&self, name: &str) -> Option<&Vec<Vec<u8>>> {
+        if !self.shape_maps.iter().any(|(_, shape)| shape == name) {
+            return None;
+        }
+        match self.shape_orders.get(name) {
+            Some(orders) if orders.len() == 1 => orders.first(),
+            _ => None,
+        }
+    }
+
+    /// Refuses each place that turns a shape into a map when the literals that build the
+    /// shape give no key order or more than one (P2R-271). Runs once every body converted.
+    pub(super) fn check_shape_maps(&mut self) {
+        let refused: Vec<Span> = self
+            .shape_maps
+            .iter()
+            .filter(|(_, shape)| self.shape_orders.get(shape).is_none_or(|o| o.len() != 1))
+            .map(|&(span, _)| span)
+            .collect();
+        for span in refused {
+            self.refuse(
+                &span,
+                "an array shape converts to a map only when every array literal that builds it lists its keys in one order, because PHP keeps the order of the literal (P2R-271)",
+            );
+        }
+    }
+
+    /// The value `expr` of the shape type `ty` where a map of text keys and `value` values
+    /// is needed, as `IndexMap::from(s)` or `s.map(IndexMap::from)`, copied first when it
+    /// is not owned (P2R-271).
+    pub(super) fn shape_as_map(
+        &mut self,
+        node: &Expression<'_>,
+        expr: RExpr,
+        ty: &RustType,
+        (key, value): (&RustType, &RustType),
+    ) -> Option<(RExpr, RustType)> {
+        let RustType::Shape(name) = ty.inner() else {
+            return Some((expr, ty.clone()));
+        };
+        if *key != RustType::String {
+            self.refuse(
+                node,
+                "an array shape converts only to a map with text keys (P2R-271)",
+            );
+            return None;
+        }
+        let fields = self.type_names.shape(name).unwrap_or_default();
+        if fields.iter().any(|field| field.ty != *value) {
+            self.refuse(
+                node,
+                "an array shape converts to a map only when every field has the map's value type (P2R-271)",
+            );
+            return None;
+        }
+        self.shape_maps.push((node.span(), name.clone()));
+        // Owned before the wrap, as an assigned value is: the place's own copy step sees
+        // only the call. The copy mark of a variable needs no statement span.
+        let expr = self.stored(node, expr, ty, node.span())?;
+        let map = RustType::Map(Box::new(RustType::String), Box::new(value.clone()));
+        Some(if matches!(ty, RustType::Option(_)) {
+            (
+                RExpr::MethodCall(
+                    Box::new(expr),
+                    "map".into(),
+                    vec![RExpr::Path("IndexMap::from".into())],
+                ),
+                RustType::Option(Box::new(map)),
+            )
+        } else {
+            (RExpr::Call("IndexMap::from".into(), vec![expr]), map)
+        })
     }
 
     /// `['k' => v, ...]` as a struct literal of the shape `expected` names, or of the shape
@@ -161,6 +263,11 @@ impl Converter<'_> {
             );
             return None;
         }
+        // PHP's key order of the shape value, which P2R-271 gives a map of it.
+        self.shape_orders
+            .entry(name.clone())
+            .or_default()
+            .insert(elements.iter().map(|&(key, _)| key.to_vec()).collect());
         // Every value converts, so the problems in each are reported.
         let values: Vec<Option<(String, RExpr)>> = elements
             .into_iter()

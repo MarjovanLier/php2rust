@@ -21,16 +21,6 @@ function unionField(array $s): int
 }
 
 /**
- * A map is no member of a union yet.
- *
- * @param array<string, string>|bool $m
- */
-function mapMember(array|bool $m): int
-{
-    return 1;
-}
-
-/**
  * @param array<string, int|string> $m
  */
 function wrongDefault(array $m): int|string

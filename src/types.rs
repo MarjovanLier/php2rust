@@ -303,9 +303,6 @@ pub fn declared_type(union: &TUnion, enums: &TypeNames) -> Result<RustType, Stri
             map
         });
     }
-    if members.iter().any(|ty| matches!(ty, RustType::Map(..))) {
-        return Err("a map inside a union is not supported yet (P2R-240)".to_owned());
-    }
     if members.len() < 2 {
         return Err(error);
     }

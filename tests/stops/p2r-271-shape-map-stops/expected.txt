@@ -1,0 +1,6 @@
+input.php:13:20: an array shape converts to a map only when every array literal that builds it lists its keys in one order, because PHP keeps the order of the literal (P2R-271)
+input.php:13:29: an array shape converts to a map only when every array literal that builds it lists its keys in one order, because PHP keeps the order of the literal (P2R-271)
+input.php:33:12: an array shape converts to a map only when every array literal that builds it lists its keys in one order, because PHP keeps the order of the literal (P2R-271)
+input.php:42:12: an array shape converts to a map only when every field has the map's value type (P2R-271)
+input.php:51:12: an array shape converts only to a map with text keys (P2R-271)
+input.php:61:12: an array shape converts to a map only when every array literal that builds it lists its keys in one order, because PHP keeps the order of the literal (P2R-271)

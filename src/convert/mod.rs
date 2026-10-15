@@ -504,6 +504,11 @@ struct Converter<'c> {
     /// of the `?:` whose first arm is converting, while that arm is `(string)` of it
     /// (P2R-233).
     scalar_guard: Option<Vec<u8>>,
+    /// The key orders, by PHP key, of the array literals that build each shape struct
+    /// (P2R-271).
+    shape_orders: BTreeMap<String, BTreeSet<Vec<Vec<u8>>>>,
+    /// The places that turn a value of a shape struct into a map, with its struct (P2R-271).
+    shape_maps: Vec<(Span, String)>,
 }
 
 impl<'c> Converter<'c> {
@@ -537,6 +542,8 @@ impl<'c> Converter<'c> {
             uses_exceptions: false,
             caught: Vec::new(),
             scalar_guard: None,
+            shape_orders: BTreeMap::new(),
+            shape_maps: Vec::new(),
         }
     }
 
@@ -794,6 +801,7 @@ impl<'c> Converter<'c> {
         }
         // Every body has converted, so every array shape the output uses is known; their
         // structs come first, in the crate root for a directory (P2R-200, P2R-172).
+        self.check_shape_maps();
         let mut shapes = self.shape_items();
         // The union enums follow the shape structs, in the same place (P2R-230).
         shapes.extend(self.union_items());

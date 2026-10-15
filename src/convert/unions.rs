@@ -351,7 +351,7 @@ impl Converter<'_> {
                 _ => {
                     self.refuse(
                         operand,
-                        "(string) of a union value that may hold a list, a shape, an enum or an object converts only as the first arm of is_scalar() ? : (P2R-233)",
+                        "(string) of a union value that may hold a list, a map, a shape, an enum or an object converts only as the first arm of is_scalar() ? : (P2R-233, P2R-270)",
                     );
                     return None;
                 }

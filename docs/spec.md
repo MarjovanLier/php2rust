@@ -82,7 +82,9 @@ stops of P2R-25 and P2R-230, the owned and lent forms and the
 other-union stop of P2R-231, the guarded `unreachable!()` of P2R-233
 (Mago's narrowed type alone proved unsound), the argument stop of
 P2R-234, the `use` line of P2R-174, and the `Result`, `Ok` and `Err`
-names of P2R-210.
+names of P2R-210. Section 25 (maps) was written on 15 Oct 2026; it
+changes P2R-07, P2R-22, P2R-50, P2R-60, P2R-82 and the roadmap of
+section 10, whose open point on output that needs a crate it decides.
 
 php2rust converts typed PHP source into normal, readable Rust (`Vec`,
 `String`, `i64`), without AI. It reads PHP with the Mago crates, uses Mago's
@@ -126,7 +128,7 @@ requirement IDs.
   the same stdout bytes, the same output file bytes and the same stderr
   bytes.
 - **P2R-07** Only the constructs that sections 3 to 5, 11 to 19 and 21 to
-  24 list as converting may convert. Any other construct MUST stop the conversion,
+  25 list as converting may convert. Any other construct MUST stop the conversion,
   which means it is reported as a problem under P2R-03. Examples that stop
   in version 1 (section 16 converts `namespace`, `use` and class
   constants, and section 17 two casts):
@@ -182,7 +184,7 @@ requirement IDs.
 - **P2R-22** Any other type (`mixed`, other than at the places of the
   `ArrayAccess` methods that take K or V (P2R-220), a union of different
   base types other
-  than `T|null` (P2R-100) and the declared unions of P2R-230, `array` without a list element type or a shape
+  than `T|null` (P2R-100) and the declared unions of P2R-230, `array` without a list element type, a shape or the key and value types of a map (P2R-240)
   (P2R-200), the type
   `null` of a variable, parameter or return value (the literal `null`
   converts by P2R-102), objects other than enums and the classes of
@@ -341,7 +343,8 @@ requirement IDs.
 - **P2R-50** The output MUST compile with no warnings under
   `rustc --edition 2024 -D warnings` from the pinned toolchain (P2R-83): as a
   program when it has `fn main()`, as a library (`--crate-type lib`)
-  otherwise. When the tool cannot produce such code for an input, it MUST
+  otherwise, with `--extern indexmap=..` for output that names `IndexMap`
+  (P2R-243). When the tool cannot produce such code for an input, it MUST
   stop instead. Int arithmetic that the tool can prove overflows, and `%` by
   a divisor it can prove is 0, MUST stop the conversion: rustc rejects many
   such cases at compile time, and whether it does depends on how the value
@@ -371,8 +374,8 @@ requirement IDs.
   - `intdiv(PHP_INT_MIN, -1)`, and division by zero in `intdiv()` or `%`:
     PHP throws an error (exit code 255 when uncaught), Rust panics (exit
     code 101) with a different message.
-  - Reading a list at a negative index or past its end: PHP warns and gives
-    `null`. Rust panics.
+  - Reading a list at a negative index or past its end, or a map at a key it
+    does not have (P2R-242): PHP warns and gives `null`. Rust panics.
   - `E::from()` with a value that no case of the enum `E` has: PHP throws a
     `ValueError` (exit code 255 when uncaught), Rust panics (exit code 101).
   - An `int` property that overflows in `+=`, `-=`, `*=`, `++` or `--`: PHP
@@ -453,8 +456,9 @@ requirement IDs.
 - **P2R-82** The README MUST state what the tool does, how to install it
   (`cargo install --locked`), that it needs `rustfmt` on `PATH` (P2R-190),
   which rustup's minimal profile leaves out, how to run it, the supported
-  PHP, the refusal rules in short, the known differences (P2R-60) and the
-  command of P2R-76.
+  PHP, the refusal rules in short, the known differences (P2R-60), the
+  `indexmap` dependency of output with a map (P2R-243) and the command of
+  P2R-76.
 - **P2R-83** The Rust toolchain MUST be pinned in `rust-toolchain.toml`. The
   `rust-version` in `Cargo.toml` MUST equal the `rust-version` of the pinned
   Mago crates (1.99.0 for Mago 1.55.0), and the pinned toolchain MUST be at
@@ -493,7 +497,9 @@ Each milestone gets its own requirements in this file when its work starts.
   (section 21); exceptions as `Result` (section 22); `ArrayAccess` classes
   as plain methods (section 23, not Rust's `Index`, which cannot throw);
   declared unions as generated enums and `?->` (section 24); maps on
-  `indexmap`; `preg_*`; interfaces and inheritance; closures; then the
+  `indexmap` (section 25); narrowing a union value with `is_string()` and
+  its kin, and unions as list and map values; `preg_*`; interfaces and
+  inheritance; closures; then the
   `StringManipulation` library, which `SouthAfricanIDValidator` calls.
   `SouthAfricanIDValidator` calls `StringManipulation::isValidDate`, which
   lives in another package, and P2R-153 resolves calls inside the input
@@ -507,9 +513,9 @@ Each milestone gets its own requirements in this file when its work starts.
     needs an engine, such as `preg_replace`, takes a crate, as maps take
     `indexmap`. Which formats of `DateTime::createFromFormat` a helper
     covers is not decided.
-  - Output that needs a crate cannot be built with plain `rustc`, which
-    P2R-50, P2R-72 and P2R-176 use; how such output and its tests are built
-    (a `Cargo.toml` beside it) is not decided.
+  - Output that needs a crate is built with plain `rustc` and
+    `--extern`, which P2R-243 decides for `indexmap`; the tool writes no
+    `Cargo.toml`, and the README names the dependency.
   - Dynamic PHP (`mixed`, magic methods, facades, reflection, arrays with
     values of mixed types) has no plain Rust form. Converting it needs a
     dynamic value type, which no section specifies yet.
@@ -2128,6 +2134,85 @@ inside a list or a shape field waits for a later slice.
   reads a variable of the closure's binding name; and `?->` on the left of
   an assignment, in `isset`, `unset` or `empty`, or inside an interpolated
   string (P2R-45).
+
+## 25. Maps (milestone 2, slice 15)
+
+Real code keys arrays by strings or ints (`array<string, bool>`,
+`array<int, Item>`). This section converts them to `IndexMap`, which keeps
+insertion order as a PHP array does. PHP stores a string key that is a
+canonical decimal integer (`'5'`, `'-5'`, not `'05'` or `'-0'`) as an int
+key, and turns a lookup key the same way, so a map keyed by the text of
+the key gives PHP's result for every insert, read and check; the int form
+becomes visible only where a key leaves the map, and those forms stop. In
+the validator this slice moves no problem line by itself: its
+`batchValidate` also needs the union narrowing of the next slice, and its
+`toArray` puts a shape where a map is declared, which stops. The Laravel
+application's `array<string, mixed>` values keep P2R-22.
+
+- **P2R-240** An array type with a key type and a value type and no known
+  keys (`array<K, V>`, `non-empty-array<K, V>`) MUST map to a map type:
+  `IndexMap<i64, V>` when `K` is `int`, and `IndexMap<String, V>` when `K`
+  is `string`, `int|string` or `array-key`, where `V` is the Rust type of
+  the value type (P2R-20). A map parameter becomes `&IndexMap<K, V>`, an
+  owned map is returned, and P2R-26 copies a map with `.clone()`, as it
+  copies a list; a map may be a list element, a shape field, a property and
+  a map value. Output that names `IndexMap` holds `use indexmap::IndexMap;`
+  after the P2R-52 line, or for a directory input in each module that
+  names it, and rustfmt sorts it with the other `use` lines (P2R-190).
+  These stop the conversion: a key type other than those, a value type
+  with no Rust type (P2R-22, `array<string, mixed>` included), a union
+  value type or a union member that is a map (a later slice), and a map
+  type inside a union.
+- **P2R-241** An array literal whose elements all have a key where a map
+  type is needed (the places of P2R-202: a return value, an argument for a
+  parameter, of `new` too, an assignment to a property, a property or
+  parameter default, and an element of a list literal or an arm of a
+  `match` or `?:` that stands in such a place) MUST convert to
+  `IndexMap::from([(key, value), ..])` in source order, so a repeated key
+  keeps its first position and its last value, as in PHP; `[]` there
+  converts to `IndexMap::new()`. A key is an int or string value: an int
+  key of an `IndexMap<String, V>` becomes its text (`5.to_string()`, a
+  literal as `String::from("5")`), and a string literal key
+  `String::from("k")`. Each value converts as a value assigned to a
+  variable of `V` (P2R-26, P2R-102). These stop the conversion: an element
+  without a key, a spread element or a by-reference element; a key of
+  another type (float, bool, null), and a string key of an
+  `IndexMap<i64, V>`, because PHP makes a canonical decimal string an int
+  and keeps any other string; and an array literal whose type Mago gives as
+  a shape where no map type is needed, which stays a shape (P2R-202).
+- **P2R-242** These forms MUST convert on a map `$m`, a variable,
+  parameter or property, where `k` is a key of the map's key type (an int
+  `k` of an `IndexMap<String, V>` given as its text, by P2R-241):
+  `$m[k]` to `m[k]`, read as a list element is read (P2R-47, P2R-26:
+  a Copy value as it is, any other copied with `.clone()` where P2R-26
+  copies); `$m[k] = v;` to `m.insert(k, v);`; `unset($m[k]);` to
+  `m.shift_remove(k);`, which keeps the order of the other entries as PHP
+  does; `isset($m[k])` to `m.contains_key(k)`, or for an `Option` value
+  `m.get(k).is_some_and(Option::is_some)`, because PHP's `isset` is false
+  for a null value; `array_key_exists(k, $m)` to `m.contains_key(k)`;
+  `$m[k] ?? $d` by P2R-105 on `m.get(k)` with an `Option` value flattened;
+  `count($m)` to `m.len() as i64`; `foreach ($m as $v)` over
+  `m.values()`, by the rules P2R-41 gives a list; and `foreach ($m as $k =>
+  $v)` over an `IndexMap<i64, V>`. A map parameter that the body changes is
+  copied first, as P2R-181 copies a list. Reading a key the map does not
+  have is a known difference (P2R-60): PHP warns and gives null, Rust
+  panics. These stop the conversion: `$m[] = v`, because PHP's next index
+  is the highest int key the array has ever had; a key leaving an
+  `IndexMap<String, V>`, where PHP gives an int for a canonical decimal
+  string (`foreach ($m as $k => $v)`, `array_keys`, `array_key_first`,
+  `array_key_last`, `array_flip`, `array_search`, `key()`); `array_merge`,
+  `+`, a sort and any output of a whole map (`json_encode`, `var_dump`,
+  `print_r`, `echo`), which renumber or show the keys; a compound
+  assignment or `??=` on an element (`$m[k] += 1`); a comparison of two
+  maps; a key of another type, or a string key of an `IndexMap<i64, V>`
+  (P2R-241); and a `foreach` over a map whose body changes the map.
+- **P2R-243** A map case MUST build with plain `rustc` given the
+  `indexmap` crate (`--extern indexmap=..`), and the tests MUST build that
+  crate, pinned to version 2.14.2, from a small cargo project in the
+  repository, so P2R-50, P2R-72 and P2R-176 hold for output that names
+  `IndexMap`. The README MUST say that such output needs the dependency
+  `indexmap = "2"` in the `Cargo.toml` that builds it; the tool writes no
+  `Cargo.toml`.
 
 ## Spec checklist
 

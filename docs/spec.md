@@ -2179,9 +2179,12 @@ application's `array<string, mixed>` values keep P2R-22.
   (P2R-22, `array<string, mixed>` included); a value type that is or holds
   a class that changes its objects (P2R-141), because such a class derives
   no `Clone`; a union value type, and a map as a union member (a later
-  slice); a value of a list or shape type where a map type is needed, and
-  a map where a list or shape is needed, other than the array literals of
-  P2R-241, which Mago does not report; an enum or class named `IndexMap`
+  slice); a value of a list or shape type where a map type is needed, a
+  map where a list or shape is needed, and a map where a map of another
+  key or value type is needed (`array<string, int>` where
+  `array<string, ?int>` or `array<string, float>` is declared, at any
+  depth), because PHP keeps each value as it is, while an array literal of
+  P2R-241 takes the map type it goes to; an enum or class named `IndexMap`
   (P2R-111, P2R-131); and a root module named `indexmap` (P2R-172).
 - **P2R-241** An array literal whose elements all have a key where a map
   type is needed (the places of P2R-202: a return value, an argument for a

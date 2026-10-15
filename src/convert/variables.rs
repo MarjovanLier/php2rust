@@ -1711,7 +1711,8 @@ impl Converter<'_> {
         node: &impl HasSpan,
         read: bool,
     ) -> Result<RustType, String> {
-        if matches!(known, RustType::Vec(_)) && self.empty_list(node) {
+        // `[]` has the variable's list or map type (P2R-21, P2R-241).
+        if matches!(known, RustType::Vec(_) | RustType::Map(..)) && self.empty_list(node) {
             return Ok(known.clone());
         }
         // Mago records no type for a variable read again after a property read, as in

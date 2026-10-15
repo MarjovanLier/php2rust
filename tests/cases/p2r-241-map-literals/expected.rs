@@ -54,6 +54,17 @@ pub fn show_ints(m: &IndexMap<i64, String>) -> String {
     return out;
 }
 
+pub fn chunks(keys: &[String]) -> IndexMap<String, i64> {
+    let mut m: IndexMap<String, i64> = IndexMap::new();
+    for k in keys.to_vec() {
+        m.insert(k.clone(), k.len() as i64);
+        if k == "cut" {
+            m = IndexMap::new();
+        }
+    }
+    return m;
+}
+
 fn main() {
     print!("{}", show(&keyed("x", "x")));
     print!("\n");
@@ -70,5 +81,15 @@ fn main() {
     print!("{}", pick(1).len() as i64);
     print!(" ");
     print!("{}", pick(2).len() as i64);
+    print!("\n");
+    print!(
+        "{}",
+        show(&chunks(&[
+            String::from("ab"),
+            String::from("cut"),
+            String::from("xyz"),
+            String::from("q")
+        ]))
+    );
     print!("\n");
 }

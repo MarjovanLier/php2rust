@@ -86,3 +86,32 @@ function passes(): int
     $shape = ['a' => 1];
     return takeMap($shape) + takeMap($list) + takeList(intMap()) + takeMap(intMap());
 }
+
+/**
+ * PHP keeps each value of a map as it is, so no map converts to a map of other values.
+ *
+ * @param array<string, int> $m
+ * @return array<string, ?int>
+ */
+function nullableValues(array $m): array
+{
+    return $m;
+}
+
+/**
+ * @param array<string, float> $m
+ */
+function takeFloats(array $m): int
+{
+    return count($m);
+}
+
+/**
+ * @param array<string, int> $m
+ * @return list<array<string, ?int>>
+ */
+function nested(array $m): array
+{
+    takeFloats($m);
+    return [$m];
+}

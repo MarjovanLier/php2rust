@@ -262,7 +262,8 @@ the others are findings of the Mago analyser. In short:
   where another union type is needed.
 - For maps: a value type that is a union, `mixed` or a class that changes its objects, a
   map inside a union, a key type other than int, string or `array-key`, a list or shape
-  where a map is needed (or the other way round), a float, bool, null or union key, a
+  where a map is needed (or the other way round), a map where a map of other key or value
+  types is needed (`array<string, int>` for `array<string, ?int>`), a float, bool, null or union key, a
   string key of an int-keyed map, an int for a `float` value, `$m[] = v`, a key with
   `foreach` over a map with text keys, `+=`, `++` or `??=` on an element, a write or
   `unset` of an element of a map property, comparing or printing a map, `isset` or

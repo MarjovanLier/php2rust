@@ -63,6 +63,24 @@ function showInts(array $m): string
     return $out;
 }
 
+/**
+ * `[]` on a map variable that holds a map already.
+ *
+ * @param list<string> $keys
+ * @return array<string, int>
+ */
+function chunks(array $keys): array
+{
+    $m = [];
+    foreach ($keys as $k) {
+        $m[$k] = strlen($k);
+        if ($k === 'cut') {
+            $m = [];
+        }
+    }
+    return $m;
+}
+
 // A key that repeats at run time keeps its first place and its last value.
 echo show(keyed('x', 'x')), "\n";
 echo show(keyed('x', '16')), "\n";
@@ -70,3 +88,4 @@ echo showInts(names(3)), "\n";
 echo showInts(names(9)), "\n";
 echo count(prices(true)), ' ', count(prices(false)), "\n";
 echo count(pick(1)), ' ', count(pick(2)), "\n";
+echo show(chunks(['ab', 'cut', 'xyz', 'q'])), "\n";

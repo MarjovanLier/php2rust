@@ -34,7 +34,7 @@ pub(super) const UNSET: &str =
 const KEY_CHECK: &str = "isset and array_key_exists() convert only on a map in a variable, parameter or property (P2R-242)";
 
 /// The problem of a list or shape where a map is needed, or the other way round (P2R-240).
-pub(super) const MAP_CLASH: &str = "a list or array shape cannot go where a map is needed, nor a map where a list, an array shape or a map with the other key type is needed (P2R-240)";
+pub(super) const MAP_CLASH: &str = "a map goes only where a map of the same key and value types is needed, and a list or array shape never goes where a map is needed (P2R-240)";
 
 /// True for a map in a variable, a parameter or a chain of property reads, which reads no
 /// element and calls nothing on the way (P2R-242).
@@ -47,14 +47,13 @@ pub(super) fn plain_holder(expression: &Expression<'_>) -> bool {
 }
 
 /// True where a list or shape value meets a map type, a map value a list or shape type, or
-/// a map value a map type with the other key type, at any depth (P2R-240).
+/// a map value a map type with another key or value type, at any depth. PHP keeps each
+/// value of a map as it is, so no conversion of the values applies (P2R-240).
 pub(super) fn map_clash(found: &RustType, declared: &RustType) -> bool {
     match (found, declared) {
         (RustType::Map(..), RustType::Vec(_) | RustType::Shape(_))
         | (RustType::Vec(_) | RustType::Shape(_), RustType::Map(..)) => true,
-        (RustType::Map(found_key, found), RustType::Map(declared_key, declared)) => {
-            found_key != declared_key || map_clash(found, declared)
-        }
+        (RustType::Map(..), RustType::Map(..)) => found != declared,
         (RustType::Option(found), declared) => map_clash(found, declared),
         (found, RustType::Option(declared)) => map_clash(found, declared),
         (RustType::Vec(found), RustType::Vec(declared)) => map_clash(found, declared),

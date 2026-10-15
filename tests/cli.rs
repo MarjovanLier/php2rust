@@ -287,16 +287,27 @@ fn an_include_path_reads_the_same_however_written() {
     assert!(
         stderr_of(&dir, &["in.php", "--include", "linked"]).contains("unknown-ref(Lib\\Money)")
     );
-    // A file that does not parse gives no symbols, even those before the error.
+    // A symbolic link to a directory as the path is walked.
+    money(&dir, &dir.join("php/money.php"));
+    std::os::unix::fs::symlink(dir.join("php"), dir.join("walked")).unwrap();
+    assert_eq!(stderr_of(&dir, &["in.php", "--include", "walked"]), known);
+    // A file that does not parse, or is not UTF-8, gives no symbols.
     std::fs::write(
         dir.join("lib/broken.php"),
         "<?php\n\nnamespace Lib;\n\nfinal class Money\n{\n}\n\nfunction (\n",
     )
     .unwrap();
-    assert!(
-        stderr_of(&dir, &["in.php", "--include", "lib/broken.php"])
-            .contains("unknown-ref(Lib\\Money)")
-    );
+    std::fs::write(
+        dir.join("lib/latin.php"),
+        b"<?php\n\nnamespace Lib;\n\n// caf\xe9\nfinal class Money\n{\n}\n",
+    )
+    .unwrap();
+    for broken in ["lib/broken.php", "lib/latin.php"] {
+        assert!(
+            stderr_of(&dir, &["in.php", "--include", broken]).contains("unknown-ref(Lib\\Money)"),
+            "{broken}"
+        );
+    }
     let _ = std::fs::remove_dir_all(&dir);
 }
 
@@ -304,9 +315,10 @@ fn an_include_path_reads_the_same_however_written() {
 #[test]
 fn an_input_under_an_include_path_stays_input() {
     let dir = scratch("include-input");
+    // The function is declared twice, once as input and once as included code.
     std::fs::write(
         dir.join("in.php"),
-        "<?php\n\ndeclare(strict_types=1);\n\necho \"x\\n\";\n",
+        "<?php\n\ndeclare(strict_types=1);\n\nfunction one(): int\n{\n    return 1;\n}\n\necho one(), \"\\n\";\n",
     )
     .unwrap();
     let run = |args: &[&str]| {

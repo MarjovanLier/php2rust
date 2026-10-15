@@ -8,7 +8,7 @@ input.php:43:19: the subject of a match must be an int, bool, string or enum (P2
 input.php:51:12: (int) is supported only on a string (P2R-166)
 input.php:76:12: a property read or method call on a value of a union type is not supported (P2R-232)
 input.php:81:12: a property read or method call on a value of a union type is not supported (P2R-232)
-input.php:87:14: foreach converts over a list only (P2R-41)
+input.php:87:14: foreach converts over a list or a map only (P2R-41, P2R-242)
 input.php:88:16: Could not infer a precise return type for function `looped`. Saw type `mixed`. (mixed-return-statement)
 input.php:96:12: only a list or a string can be read by index (P2R-47, P2R-165)
 input.php:101:12: the right side of ?? must have the type IntOrString here (P2R-105)

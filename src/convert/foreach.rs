@@ -32,7 +32,8 @@ impl Converter<'_> {
             ForeachBody::Statement(inner) => statements_of(inner),
             ForeachBody::ColonDelimited(inner) => inner.statements.iter().collect(),
         };
-        let (element, by_ref, iter) = self.iteration(statement);
+        let (element, by_ref, iter, map_key) = self.iteration(statement);
+        let map = map_key.is_some();
         let lent = element.as_ref().is_some_and(|ty| self.is_changing(ty));
         let lent_mode = if self.loops.by_mut.contains(&statement.span()) {
             Mode::Mut
@@ -58,14 +59,18 @@ impl Converter<'_> {
         flow.enter(start);
         let outer = self.variables.open(slot, true);
         let key = statement.target.key();
-        let key_var = key.map(|key| self.binding(key, Some(RustType::I64)));
+        // A refused key of a map keyed by text still has its type, so its reads add no
+        // problem (P2R-03).
+        let key_type = map_key.unwrap_or(RustType::I64);
+        let key_var = key.map(|key| self.binding(key, Some(key_type)));
         let value_var = self.binding(statement.target.value(), element);
         if let (true, Some(value)) = (lent, value_var) {
             self.variables.lend(value, lent_mode);
         }
+        // A map gives its own keys (P2R-242).
         let iter = match key {
-            Some(_) => format!("(0_i64..).zip({iter})"),
-            None => iter,
+            Some(_) if !map => format!("(0_i64..).zip({iter})"),
+            _ => iter,
         };
         let open = if empty(&statements) { "{}" } else { "{" };
         let rest = format!(" in {iter} {open}");
@@ -73,7 +78,7 @@ impl Converter<'_> {
             (None, Some(value)) => self.variables.for_line(depth, None, value, by_ref, rest),
             (Some(Some(key)), Some(value)) => {
                 self.variables
-                    .for_line(depth, Some(key), value, by_ref, rest)
+                    .for_line(depth, Some((key, map && by_ref)), value, by_ref, rest)
             }
             // A refused target: the conversion fails, so the line is never printed.
             _ => indent(depth),
@@ -107,26 +112,34 @@ impl Converter<'_> {
     }
 
     /// Converts the list of a foreach. Gives its element type, `None` when a problem is
-    /// recorded, whether the loop borrows it, and its Rust text (P2R-26, P2R-41).
-    fn iteration(&mut self, statement: &Foreach<'_>) -> (Option<RustType>, bool, String) {
+    /// recorded, whether the loop borrows it, its Rust text, and the key type of a map
+    /// (P2R-26, P2R-41, P2R-242).
+    fn iteration(
+        &mut self,
+        statement: &Foreach<'_>,
+    ) -> (Option<RustType>, bool, String, Option<RustType>) {
         let list = statement.expression;
         let Some((expr, ty)) = self.expression(list) else {
-            return (None, false, String::new());
+            return (None, false, String::new(), None);
         };
+        if let RustType::Map(key, value) = &ty {
+            let (element, by_ref, iter) = self.map_iteration(statement, expr, &ty, key, value);
+            return (element, by_ref, iter, Some((**key).clone()));
+        }
         let RustType::Vec(element) = &ty else {
             let message = if matches!(ty, RustType::Option(_)) {
                 "foreach over a value that may be null is not supported (P2R-106)"
             } else {
-                "foreach converts over a list only (P2R-41)"
+                "foreach converts over a list or a map only (P2R-41, P2R-242)"
             };
             self.refuse(list, message);
-            return (None, false, String::new());
+            return (None, false, String::new(), None);
         };
         if self.is_changing(element) {
             let by_mut = self.loops.by_mut.contains(&statement.span());
             return match self.lent_list(list, expr, by_mut) {
-                Some(iter) => (Some((**element).clone()), false, iter),
-                None => (None, false, String::new()),
+                Some(iter) => (Some((**element).clone()), false, iter, None),
+                None => (None, false, String::new(), None),
             };
         }
         // A Copy value comes out of a borrowed list as a plain value. A list field is
@@ -139,7 +152,7 @@ impl Converter<'_> {
         if field && self.loops.copied.contains(&statement.span()) {
             let copy = RExpr::Method(Box::new(expr), "clone");
             let iter = printer::expr(&copy, true);
-            return (Some((**element).clone()), false, iter);
+            return (Some((**element).clone()), false, iter, None);
         }
         let by_ref = (holder(list).is_some() || field) && element.is_copy();
         let expr = if by_ref {
@@ -147,11 +160,55 @@ impl Converter<'_> {
         } else {
             match self.stored(list, expr, &ty, list.span()) {
                 Some(expr) => expr,
-                None => return (None, false, String::new()),
+                None => return (None, false, String::new(), None),
             }
         };
         let iter = printer::expr(&expr, true);
-        (Some((**element).clone()), by_ref, iter)
+        (Some((**element).clone()), by_ref, iter, None)
+    }
+
+    /// The map `expr` of the type `ty` that a foreach iterates: `m.values()` for its Copy
+    /// values, `m.values().cloned()` for others, and with a key of an int-keyed map `&m`,
+    /// or `m.clone()` for values that are not Copy (P2R-242).
+    fn map_iteration(
+        &mut self,
+        statement: &Foreach<'_>,
+        expr: RExpr,
+        ty: &RustType,
+        key: &RustType,
+        value: &RustType,
+    ) -> (Option<RustType>, bool, String) {
+        let list = statement.expression;
+        if let Some(target) = statement.target.key()
+            && *key == RustType::String
+        {
+            self.refuse(
+                target,
+                "a foreach key of a map keyed by text is not supported, because PHP gives an int for a decimal string key (P2R-242)",
+            );
+            return (None, false, String::new());
+        }
+        let field = matches!(
+            unparenthesized(list),
+            Expression::Access(Access::Property(_))
+        );
+        // As for a list field, the body changes the object that holds the map (P2R-146).
+        let expr = if field && self.loops.copied.contains(&statement.span()) {
+            RExpr::Method(Box::new(expr), "clone")
+        } else {
+            expr
+        };
+        let by_ref = value.is_copy();
+        let place = holder(list).is_some() || field;
+        let values = || RExpr::MethodCall(Box::new(expr.clone()), "values".to_owned(), Vec::new());
+        let iter = match (statement.target.key().is_some(), by_ref) {
+            (false, true) => values(),
+            (false, false) => RExpr::Method(Box::new(values()), "cloned"),
+            (true, true) => self.borrowed(expr, ty),
+            (true, false) if place => RExpr::Method(Box::new(expr), "clone"),
+            (true, false) => expr,
+        };
+        (Some(value.clone()), by_ref, printer::expr(&iter, true))
     }
 
     /// The Rust text of a list of a changing type that a foreach iterates by reference:

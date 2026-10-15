@@ -543,8 +543,10 @@ impl Converter<'_> {
             {
                 RExpr::MapOwned(Box::new(RExpr::Var(name)))
             }
-            // Rust cannot move a string or list out of a list.
-            RExpr::Index(..) if !ty.is_copy() => RExpr::Method(Box::new(expr), "clone"),
+            // Rust cannot move a string or list out of a list or a map.
+            RExpr::Index(..) | RExpr::Key(..) if !ty.is_copy() => {
+                RExpr::Method(Box::new(expr), "clone")
+            }
             // The `&str` that `??` gives with a borrowed default (P2R-105).
             lent if *ty == RustType::String && self.lends(&lent) => {
                 RExpr::Method(Box::new(lent), "to_string")

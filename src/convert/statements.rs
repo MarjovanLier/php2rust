@@ -53,6 +53,7 @@ impl Converter<'_> {
                 self.expression_statement(expression.expression, depth, body)
             }
             Statement::Noop(_) => {}
+            Statement::Unset(unset) => self.unset_statement(unset, depth, body),
             Statement::If(r#if) => self.if_statement(r#if, depth, context, body),
             Statement::While(r#while) => self.while_statement(r#while, depth, context, body),
             Statement::For(r#for) => self.for_statement(r#for, depth, context, body),
@@ -206,6 +207,10 @@ impl Converter<'_> {
             }
             _ if matches!(ty, RustType::Shape(_)) => {
                 self.refuse(value, "echo of an array shape is not supported (P2R-201)");
+                None
+            }
+            _ if matches!(ty, RustType::Map(..)) => {
+                self.refuse(value, "echo of a map is not supported (P2R-242)");
                 None
             }
             _ if matches!(ty.inner(), RustType::Union(_)) => {

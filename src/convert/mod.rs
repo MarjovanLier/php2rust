@@ -41,6 +41,7 @@ mod foreach;
 mod functions;
 mod helpers;
 mod lists;
+mod maps;
 mod matching;
 mod modes;
 mod nulls;
@@ -816,6 +817,15 @@ impl<'c> Converter<'c> {
         items.splice(0..0, shapes.into_iter().map(|(_, lines)| lines));
         items.extend(exception);
         items.extend(self.helpers.iter().map(|(_, helper)| helper.lines()));
+        let text = items
+            .iter()
+            .chain([&main])
+            .flatten()
+            .cloned()
+            .collect::<Vec<_>>();
+        if crates::names_index_map(&text.join("\n")) {
+            items.insert(0, vec![crates::INDEX_MAP_USE.to_owned()]);
+        }
         vec![(String::new(), assemble(items, main))]
     }
 }

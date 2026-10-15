@@ -12,7 +12,7 @@ use mago_syntax::cst::*;
 use mago_syntax::walker::Walker;
 
 use super::helpers::Helper;
-use super::{Converter, ParameterSignature, nulls, parameter_index};
+use super::{Converter, ParameterSignature, maps, nulls, parameter_index};
 use crate::printer::RExpr;
 use crate::types::{self, RustType};
 
@@ -60,7 +60,7 @@ pub(super) fn unparenthesized<'e, 'a>(expression: &'e Expression<'a>) -> &'e Exp
 /// The types the reads and writes of one body give each variable name, for the literals
 /// that have no type of their own: `[]` and `null`.
 pub(super) struct SiteTypes {
-    /// The list type of each name, for a `[]` (P2R-21).
+    /// The list or map type of each name, for a `[]` (P2R-21, P2R-241).
     pub(super) lists: HashMap<Vec<u8>, Option<RustType>>,
     /// The `Option` type of each name that may hold null (P2R-102); `None` when its reads
     /// and writes give different types.
@@ -126,7 +126,8 @@ impl Sites<'_> {
                 }
             })
             .or_insert(Some(inner));
-        if !matches!(ty, RustType::Vec(_)) {
+        // A `[]` takes a map type as it takes a list type (P2R-241).
+        if !matches!(ty, RustType::Vec(_) | RustType::Map(..)) {
             return;
         }
         self.found
@@ -271,6 +272,9 @@ impl Converter<'_> {
                 );
                 None
             }
+            (Expression::Array(array), Some(ty)) if let RustType::Map(key, value) = ty.inner() => {
+                self.map_literal(array, key, value)
+            }
             (Expression::Array(array), _) => self.list(array, expected),
             (Expression::Literal(Literal::Null(_)), Some(ty @ RustType::Option(_))) => {
                 Some((RExpr::None, ty.clone()))
@@ -316,6 +320,13 @@ impl Converter<'_> {
             {
                 Ok(expected.clone())
             }
+            // Mago types a map literal as a shape, so the elements take the map type
+            // (P2R-241).
+            Some(expected @ RustType::Vec(element))
+                if matches!(element.inner(), RustType::Map(..)) =>
+            {
+                Ok(expected.clone())
+            }
             _ => self.site_type(array),
         };
         let ty = match found {
@@ -329,7 +340,10 @@ impl Converter<'_> {
         // into the list (P2R-26). In a list of `Option`, `null` is `None` and every other
         // element is `Some(..)` (P2R-102).
         let wanted = match &ty {
-            RustType::Vec(element) if matches!(**element, RustType::Option(_)) => {
+            RustType::Vec(element)
+                if matches!(**element, RustType::Option(_))
+                    || matches!(element.inner(), RustType::Map(..)) =>
+            {
                 Some((**element).clone())
             }
             _ => None,
@@ -343,6 +357,12 @@ impl Converter<'_> {
                     && nulls::null_for_plain(&element, target)
                 {
                     self.refuse(value, nulls::NULL_ELEMENT);
+                    return None;
+                }
+                if let RustType::Vec(target) = &ty
+                    && maps::map_clash(&element, target)
+                {
+                    self.refuse(value, maps::MAP_CLASH);
                     return None;
                 }
                 let expr = self.stored(value, expr, &element, array.span())?;
@@ -389,6 +409,9 @@ impl Converter<'_> {
         let list = self.expression(access.array);
         if let Some((object, RustType::Shape(name))) = list {
             return self.shape_read(access, object, &name);
+        }
+        if let Some((object, RustType::Map(key, value))) = list {
+            return self.map_read(access, object, &key, *value);
         }
         let index = self.expression(access.index);
         let ((list, list_type), (index, index_type)) = (list?, index?);
@@ -567,8 +590,11 @@ impl Converter<'_> {
             self.refuse(arguments[0], nulls::NULL_BUILT_IN);
             return None;
         }
-        if !matches!(ty, RustType::Vec(_)) {
-            self.refuse(node, "count() converts on a list only (P2R-48)");
+        if !matches!(ty, RustType::Vec(_) | RustType::Map(..)) {
+            self.refuse(
+                node,
+                "count() converts on a list or a map only (P2R-48, P2R-242)",
+            );
             return None;
         }
         Some((RExpr::Len(Box::new(list)), RustType::I64))

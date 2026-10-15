@@ -80,6 +80,12 @@ impl Converter<'_> {
             Expression::Call(Call::Function(call)) if self.calls_built_in(call, b"count") => {
                 self.count(call, expression)
             }
+            Expression::Call(Call::Function(call))
+                if self.calls_built_in(call, b"array_key_exists") =>
+            {
+                self.array_key_exists(call, expression)
+            }
+            Expression::Construct(Construct::Isset(isset)) => self.isset(isset, expression),
             Expression::Call(Call::Function(call)) if self.calls_built_in(call, b"intdiv") => {
                 self.intdiv(call, expression)
             }
@@ -332,7 +338,7 @@ impl Converter<'_> {
             RustType::F64 => "double",
             RustType::Bool => "boolean",
             RustType::String => "string",
-            RustType::Vec(_) | RustType::Shape(_) => "array",
+            RustType::Vec(_) | RustType::Shape(_) | RustType::Map(..) => "array",
             RustType::Enum(_) | RustType::Class(_) => "object",
             RustType::Option(_) => {
                 self.refuse(arguments[0], nulls::NULL_BUILT_IN);

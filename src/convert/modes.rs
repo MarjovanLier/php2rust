@@ -1122,10 +1122,11 @@ impl<'ast, 'arena, 'x, 'c> Walker<'ast, 'arena, Body<'ast, 'arena, 'x, 'c>> for 
         let Some(open) = body.open.pop() else {
             return;
         };
+        // A map field is borrowed for every value type (P2R-242).
         let copy_list = matches!(
             body.type_of(foreach.expression),
             Some(RustType::Vec(element)) if element.is_copy()
-        );
+        ) || matches!(body.type_of(foreach.expression), Some(RustType::Map(..)));
         let property = matches!(
             unparenthesized(foreach.expression),
             Expression::Access(Access::Property(_))

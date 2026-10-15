@@ -39,6 +39,10 @@ namespace the files share: `Acme\Shop\Model` in a package whose files all sit un
 the items of other modules with `use crate::...;` lines. The output directory must not
 exist yet; `rustc --edition 2024 --crate-type lib crate/lib.rs` builds the crate.
 
+Output that holds a map uses the `indexmap` crate (`use indexmap::IndexMap;`). The
+`Cargo.toml` that builds it needs `indexmap = "2"` under `[dependencies]`; php2rust writes
+no `Cargo.toml`.
+
 | Exit code | Meaning |
 |---|---|
 | 0 | Converted. |
@@ -176,6 +180,11 @@ converts:
   value (echo, maths, comparisons) stop.
 - `$o?->p` and `$o?->m($x)` on a nullable object become `o.as_ref().map(|o| ..)`,
   and `??` works on the result.
+- maps (`array<string, V>`, `array<int, V>`, `array<array-key, V>`): each becomes an
+  `IndexMap`, which keeps PHP's key order. A string or `array-key` key becomes text, so an
+  int key `5` and the key `'5'` are one key, as in PHP. A literal with a key on every
+  element, `$m = []`, `$m[k]`, `$m[k] = v`, `unset($m[k])`, `isset($m[k])`,
+  `array_key_exists()`, `$m[k] ?? $d`, `count()` and `foreach` convert.
 
 ## What stops the conversion
 
@@ -203,8 +212,8 @@ the others are findings of the Mago analyser. In short:
 - A `?:` without its middle part (`$a ?: $b`), inside another `?:`, of lists, of a
   nullable string or list, or with a string arm that is a call, a joined string, or a
   property read or list element on a call or `new`.
-- For array shapes: an optional key (`key?:`), an int key, a shape open to other keys
-  (`...`), a key with no Rust name, a shape that holds an object or an enum without
+- For array shapes: an optional key (`key?:`), an int key, a key with no Rust name (a
+  shape open to other keys, `...<string, int>`, is a map), a shape that holds an object or an enum without
   cases, two shapes that give one struct name, a struct name that an enum or class
   already has, comparing, printing or changing a shape, `isset` or `empty` of an
   element, `??` on an element of a list element, a key that is not a string literal,
@@ -251,6 +260,13 @@ the others are findings of the Mago analyser. In short:
   disagree on int and float, `(string)` of a union that may hold a float, a list, a shape
   or an object (outside `is_scalar($v) ? (string) $v : ..`), and a union value passed
   where another union type is needed.
+- For maps: a value type that is a union, `mixed` or a class that changes its objects, a
+  map inside a union, a key type other than int, string or `array-key`, a list or shape
+  where a map is needed (or the other way round), a float, bool, null or union key, a
+  string key of an int-keyed map, an int for a `float` value, `$m[] = v`, a key with
+  `foreach` over a map with text keys, `+=`, `++` or `??=` on an element, a write or
+  `unset` of an element of a map property, comparing or printing a map, `isset` or
+  `array_key_exists()` on anything but a map, and a `foreach` that changes its map.
 - A copy of an object whose class changes its objects: `$b = $a;` followed by a read of
   `$a`, `return $this;`, or a property or list element of such an object used as a value.
   A change through a call result, `??=` on a property, a write to a list element of a
@@ -274,7 +290,8 @@ the others are findings of the Mago analyser. In short:
   after other code outside functions: PHP declares an enum only when execution reaches
   it.
 - A type with no single Rust type: `mixed`, `null` on its own, `array` without a list
-  element type or a shape, or a union of different types other than `T|null`. A missing
+  element type, a key and value type or a shape, or a union of different types other than
+  `T|null`. A missing
   parameter or return type.
 - A value that may be null where PHP gives null a meaning Rust does not copy, or where a
   plain value is needed: in `echo`, string building, arithmetic, a shift, a cast, a
@@ -364,6 +381,8 @@ php2rust refuses some valid PHP that version 1 converts in other forms:
   message.
 - Reading a list at a negative index or past its end: PHP warns and gives `null`. Rust
   panics.
+- Reading a map at a key it does not have (`$m['k']` without `??` or `isset`): PHP warns
+  and gives `null`. Rust panics.
 - Reading a string offset past either end of the string: PHP warns and gives `""`. Rust
   panics.
 - `substr()` or a string offset that cuts a character of more than one byte: PHP gives

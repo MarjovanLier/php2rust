@@ -108,6 +108,9 @@ pub enum RustType {
     Shape(String),
     /// A declared union, as a generated enum, by its Rust name (P2R-230).
     Union(String),
+    /// A map, `IndexMap<K, V>`, keyed by `I64` or by the text of the key, `String`
+    /// (P2R-240).
+    Map(Box<RustType>, Box<RustType>),
 }
 
 impl RustType {
@@ -123,6 +126,7 @@ impl RustType {
             Self::Enum(name) | Self::Class(name) | Self::Shape(name) | Self::Union(name) => {
                 name.clone()
             }
+            Self::Map(key, value) => format!("IndexMap<{}, {}>", key.owned(), value.owned()),
         }
     }
 
@@ -133,15 +137,19 @@ impl RustType {
             Self::String => "&str".into(),
             Self::Vec(element) => format!("&[{}]", element.owned()),
             Self::Class(name) | Self::Shape(name) | Self::Union(name) => format!("&{name}"),
+            Self::Map(..) => format!("&{}", self.owned()),
             Self::Option(inner) => format!("Option<{}>", inner.parameter()),
             other => other.owned(),
         }
     }
 
-    /// True for a struct: a class, an array shape or a union enum, which copies with
-    /// `.clone()` and is borrowed as `&S` (P2R-132, P2R-201, P2R-232).
+    /// True for a struct: a class, an array shape, a union enum or a map, which copies
+    /// with `.clone()` and is borrowed as `&S` (P2R-132, P2R-201, P2R-232, P2R-240).
     pub fn is_struct(&self) -> bool {
-        matches!(self, Self::Class(_) | Self::Shape(_) | Self::Union(_))
+        matches!(
+            self,
+            Self::Class(_) | Self::Shape(_) | Self::Union(_) | Self::Map(..)
+        )
     }
 
     /// The method that lends the value inside an owned `Option` of this inner type:
@@ -169,6 +177,7 @@ impl RustType {
         match self {
             Self::I64 | Self::F64 | Self::Bool | Self::Enum(_) => true,
             Self::String | Self::Vec(_) | Self::Class(_) | Self::Shape(_) | Self::Union(_) => false,
+            Self::Map(..) => false,
             Self::Option(inner) => inner.is_copy(),
         }
     }
@@ -177,7 +186,7 @@ impl RustType {
     fn holds_class(&self) -> bool {
         match self {
             Self::Class(_) => true,
-            Self::Vec(inner) | Self::Option(inner) => inner.holds_class(),
+            Self::Vec(inner) | Self::Option(inner) | Self::Map(_, inner) => inner.holds_class(),
             _ => false,
         }
     }
@@ -190,7 +199,7 @@ pub fn built(ty: &RustType) -> bool {
     match ty {
         RustType::I64 | RustType::F64 | RustType::Bool | RustType::String => true,
         RustType::Enum(_) | RustType::Class(_) | RustType::Shape(_) | RustType::Union(_) => true,
-        RustType::Vec(element) => built(element),
+        RustType::Vec(element) | RustType::Map(_, element) => built(element),
         RustType::Option(inner) => !matches!(**inner, RustType::Option(_)) && built(inner),
     }
 }
@@ -224,6 +233,7 @@ pub fn rust_type(union: &TUnion, enums: &TypeNames) -> Result<RustType, String> 
         }
         let this = match atomic {
             TAtomic::Array(TArray::Keyed(keyed)) if is_shape(keyed) => shape_type(keyed, enums)?,
+            TAtomic::Array(TArray::Keyed(keyed)) if is_map(keyed) => map_type(keyed, enums)?,
             _ => atomic_type(atomic, enums).ok_or_else(unknown)?,
         };
         if found.as_ref().is_some_and(|seen| *seen != this) {
@@ -274,6 +284,9 @@ pub fn declared_type(union: &TUnion, enums: &TypeNames) -> Result<RustType, Stri
         for ty in found {
             if nullable_object(&ty) {
                 return Err(NULLABLE_OBJECT.to_owned());
+            }
+            if matches!(ty, RustType::Map(..)) {
+                return Err("a map inside a union is not supported yet (P2R-240)".to_owned());
             }
             if !members.contains(&ty) {
                 members.push(ty);
@@ -331,6 +344,7 @@ pub fn variant(ty: &RustType) -> String {
         RustType::Bool => "Bool".to_owned(),
         RustType::String => "String".to_owned(),
         RustType::Vec(_) => "List".to_owned(),
+        RustType::Map(..) => "Map".to_owned(),
         RustType::Enum(name)
         | RustType::Class(name)
         | RustType::Shape(name)
@@ -347,6 +361,55 @@ fn is_shape(keyed: &TKeyedArray) -> bool {
             .known_items
             .as_ref()
             .is_some_and(|items| !items.is_empty())
+}
+
+/// True for an array with a key type and a value type, such as `array<string, int>`, also
+/// with the keys a write by a literal key adds, `array{'z': int, ...<string, int>}`
+/// (P2R-240).
+fn is_map(keyed: &TKeyedArray) -> bool {
+    keyed.parameters.is_some()
+}
+
+/// The map of `array<K, V>`: `IndexMap<i64, V>` for an int key, and `IndexMap<String, V>`
+/// keyed by the text of the key for a string, `int|string` or `array-key` key, because PHP
+/// turns stored and lookup keys the same way. Known keys and their values count as keys
+/// and values of the map (P2R-240).
+fn map_type(keyed: &TKeyedArray, enums: &TypeNames) -> Result<RustType, String> {
+    let Some((key, value)) = &keyed.parameters else {
+        return Err("an array without key and value types has no Rust type (P2R-22)".into());
+    };
+    let unknown = || {
+        format!(
+            "the map key type {} has no Rust type (P2R-240)",
+            key.get_id()
+        )
+    };
+    let mut int = false;
+    let mut text = false;
+    for atomic in key.types.iter() {
+        match atomic {
+            TAtomic::Scalar(TScalar::Integer(_)) => int = true,
+            TAtomic::Scalar(TScalar::String(_)) => text = true,
+            TAtomic::Scalar(TScalar::ArrayKey) => (int, text) = (true, true),
+            _ => return Err(unknown()),
+        }
+    }
+    let mut values = value.types.to_vec();
+    for (known, (_, known_value)) in keyed.known_items.iter().flat_map(|items| items.iter()) {
+        match known {
+            ArrayKey::Integer(_) => int = true,
+            ArrayKey::String(_) => text = true,
+            _ => return Err(unknown()),
+        }
+        values.extend(known_value.types.iter().cloned());
+    }
+    let key = match (int, text) {
+        (true, false) => RustType::I64,
+        (_, true) => RustType::String,
+        _ => return Err(unknown()),
+    };
+    let value = rust_type(&TUnion::from_vec(values), enums)?;
+    Ok(RustType::Map(Box::new(key), Box::new(value)))
 }
 
 /// The struct of an array shape, gathered into `enums` (P2R-200). Mago keeps the keys in

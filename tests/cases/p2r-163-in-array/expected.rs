@@ -47,7 +47,7 @@ fn main() {
     if small(-2) && small(10) && !small(3) && known("c") && !known("d") {
         print!("small and known\n");
     }
-    if [1_i64, 3000000000].contains(&3000000000) {
+    if [1_i64, 3000000000].contains(&3000000000_i64) {
         print!("big\n");
     }
 }

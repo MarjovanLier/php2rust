@@ -283,7 +283,9 @@ impl Converter<'_> {
             _ => None,
         };
         let shape = matches!(holder, Some(RustType::Shape(_)));
-        let element = shape && shapes::no_list_read(left_node);
+        // `coalesce_left` refuses a map that is not in a variable, parameter or property.
+        let map = matches!(holder, Some(RustType::Map(..)));
+        let element = (shape && shapes::no_list_read(left_node)) || map;
         if !element
             && !matches!(
                 left_node,
@@ -317,7 +319,7 @@ impl Converter<'_> {
         }
         // Both sides convert first, so problems on both sides are reported. A lazy default
         // runs in a closure, where a call that throws has nowhere to go (P2R-213).
-        let left = self.expression(binary.lhs);
+        let left = self.coalesce_left(binary.lhs);
         let outer = self.raise.take();
         let right = self.expression(binary.rhs);
         self.raise = outer;
@@ -373,7 +375,7 @@ impl Converter<'_> {
         left_node: &Expression<'_>,
         throw: &Throw<'_>,
     ) -> Option<(RExpr, RustType)> {
-        let left = self.expression(binary.lhs);
+        let left = self.coalesce_left(binary.lhs);
         let exception = self.thrown_lazily(throw);
         let ((left, left_type), exception) = (left?, exception?);
         let RustType::Option(inner) = &left_type else {

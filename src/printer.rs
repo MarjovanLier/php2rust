@@ -97,6 +97,11 @@ pub enum RExpr {
     List(Vec<RExpr>),
     /// A list read by index (P2R-47).
     Index(Box<RExpr>, Box<RExpr>),
+    /// A map literal: `IndexMap::from([(k, v), ..])`, or `IndexMap::new()` when empty
+    /// (P2R-241).
+    MapLiteral(Vec<(RExpr, RExpr)>),
+    /// A map read by key, `m[key]`, with the key in its borrowed form (P2R-242).
+    Key(Box<RExpr>, Box<RExpr>),
     /// A float literal, written by value (P2R-49).
     Float(f64),
     /// `value as f64`: an int where a float is declared (P2R-25).
@@ -296,9 +301,11 @@ fn render(expr: &RExpr, anchor: bool, min_precedence: u8) -> String {
         RExpr::Known(name, _) => name.clone(),
         RExpr::Format(text, values) => format!("format!({})", format_arguments(text, values)),
         // The parameter type fixes the element type, so a list literal needs no `vec!`.
+        // A borrowed map key is generic in `get` and `Index`, so an int literal gets `_i64`
+        // (P2R-242).
         RExpr::Ref(inner) => match &**inner {
             RExpr::List(items) => format!("&[{}]", elements(items, false)),
-            other => format!("&{}", render(other, false, UNARY)),
+            other => format!("&{}", render(other, !anchored(other), UNARY)),
         },
         RExpr::RefMut(inner) => match &**inner {
             // The `[]` default of a `&mut [C]` parameter (P2R-168).
@@ -329,6 +336,19 @@ fn render(expr: &RExpr, anchor: bool, min_precedence: u8) -> String {
                 RExpr::Int(value) if value >= 0 => format!("{list}[{value}]"),
                 _ => format!("{list}[{} as usize]", render(index, true, CAST)),
             }
+        }
+        RExpr::MapLiteral(pairs) if pairs.is_empty() => "IndexMap::new()".to_owned(),
+        RExpr::MapLiteral(pairs) => {
+            let parts: Vec<String> = pairs
+                .iter()
+                .map(|(key, value)| {
+                    format!("({}, {})", render(key, false, 0), render(value, false, 0))
+                })
+                .collect();
+            format!("IndexMap::from([{}])", parts.join(", "))
+        }
+        RExpr::Key(map, key) => {
+            format!("{}[{}]", render(map, false, POSTFIX), render(key, false, 0))
         }
         // Rust has no literal for infinity. Debug gives the shortest text that reads back
         // as the same value, and always a float literal (`1.0`, `1e300`).
@@ -469,7 +489,9 @@ pub fn anchored(expr: &RExpr) -> bool {
         RExpr::RefMut(_) => true,
         RExpr::Bool(_) | RExpr::Not(_) => true,
         RExpr::List(items) => items.iter().any(anchored),
-        RExpr::Index(list, _) => anchored(list),
+        RExpr::Index(list, _) | RExpr::Key(list, _) => anchored(list),
+        // Its int literals take their type from where the map goes (P2R-241).
+        RExpr::MapLiteral(_) => false,
         // A float literal without a suffix is f64, as is a cast to it.
         RExpr::Float(_) | RExpr::ToFloat(_) | RExpr::ToUsize(_) => true,
         // `None` alone, or `Some(5)`, leaves the inner type to inference (P2R-49).
@@ -518,7 +540,7 @@ pub fn literal_value(expr: &RExpr) -> Option<i64> {
         RExpr::Format(..) | RExpr::Ref(_) | RExpr::Method(..) | RExpr::Len(_) => None,
         RExpr::RefMut(_) => None,
         RExpr::Bool(_) | RExpr::Not(_) => None,
-        RExpr::List(_) | RExpr::Index(..) => None,
+        RExpr::List(_) | RExpr::Index(..) | RExpr::MapLiteral(_) | RExpr::Key(..) => None,
         RExpr::Float(_) | RExpr::ToFloat(_) | RExpr::ToUsize(_) => None,
         RExpr::None | RExpr::Some(_) | RExpr::MapOwned(_) | RExpr::Unwrap { .. } => None,
         RExpr::Path(_) | RExpr::Field(..) | RExpr::MethodCall(..) => None,
@@ -769,7 +791,8 @@ mod tests {
         let list = || vec![RExpr::Int(1), RExpr::Int(2)];
         let needle = |inner| Box::new(RExpr::Ref(Box::new(inner)));
         let literal = RExpr::Contains(list(), needle(RExpr::Int(2)));
-        assert_eq!(expr(&literal, false), "[1_i64, 2].contains(&2)");
+        // A literal behind `&` is anchored too, as a map key needs (P2R-242).
+        assert_eq!(expr(&literal, false), "[1_i64, 2].contains(&2_i64)");
         let variable = RExpr::Contains(list(), needle(RExpr::Var("n".into())));
         assert_eq!(expr(&variable, false), "[1, 2].contains(&n)");
         let empty = RExpr::RefMut(Box::new(RExpr::List(Vec::new())));

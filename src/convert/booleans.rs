@@ -142,6 +142,7 @@ pub(super) fn refusal(
         RustType::Class(_) => Some("an object cannot be compared (P2R-136)"),
         RustType::Shape(_) => Some("an array shape cannot be compared (P2R-201)"),
         RustType::Union(_) => Some(UNION_COMPARED),
+        RustType::Map(..) => Some("a comparison of maps is not supported (P2R-242)"),
     }
 }
 

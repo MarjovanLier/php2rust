@@ -48,6 +48,8 @@ use mago_syntax::walker::Walker;
 
 use super::control::{Loop, emit};
 use super::flow::{Flow, Var};
+use super::lists::unparenthesized;
+use super::maps::{MAP_APPEND, MAP_MAY_BE_NULL, MAP_PROPERTY_CHANGE, UNSET};
 use super::{
     Converter, Mode, ParameterSignature, classes, helpers, lists, nulls, numbers, strings,
 };
@@ -85,9 +87,13 @@ enum Pending {
         /// The value opens a `match`, so no `;` ends the line (P2R-123).
         open: bool,
     },
+    /// A `[]` assigned to a declared variable: `x = Vec::new();`, or `x = IndexMap::new();`
+    /// when the variable holds a map at the end of the body (P2R-21, P2R-241).
+    Empty { var: Var },
     /// The opening line of a foreach: `for pattern in list {` (P2R-41).
     Foreach {
-        key: Option<Var>,
+        /// The key, and whether it is read through `&`, as from a borrowed map (P2R-242).
+        key: Option<(Var, bool)>,
         value: Var,
         /// The loop borrows a list of Copy values, so the value is read through `&`.
         by_ref: bool,
@@ -499,7 +505,7 @@ impl Variables {
     pub(super) fn for_line(
         &mut self,
         depth: usize,
-        key: Option<Var>,
+        key: Option<(Var, bool)>,
         value: Var,
         by_ref: bool,
         rest: String,
@@ -545,7 +551,7 @@ pub(super) fn chain_root(expr: &RExpr) -> Option<&str> {
     match expr {
         RExpr::Var(name) | RExpr::Known(name, _) => Some(name),
         RExpr::Field(object, _) => chain_root(object),
-        RExpr::Index(list, _) => chain_root(list),
+        RExpr::Index(list, _) | RExpr::Key(list, _) => chain_root(list),
         _ => None,
     }
 }
@@ -814,6 +820,15 @@ impl Converter<'_> {
         if let Some(converted) = self.property_change(expression, target, operator, value) {
             return converted;
         }
+        // Mago types a map that may be null as a map after the write, and a write by a key
+        // of another type as another map, so either type sends it here (P2R-242).
+        let map = |ty: &RustType| matches!(ty.inner(), RustType::Map(..));
+        if let Expression::ArrayAccess(access) = target
+            && (self.site_type(access.array).is_ok_and(|ty| map(&ty))
+                || self.chain_type(access.array).is_some_and(|ty| map(&ty)))
+        {
+            return self.map_write(expression, target, access, operator, value);
+        }
         let Expression::Variable(Variable::Direct(variable)) = target else {
             // The value's reads and the target's writes still count, so no false P2R-34 or
             // P2R-35 line follows. The refusal covers the whole assignment, so it is the one
@@ -854,10 +869,10 @@ impl Converter<'_> {
         if operator == Some("=") && value.is_some_and(lists::is_empty_literal) {
             let (var, declares) = self.write(variable, expression, None)?;
             if !declares {
-                let name = &self.variables.entries[var].rust_name;
-                return Some(format!("{name} = Vec::new();"));
+                self.variables.pending.push(Pending::Empty { var });
+                return Some(format!("{MARK}{}", self.variables.pending.len() - 1));
             }
-            return Some(self.first_write(var, true, "Vec::new()".to_owned(), false));
+            return Some(self.first_write(var, true, EMPTY_LIST.to_owned(), false));
         }
         // `null` has no type of its own either: it has the variable's `Option` type, which
         // the other reads and writes of its name give (P2R-102).
@@ -1024,6 +1039,16 @@ impl Converter<'_> {
         {
             return self.append_option(expression, list, source, (**element).clone());
         }
+        // Mago types the map after the append as a list or a map, which has no Rust type.
+        if matches!(known, Some(RustType::Map(..))) {
+            self.record_refused(value);
+            if let Some(var) = self.lookup(list) {
+                self.variables.read(var, list.span);
+            }
+            let (var, _) = self.record_write(list);
+            self.fail(var, expression, MAP_APPEND.to_owned());
+            return None;
+        }
         // A list is a list of `Option` only when its first write holds null (P2R-102).
         if matches!(known, Some(RustType::Vec(_))) && nulls::is_null(value) {
             if let Some(var) = self.lookup(list) {
@@ -1048,10 +1073,10 @@ impl Converter<'_> {
         };
         let RustType::Vec(element) = &current_type else {
             self.record_write(list);
-            let message = if matches!(current_type, RustType::Option(_)) {
-                "a value that may be null cannot be appended to (P2R-106)"
-            } else {
-                "only a list can be appended to (P2R-47)"
+            let message = match current_type {
+                RustType::Option(_) => "a value that may be null cannot be appended to (P2R-106)",
+                RustType::Map(..) => MAP_APPEND,
+                _ => "only a list can be appended to (P2R-47)",
             };
             self.refuse(expression, message);
             return None;
@@ -1069,6 +1094,157 @@ impl Converter<'_> {
         let name = &self.variables.entries[var].rust_name;
         let push = RExpr::Call(format!("{name}.push"), vec![value]);
         Some(format!("{};", printer::expr(&push, false)))
+    }
+
+    /// `$m[k] = v;` on a map in a variable or parameter: `m.insert(k, v);`, which keeps the
+    /// position of a key the map has and adds a new one at the end, as PHP does (P2R-242).
+    fn map_write(
+        &mut self,
+        expression: &Expression<'_>,
+        target: &Expression<'_>,
+        access: &ArrayAccess<'_>,
+        operator: Option<&str>,
+        value: Option<&Expression<'_>>,
+    ) -> Option<String> {
+        let holder = unparenthesized(access.array);
+        let problem = match holder {
+            _ if operator != Some("=") => {
+                "a compound assignment, ++, -- or ??= on a map element is not supported (P2R-242)"
+            }
+            Expression::Variable(Variable::Direct(_)) => "",
+            Expression::Access(mago_syntax::cst::Access::Property(_)) => MAP_PROPERTY_CHANGE,
+            _ => "a map element can change only on a map in a variable or parameter (P2R-242)",
+        };
+        let (Some(value), "", Expression::Variable(Variable::Direct(variable))) =
+            (value, problem, holder)
+        else {
+            // The reads and writes still count, so no false P2R-34 or P2R-35 line follows.
+            if let Some(value) = value {
+                self.record_refused(value);
+            }
+            self.record_refused_target(target);
+            self.refuse(expression, problem);
+            return None;
+        };
+        // A key or value of another type gives the map another type in Mago, so they convert
+        // before the map is read, and their problem is the one reported (P2R-241).
+        let known = self
+            .lookup(variable)
+            .and_then(|var| self.variables.entries[var].ty.clone());
+        // A map that may be null is refused before Mago's type of the write is read.
+        let read_first = !matches!(known, Some(RustType::Map(..) | RustType::Option(_)));
+        let current = match known {
+            Some(ty @ (RustType::Map(..) | RustType::Option(_))) => Some(ty),
+            _ => self.variable(variable).map(|(_, ty)| ty),
+        };
+        let (key_type, value_type) = match current {
+            Some(RustType::Map(key, value)) => (key, value),
+            other => {
+                if !read_first {
+                    self.record_refused(access.array);
+                }
+                self.record_refused(access.index);
+                self.record_refused(value);
+                self.record_write(variable);
+                match other {
+                    Some(RustType::Option(_)) => self.refuse(expression, MAP_MAY_BE_NULL),
+                    Some(_) => self.refuse(
+                        expression,
+                        "writing to a list index is not supported in version 1 (P2R-47)",
+                    ),
+                    None => {}
+                }
+                return None;
+            }
+        };
+        let statement = expression.span();
+        let key = self.map_key(access.index, &key_type, Some(statement));
+        let stored = self.map_value(value, &value_type, statement);
+        let (Some(key), Some(stored)) = (key, stored) else {
+            if !read_first {
+                self.record_refused(access.array);
+            }
+            // Mago gives the map another type after this write, so its later reads would
+            // report the same cause (P2R-03).
+            let (var, _) = self.record_write(variable);
+            self.variables.entries[var].ty = None;
+            return None;
+        };
+        if !read_first && self.variable(variable).is_none() {
+            self.record_write(variable);
+            return None;
+        }
+        let (var, _) = self.write(variable, variable, None)?;
+        let map = RExpr::Var(self.variables.entries[var].rust_name.clone());
+        let insert = RExpr::MethodCall(Box::new(map), "insert".to_owned(), vec![key, stored]);
+        Some(format!("{};", printer::expr(&insert, false)))
+    }
+
+    /// `unset($m[k]);` on a map in a variable or parameter: `m.shift_remove(&k);`, which
+    /// keeps the order of the other keys, as PHP does (P2R-242).
+    pub(super) fn unset_statement(
+        &mut self,
+        unset: &Unset<'_>,
+        depth: usize,
+        body: &mut Vec<String>,
+    ) {
+        for value in unset.values.iter() {
+            if let Some(text) = self.unset_element(value) {
+                body.push(emit(depth, text));
+            }
+        }
+    }
+
+    fn unset_element(&mut self, value: &Expression<'_>) -> Option<String> {
+        let problem = match unparenthesized(value) {
+            Expression::ArrayAccess(access) => match unparenthesized(access.array) {
+                Expression::Variable(Variable::Direct(variable)) => {
+                    return self.map_remove(value, access, variable);
+                }
+                Expression::Access(mago_syntax::cst::Access::Property(_))
+                    if self
+                        .site_type(access.array)
+                        .is_ok_and(|ty| matches!(ty.inner(), RustType::Map(..))) =>
+                {
+                    MAP_PROPERTY_CHANGE
+                }
+                _ => UNSET,
+            },
+            _ => UNSET,
+        };
+        self.record_refused(value);
+        self.refuse(value, problem);
+        None
+    }
+
+    fn map_remove(
+        &mut self,
+        value: &Expression<'_>,
+        access: &ArrayAccess<'_>,
+        variable: &DirectVariable<'_>,
+    ) -> Option<String> {
+        let current = self.variable(variable);
+        let key_type = match current.map(|(_, ty)| ty) {
+            Some(RustType::Map(key, _)) => key,
+            other => {
+                self.record_refused(access.index);
+                self.record_write(variable);
+                match other {
+                    Some(RustType::Option(_)) => self.refuse(value, MAP_MAY_BE_NULL),
+                    Some(_) => self.refuse(value, UNSET),
+                    None => {}
+                }
+                return None;
+            }
+        };
+        let Some(key) = self.map_key(access.index, &key_type, None) else {
+            self.record_write(variable);
+            return None;
+        };
+        let (var, _) = self.write(variable, variable, None)?;
+        let map = RExpr::Var(self.variables.entries[var].rust_name.clone());
+        let remove = RExpr::MethodCall(Box::new(map), "shift_remove".to_owned(), vec![key]);
+        Some(format!("{};", printer::expr(&remove, false)))
     }
 
     /// `$a[] = x` on a list of `Option`, whose elements are `element`: `null` is `None` and
@@ -1732,6 +1908,7 @@ impl Converter<'_> {
                         _ => String::new(),
                     };
                     let end = if *open { "" } else { ";" };
+                    let value = first_value(value, entry.ty.as_ref());
                     let text = match slots[*var] {
                         Some(_) => format!("{indent}{name} = {value}{end}"),
                         None => format!(
@@ -1740,6 +1917,11 @@ impl Converter<'_> {
                         ),
                     };
                     finished.push(text);
+                }
+                Some((at, _, Pending::Empty { var })) => {
+                    let entry = &entries[*var];
+                    let value = first_value(EMPTY_LIST, entry.ty.as_ref());
+                    finished.push(format!("{}{} = {value};", &line[..at], entry.rust_name));
                 }
                 Some((
                     at,
@@ -2060,16 +2242,30 @@ fn condition_line(
 }
 
 /// The pattern of a foreach: its value, or its key and value (P2R-41).
+/// The Rust text of `[]` assigned to a variable before its type is known (P2R-21).
+const EMPTY_LIST: &str = "Vec::new()";
+
+/// The value of a first write, with `[]` as `IndexMap::new()` for a variable that holds a
+/// map at the end of the body (P2R-241).
+fn first_value<'v>(value: &'v str, ty: Option<&RustType>) -> &'v str {
+    match ty.map(RustType::inner) {
+        Some(RustType::Map(..)) if value == EMPTY_LIST => "IndexMap::new()",
+        _ => value,
+    }
+}
+
 fn for_pattern(
     entries: &[Entry],
     unused: &[bool],
-    key: Option<Var>,
+    key: Option<(Var, bool)>,
     value: Var,
     by_ref: bool,
 ) -> String {
     let value = pattern(&entries[value], unused[value], by_ref);
     match key {
-        Some(key) => format!("({}, {value})", pattern(&entries[key], unused[key], false)),
+        Some((key, by_ref)) => {
+            format!("({}, {value})", pattern(&entries[key], unused[key], by_ref))
+        }
         None => value,
     }
 }

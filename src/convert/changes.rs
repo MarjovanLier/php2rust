@@ -10,7 +10,7 @@ use mago_syntax::cst::*;
 
 use super::lists::unparenthesized;
 use super::variables::{chain_root, operation};
-use super::{Converter, nulls, numbers};
+use super::{Converter, maps, nulls, numbers};
 use crate::printer::{self, RExpr};
 use crate::types::RustType;
 
@@ -154,7 +154,11 @@ impl Converter<'_> {
         (target, target_type): (RExpr, RustType),
     ) -> Option<String> {
         let RustType::Vec(element) = &target_type else {
-            self.refuse(expression, "only a list can be appended to (P2R-47)");
+            let message = match target_type {
+                RustType::Map(..) => maps::MAP_APPEND,
+                _ => "only a list can be appended to (P2R-47)",
+            };
+            self.refuse(expression, message);
             return None;
         };
         if nulls::null_for_plain(&value_type, element) {

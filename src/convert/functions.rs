@@ -219,7 +219,10 @@ impl Converter<'_> {
                         Expression::Literal(Literal::Integer(_) | Literal::Float(_))
                     )
             }
-            Expression::Array(array) => array.elements.is_empty(),
+            // A map literal too (P2R-241).
+            Expression::Array(array) => {
+                array.elements.is_empty() || matches!(ty.inner(), RustType::Map(..))
+            }
             // PHP rejects `static::` in a default when it compiles the file; Mago does not
             // report it.
             Expression::Access(Access::ClassConstant(access)) => {
@@ -252,6 +255,9 @@ impl Converter<'_> {
             Expression::Literal(Literal::Null(_)) => (RExpr::None, ty.clone()),
             Expression::Array(_) if matches!(inner, RustType::Vec(_)) => {
                 (RExpr::List(Vec::new()), inner.clone())
+            }
+            Expression::Array(array) if let RustType::Map(key, map_value) = inner => {
+                self.map_literal(array, key, map_value)?
             }
             Expression::Array(_) => {
                 self.refuse(
@@ -451,7 +457,7 @@ impl Converter<'_> {
             .iter()
             .filter(|parameter| written.contains(&parameter.php_name))
             .filter(|parameter| match parameter.ty.inner() {
-                RustType::String => true,
+                RustType::String | RustType::Map(..) => true,
                 RustType::Vec(element) => !self.is_changing(element),
                 _ => false,
             })
@@ -474,6 +480,7 @@ pub(super) fn copy_lines(
             let copy = match &parameter.ty {
                 RustType::Option(_) => "map(ToOwned::to_owned)",
                 RustType::Vec(_) => "to_vec()",
+                RustType::Map(..) => "clone()",
                 _ => "to_string()",
             };
             emit(depth, format!("let mut {name} = {name}.{copy};"))
@@ -493,13 +500,29 @@ impl<'ast, 'arena> Walker<'ast, 'arena, HashSet<Vec<u8>>> for Written {
     ) {
         let variable = match lists::unparenthesized(assignment.lhs) {
             Expression::Variable(Variable::Direct(variable)) => variable,
-            Expression::ArrayAppend(append) => match lists::unparenthesized(append.array) {
-                Expression::Variable(Variable::Direct(variable)) => variable,
-                _ => return,
-            },
+            // A map insert changes the map (P2R-242).
+            Expression::ArrayAppend(ArrayAppend { array, .. })
+            | Expression::ArrayAccess(ArrayAccess { array, .. }) => {
+                match lists::unparenthesized(array) {
+                    Expression::Variable(Variable::Direct(variable)) => variable,
+                    _ => return,
+                }
+            }
             _ => return,
         };
         names.insert(variable.name[1..].to_vec());
+    }
+
+    // So does a removal (P2R-242).
+    fn walk_in_unset(&self, unset: &'ast Unset<'arena>, names: &mut HashSet<Vec<u8>>) {
+        for value in unset.values.iter() {
+            if let Expression::ArrayAccess(access) = lists::unparenthesized(value)
+                && let Expression::Variable(Variable::Direct(variable)) =
+                    lists::unparenthesized(access.array)
+            {
+                names.insert(variable.name[1..].to_vec());
+            }
+        }
     }
 
     fn walk_function(&self, _: &'ast Function<'arena>, _: &mut HashSet<Vec<u8>>) {}

@@ -8,7 +8,7 @@ use mago_span::HasSpan;
 use mago_syntax::cst::*;
 
 use super::helpers::Helper;
-use super::{Converter, nulls, unions};
+use super::{Converter, maps, nulls, unions};
 use crate::printer::{self, BinOp, RExpr};
 use crate::types::RustType;
 
@@ -24,6 +24,11 @@ impl Converter<'_> {
         ty: &RustType,
         declared: &RustType,
     ) -> Option<RExpr> {
+        // Mago accepts a list or a shape where a map is declared (P2R-240).
+        if maps::map_clash(ty, declared) {
+            self.refuse(node, maps::MAP_CLASH);
+            return None;
+        }
         if ints_for_floats(ty.inner(), declared.inner()) {
             self.refuse(
                 node,

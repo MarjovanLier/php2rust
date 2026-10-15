@@ -24,6 +24,8 @@ const TAKEN: &[&str] = &[
     "Result",
     "Ok",
     "Err",
+    // The map type (P2R-240).
+    "IndexMap",
 ];
 
 /// Names PHP reserves, its keywords and type names, which no enum may take; each one fails

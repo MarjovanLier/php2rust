@@ -111,6 +111,14 @@ impl Converter<'_> {
                                 format!("a module named {module} is not supported, because it would take over the paths of Rust's type {module} (P2R-172)"),
                             )
                         }
+                        // `use indexmap::IndexMap;` in the crate root would name it (P2R-240).
+                        Some(module) if depth == 0 && module == "indexmap" => {
+                            named = false;
+                            self.refuse_namespace(
+                                *name,
+                                "a root module named indexmap is not supported, because it would take over the indexmap crate (P2R-172)".to_owned(),
+                            )
+                        }
                         Some(module)
                             if module == "r#mod"
                                 || (depth == 0 && matches!(module.as_str(), "lib" | "main")) =>
@@ -283,12 +291,15 @@ impl Converter<'_> {
                     path
                 })
                 .collect();
-            if !uses.is_empty() {
-                groups.push(
-                    uses.iter()
-                        .map(|path| format!("use {};", path.join("::")))
-                        .collect(),
-                );
+            let mut lines: Vec<String> = uses
+                .iter()
+                .map(|path| format!("use {};", path.join("::")))
+                .collect();
+            if names_index_map(&text) {
+                lines.push(INDEX_MAP_USE.to_owned());
+            }
+            if !lines.is_empty() {
+                groups.push(lines);
             }
             groups.extend(items);
             groups.extend(
@@ -307,6 +318,16 @@ impl Converter<'_> {
         }
         files
     }
+}
+
+/// The `use` line of output that names `IndexMap` (P2R-240).
+pub(super) const INDEX_MAP_USE: &str = "use indexmap::IndexMap;";
+
+/// True when `text`, Rust lines of items, names the `IndexMap` type outside a string
+/// literal (P2R-240).
+pub(super) fn names_index_map(text: &str) -> bool {
+    let item = BTreeMap::from([("IndexMap".to_owned(), ItemKind::Type)]);
+    !used_items(text, &item).is_empty()
 }
 
 /// An enum, class or function of the crate, as a module names it.

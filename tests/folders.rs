@@ -55,6 +55,55 @@ fn tool(args: &[&str], dir: &Path) -> Output {
     run(env!("CARGO_BIN_EXE_php2rust"), args, dir)
 }
 
+/// The rustc arguments that give output naming `IndexMap` its crate, built once from the
+/// support project, pinned to indexmap 2.14.2 (P2R-243). An unused `--extern` loads nothing.
+fn indexmap_args() -> &'static [String] {
+    static ARGS: OnceLock<Vec<String>> = OnceLock::new();
+    ARGS.get_or_init(|| {
+        let target = root().join("target").join("indexmap-support");
+        let manifest = root().join("tests/support/indexmap/Cargo.toml");
+        let build = run(
+            "cargo",
+            &[
+                "build",
+                "--release",
+                "--locked",
+                "--manifest-path",
+                manifest.to_str().expect("UTF-8 path"),
+                "--target-dir",
+                target.to_str().expect("UTF-8 path"),
+            ],
+            &root(),
+        );
+        assert!(
+            build.status.success(),
+            "cannot build indexmap for the map cases (P2R-243): {}",
+            text(&build.stderr)
+        );
+        let deps = target.join("release").join("deps");
+        let rlibs: Vec<PathBuf> = fs::read_dir(&deps)
+            .expect("readable deps folder")
+            .map(|entry| entry.expect("readable deps entry").path())
+            .filter(|path| {
+                path.file_name()
+                    .and_then(|name| name.to_str())
+                    .is_some_and(|name| name.starts_with("libindexmap-") && name.ends_with(".rlib"))
+            })
+            .collect();
+        assert_eq!(
+            rlibs.len(),
+            1,
+            "expected one indexmap rlib, found {rlibs:?}"
+        );
+        vec![
+            "--extern".to_owned(),
+            format!("indexmap={}", rlibs[0].display()),
+            "-L".to_owned(),
+            format!("dependency={}", deps.display()),
+        ]
+    })
+}
+
 /// Fails loudly when a tool the checks need is missing or has the wrong version: a skipped
 /// behaviour check looks exactly like a pass.
 fn check_toolchain() {
@@ -223,6 +272,7 @@ fn case(dir: &Path, scratch: &Path) -> Result<(), String> {
     if !program {
         args.extend(["--crate-type", "lib"]);
     }
+    args.extend(indexmap_args().iter().map(String::as_str));
     args.push("expected.rs");
     let build = run("rustc", &args, dir);
     if !build.status.success() {
@@ -335,21 +385,19 @@ fn crate_case(dir: &Path, scratch: &Path) -> Result<(), String> {
     }
     let library = scratch.join(format!("{}.rlib", name(dir)));
     let target = library.to_str().expect("UTF-8 scratch path");
-    let build = run(
-        "rustc",
-        &[
-            "--edition",
-            "2024",
-            "--crate-type",
-            "lib",
-            "-D",
-            "warnings",
-            "-o",
-            target,
-            "expected/lib.rs",
-        ],
-        dir,
-    );
+    let mut args = vec![
+        "--edition",
+        "2024",
+        "--crate-type",
+        "lib",
+        "-D",
+        "warnings",
+        "-o",
+        target,
+    ];
+    args.extend(indexmap_args().iter().map(String::as_str));
+    args.push("expected/lib.rs");
+    let build = run("rustc", &args, dir);
     if !build.status.success() {
         return Err(format!("rustc failed (P2R-50):\n{}", text(&build.stderr)));
     }

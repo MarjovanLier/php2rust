@@ -1,7 +1,6 @@
 input.php:24:17: an array shape that holds an enum without cases cannot have a value (P2R-200)
 input.php:32:19: an array shape with an optional key is not supported (P2R-200)
 input.php:40:19: an array shape converts only with string keys (P2R-200)
-input.php:48:15: the type array{'a': int, ...<string, int>} has no Rust type (P2R-22)
 input.php:56:17: the array shape key '2x' has no Rust form (P2R-200)
 input.php:64:15: two keys of this array shape give the field name foo_bar (P2R-200)
 input.php:72:16: an array shape that holds an object is not supported yet (P2R-200)

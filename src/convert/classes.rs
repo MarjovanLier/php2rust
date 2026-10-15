@@ -327,6 +327,8 @@ impl Converter<'_> {
         match ty {
             RustType::Option(inner) => self.is_changing(inner),
             RustType::Vec(element) => self.nullable_changing(element),
+            // A map clones its values, which such a class does not derive (P2R-240).
+            RustType::Map(_, value) => self.is_changing(value) || self.nullable_changing(value),
             // A union enum holds its member inline, as an `Option` does (P2R-230).
             RustType::Union(_) => self.is_changing(ty),
             _ => false,
@@ -841,7 +843,10 @@ impl Converter<'_> {
                         Expression::Literal(Literal::Integer(_) | Literal::Float(_))
                     )
             }
-            Expression::Array(array) => array.elements.is_empty(),
+            // A map literal too (P2R-241).
+            Expression::Array(array) => {
+                array.elements.is_empty() || matches!(ty.inner(), RustType::Map(..))
+            }
             _ => false,
         };
         if !literal {
@@ -855,6 +860,9 @@ impl Converter<'_> {
         let (expr, found) = match lists::unparenthesized(value) {
             Expression::Array(_) if matches!(inner, RustType::Vec(_)) => {
                 (RExpr::List(Vec::new()), inner.clone())
+            }
+            Expression::Array(array) if let RustType::Map(key, map_value) = inner => {
+                self.map_literal(array, key, map_value)?
             }
             Expression::Literal(Literal::Null(_)) if matches!(ty, RustType::Option(_)) => {
                 (RExpr::None, ty.clone())
@@ -1722,7 +1730,7 @@ const UNION_MEMBER: &str =
     "a property read or method call on a value of a union type is not supported (P2R-232)";
 
 /// The problem of a nullable or union type that holds a changing type (P2R-141, P2R-230).
-pub(super) const NULLABLE_CHANGING: &str = "a nullable or union type that holds objects whose class changes them is not supported (P2R-141)";
+pub(super) const NULLABLE_CHANGING: &str = "a nullable, union or map type that holds objects whose class changes them is not supported (P2R-141, P2R-240)";
 
 /// The problem of a declared property without a type or a default (P2R-140).
 const NEEDS_DEFAULT: &str = "a declared property needs a type and a default value (P2R-140)";

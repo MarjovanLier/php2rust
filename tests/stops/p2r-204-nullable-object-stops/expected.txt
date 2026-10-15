@@ -4,4 +4,4 @@ input.php:32:12: a method call on a value that may be null is not supported (P2R
 input.php:42:12: an object cannot be compared (P2R-136)
 input.php:47:5: an object parameter cannot be assigned, because Rust borrows it (P2R-132)
 input.php:56:22: this class holds itself, so the Rust struct would have no size (P2R-130)
-input.php:64:15: a nullable or union type that holds objects whose class changes them is not supported (P2R-141)
+input.php:64:15: a nullable, union or map type that holds objects whose class changes them is not supported (P2R-141, P2R-240)

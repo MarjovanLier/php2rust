@@ -123,7 +123,8 @@ P2R-188, P2R-232, P2R-282 and the roadmap of section 10. Section 33
 2026; it changes P2R-07, P2R-60, P2R-260, P2R-262 and the roadmap of
 section 10. Section 34 (`DateTime` from a format, and `date_parse` of
 its text) was written on 15 Oct 2026; it changes P2R-07, P2R-48,
-P2R-60, P2R-104, P2R-174, P2R-188 and the roadmap of section 10. Its
+P2R-60, P2R-104, P2R-136, P2R-174, P2R-188 and the roadmap of section
+10. Its
 PHP spec reviewer found that PHP ends a format at a NUL byte, throws
 at a NUL in the text, and moves a local time in any gap of its zone;
 its Rust spec reviewer found the missing `use` line of a module whose
@@ -3128,8 +3129,11 @@ read takes the current date or time.
   turns into `let Some(v) = .. else` (`$v === null`, `!$v instanceof
   DateTime`, `$v === false`, and their mirrored forms), it is the first
   operand of the top-level `||` chain of the condition, the `if` has no
-  `elseif` or `else`, and its body always leaves by `return`, `break`,
-  `continue` or `throw`, MUST convert to `let Some(v) = v else { .. };`
+  `elseif` or `else`, and its body ends with a `return`, `throw`,
+  `break` or `continue` statement and, inside a `for` with a step,
+  holds no `break` or `continue` that leaves it (the step goes in at
+  each `continue` of one block only), MUST convert to
+  `let Some(v) = v else { .. };`
   followed by `if B { .. }`, where `B` is the rest of the chain in order
   (`B || C` for three operands), reads the binding, and both blocks hold
   the body, converted once. PHP evaluates `X` first and reads `B` only
@@ -3138,9 +3142,10 @@ read takes the current date or time.
   P2R-104 writes `if v.is_none() { .. }` for the let-else, still followed
   by `if B { .. }`. The rules of P2R-104 and P2R-290 for a write to `$v`
   and for the step of a `for` apply as to a `let ... else`. Where the
-  body reads `$v`, which is not the binding in Rust, the form does not
-  apply, and the condition converts as any other, so a read of `$v` in
-  `B` stops by P2R-106. `X` as a later operand converts by P2R-103 or
+  body reads `$v`, which is not the binding in Rust, where the `if` has
+  an `else`, or where the body does not end as above, the form does not
+  apply, and the condition converts as any other: a read of `$v` in `B`
+  then stops by P2R-106. `X` as a later operand converts by P2R-103 or
   P2R-333 without a binding.
 - **P2R-335** `date_parse($d->format('Y-m-d H:i:s'))`, where `$d` has
   type `PhpDateTime` and the format is that string literal, MUST convert

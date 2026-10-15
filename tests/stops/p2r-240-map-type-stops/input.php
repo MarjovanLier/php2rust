@@ -17,10 +17,12 @@ final class IndexMap
 }
 
 /**
- * @param array<string, int|string> $m
+ * A union value type converts only in a declared type (P2R-250).
  */
-function unionValue(array $m): int
+function unionValue(): int
 {
+    /** @var array<string, int|string> $m */
+    $m = ['a' => 1];
     return count($m);
 }
 

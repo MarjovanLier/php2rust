@@ -16,6 +16,15 @@ use crate::types::{self, RustType};
 pub(super) const NULL_ELEMENT: &str =
     "a value that may be null cannot go into a list of values that cannot be null (P2R-106)";
 
+/// The check a let-else binds: the variable, its id, the type it binds, and its pattern
+/// with the line after it (P2R-104, P2R-252).
+pub(super) type Guard<'e, 'a> = (
+    &'e DirectVariable<'a>,
+    Var,
+    RustType,
+    (String, Option<String>),
+);
+
 /// The problem of a value that may be null as the argument of a built-in function
 /// (P2R-106).
 pub(super) const NULL_BUILT_IN: &str =
@@ -188,7 +197,7 @@ impl Converter<'_> {
         let operands = and_operands(condition);
         if !operands
             .iter()
-            .any(|o| self.null_checked(o, true).is_some())
+            .any(|o| self.null_checked(o, true).is_some() || self.member_checked(o, true).is_some())
         {
             return None;
         }
@@ -196,10 +205,31 @@ impl Converter<'_> {
         let mut bindings = Vec::new();
         let mut converted = true;
         for operand in operands {
-            if let Some((variable, outer, inner)) = self.null_checked(operand, true) {
+            // `is_T($v)` on a union value binds its member as `$v !== null` binds (P2R-252).
+            let check = self
+                .null_checked(operand, true)
+                .map(|(variable, outer, inner)| {
+                    let pattern = self.pattern(outer, &inner);
+                    let test = format!("{}.is_some()", self.variables.name_of(outer));
+                    (variable, outer, inner, pattern, test)
+                })
+                .or_else(|| {
+                    self.member_checked(operand, true).map(|check| {
+                        let pattern = match check.shadow {
+                            Some(shadow) => format!("{} && {shadow}", check.pattern),
+                            None => check.pattern,
+                        };
+                        (
+                            check.variable,
+                            check.outer,
+                            check.member,
+                            pattern,
+                            check.test,
+                        )
+                    })
+                });
+            if let Some((variable, outer, inner, pattern, test)) = check {
                 self.variables.read(outer, variable.span);
-                let pattern = self.pattern(outer, &inner);
-                let test = format!("{}.is_some()", self.variables.name_of(outer));
                 let binding = self.bind_null(variable, inner);
                 bindings.push(binding);
                 parts.push(Part::Let {
@@ -228,6 +258,22 @@ impl Converter<'_> {
             String::new()
         };
         Some((line, bindings))
+    }
+
+    /// The check of `if ($v === null)` or `if (!is_T($v))` that a let-else binds when its
+    /// body always leaves, with its pattern and the line after it (P2R-104, P2R-252).
+    pub(super) fn guard_check<'e, 'a>(
+        &self,
+        condition: &'e Expression<'a>,
+    ) -> Option<Guard<'e, 'a>> {
+        if let Some((variable, outer, inner)) = self.null_checked(condition, false) {
+            let pattern = self.pattern(outer, &inner);
+            return Some((variable, outer, inner, (pattern, None)));
+        }
+        self.member_checked(condition, false).map(|check| {
+            let lines = (check.pattern, check.shadow);
+            (check.variable, check.outer, check.member, lines)
+        })
     }
 
     /// `let Some(v) = v`, the pattern that binds the inner value of `outer` (P2R-104). An

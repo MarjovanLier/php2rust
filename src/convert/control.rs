@@ -98,9 +98,10 @@ impl Converter<'_> {
         // rustfmt keeps an empty block on the opening line only without an else.
         let alone = branches.len() == 1 && empty(&branches[0].1);
         // `if ($v === null)` alone, on a variable that may be null, becomes a let-else when
-        // its body always leaves (P2R-104).
+        // its body always leaves (P2R-104), and so does `if (!is_T($v))` on a union value
+        // (P2R-252).
         let guarded = match branches.as_slice() {
-            [(Some(condition), _)] if !alone => self.null_checked(condition, false),
+            [(Some(condition), _)] if !alone => self.guard_check(condition),
             _ => None,
         };
         let mut guard: Option<usize> = None;
@@ -126,10 +127,9 @@ impl Converter<'_> {
                     }
                     let keyword = if index == 0 { "if" } else { "} else if" };
                     let open = if alone { "{}" } else { "{" };
-                    if let Some((_, outer, inner)) = &guarded {
+                    if let Some((_, _, _, pattern)) = &guarded {
                         let test = self.condition_text(condition);
-                        let pattern = self.pattern(*outer, inner);
-                        let (line, at) = self.variables.guard_line(depth, pattern, test);
+                        let (line, at) = self.variables.guard_line(depth, pattern.clone(), test);
                         guard = Some(at);
                         line
                     } else {
@@ -183,7 +183,7 @@ impl Converter<'_> {
         self.variables.flow.enter(join);
         self.join(arriving, "an if whose every branch leaves");
         // The statements after a let-else in its block read the binding (P2R-104).
-        if let (Some((variable, _, inner)), Some(at), true) = (guarded, guard, body_leaves) {
+        if let (Some((variable, _, inner, _)), Some(at), true) = (guarded, guard, body_leaves) {
             let binding = self.bind_null(variable, inner);
             self.variables.guard(binding);
             self.variables.set_guard(at, binding);

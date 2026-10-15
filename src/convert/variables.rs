@@ -68,8 +68,9 @@ pub(super) const THIS: &[u8] = b"this";
 /// The problem of a copy of a value of a changing type (P2R-145).
 const NO_COPY: &str = "an object whose class changes its objects is never copied; it moves only from a local variable or an owned parameter that is not read again (P2R-145)";
 
-/// The problem of a write to the binding of a null check (P2R-104).
-const CHECKED: &str = "a variable that a check against null binds cannot be assigned until the check's block ends (P2R-104)";
+/// The problem of a write to the binding of a null check or a type test (P2R-104,
+/// P2R-252).
+const CHECKED: &str = "a variable that a check against null or a type test binds cannot be assigned until the check's block ends (P2R-104, P2R-252)";
 
 pub(super) use crate::printer::COPY;
 
@@ -118,6 +119,9 @@ enum Pending {
         pattern: String,
         /// `v.is_none()`.
         test: String,
+        /// `let v = v.as_str()` after the let-else of a string member of a union, so the
+        /// binding reads as a `&str` (P2R-252).
+        shadow: Option<String>,
     },
     /// The closing line of a guard: `};` after a let-else, otherwise `}`.
     GuardEnd { guard: usize },
@@ -354,13 +358,14 @@ impl Variables {
     pub(super) fn guard_line(
         &mut self,
         depth: usize,
-        pattern: String,
+        (pattern, shadow): (String, Option<String>),
         test: String,
     ) -> (String, usize) {
         self.pending.push(Pending::Guard {
             binding: None,
             pattern,
             test,
+            shadow,
         });
         let index = self.pending.len() - 1;
         (format!("{}{MARK}{index}", "    ".repeat(depth)), index)
@@ -1965,6 +1970,7 @@ impl Converter<'_> {
                         binding,
                         pattern,
                         test,
+                        ..
                     },
                 )) => {
                     let indent = &line[..at];
@@ -1976,10 +1982,17 @@ impl Converter<'_> {
                     finished.push(text);
                 }
                 Some((at, _, Pending::GuardEnd { guard })) => {
-                    let after_let = matches!(pending.get(*guard),
-                        Some(Pending::Guard { binding, .. }) if let_else(*binding, &unused));
-                    let end = if after_let { "};" } else { "}" };
+                    let shadow = match pending.get(*guard) {
+                        Some(Pending::Guard {
+                            binding, shadow, ..
+                        }) if let_else(*binding, &unused) => Some(shadow),
+                        _ => None,
+                    };
+                    let end = if shadow.is_some() { "};" } else { "}" };
                     finished.push(format!("{}{end}", &line[..at]));
+                    if let Some(Some(shadow)) = shadow {
+                        finished.push(format!("{}{shadow};", &line[..at]));
+                    }
                 }
                 None => finished.push(line),
             }

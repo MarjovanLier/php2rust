@@ -82,19 +82,47 @@ impl Converter<'_> {
         key: &RustType,
         value: &RustType,
     ) -> Option<(RExpr, RustType)> {
+        let statement = array.span();
+        // A literal of plain values gives the keys 0, 1, 2 in order, as PHP does (P2R-241).
+        if array
+            .elements
+            .iter()
+            .all(|element| matches!(element, ArrayElement::Value(_)))
+        {
+            let pairs: Vec<Option<(RExpr, RExpr)>> = array
+                .elements
+                .iter()
+                .enumerate()
+                .map(|(at, element)| {
+                    let ArrayElement::Value(element) = element else {
+                        return None;
+                    };
+                    let index = i64::try_from(at).ok()?;
+                    let k = match key {
+                        RustType::I64 => RExpr::Int(index),
+                        _ => {
+                            RExpr::Call("String::from".into(), vec![RExpr::Str(index.to_string())])
+                        }
+                    };
+                    Some((k, self.map_value(element.value, value, statement)?))
+                })
+                .collect();
+            let pairs = pairs.into_iter().collect::<Option<Vec<_>>>()?;
+            let ty = RustType::Map(Box::new(key.clone()), Box::new(value.clone()));
+            return Some((RExpr::MapLiteral(pairs), ty));
+        }
         let mut elements = Vec::new();
         for element in array.elements.iter() {
             let ArrayElement::KeyValue(pair) = element else {
                 self.refuse_list(
                     array,
-                    "an array literal where a map is needed converts only with a key and a value on every element, never a plain value or a spread (P2R-241)",
+                    "an array literal where a map is needed converts only with a key and a value on every element, or with plain values only, never a mix or a spread (P2R-241)",
                 );
                 return None;
             };
             elements.push((pair.key, pair.value));
         }
         // Every key and value converts, so the problems in each are reported.
-        let statement = array.span();
         let pairs: Vec<Option<(RExpr, RExpr)>> = elements
             .into_iter()
             .map(|(k, v)| {

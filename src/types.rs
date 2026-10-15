@@ -275,6 +275,10 @@ pub fn declared_type(union: &TUnion, enums: &TypeNames) -> Result<RustType, Stri
                 ]
             }
             TAtomic::Scalar(TScalar::ArrayKey) => vec![RustType::I64, RustType::String],
+            // A declared map may hold a union (P2R-250).
+            TAtomic::Array(TArray::Keyed(keyed)) if is_map(keyed) => {
+                vec![declared_map(keyed, enums)?]
+            }
             // A list of a union fails here, and a union stays out of lists (P2R-230).
             _ => vec![
                 rust_type(&TUnion::from_vec(vec![atomic.clone()]), enums)
@@ -285,13 +289,22 @@ pub fn declared_type(union: &TUnion, enums: &TypeNames) -> Result<RustType, Stri
             if nullable_object(&ty) {
                 return Err(NULLABLE_OBJECT.to_owned());
             }
-            if matches!(ty, RustType::Map(..)) {
-                return Err("a map inside a union is not supported yet (P2R-240)".to_owned());
-            }
             if !members.contains(&ty) {
                 members.push(ty);
             }
         }
+    }
+    // A map whose value type is a union, alone or with null (P2R-250).
+    if let [map @ RustType::Map(..)] = members.as_slice() {
+        let map = map.clone();
+        return Ok(if nullable {
+            RustType::Option(Box::new(map))
+        } else {
+            map
+        });
+    }
+    if members.iter().any(|ty| matches!(ty, RustType::Map(..))) {
+        return Err("a map inside a union is not supported yet (P2R-240)".to_owned());
     }
     if members.len() < 2 {
         return Err(error);
@@ -370,6 +383,26 @@ fn is_map(keyed: &TKeyedArray) -> bool {
     keyed.parameters.is_some()
 }
 
+/// True when every member of `site`, a type Mago gives, is one of `members`, the members of
+/// a union enum, or `null` when `nullable` (P2R-232).
+pub fn within(site: &TUnion, members: &[RustType], nullable: bool, enums: &TypeNames) -> bool {
+    let scalar = |member: &RustType| {
+        matches!(
+            member,
+            RustType::I64 | RustType::F64 | RustType::Bool | RustType::String
+        )
+    };
+    site.types.iter().all(|atomic| match atomic {
+        TAtomic::Null => nullable,
+        TAtomic::Scalar(TScalar::Generic) => members.iter().any(scalar),
+        TAtomic::Scalar(TScalar::ArrayKey) => members
+            .iter()
+            .any(|member| matches!(member, RustType::I64 | RustType::String)),
+        other => rust_type(&TUnion::from_vec(vec![other.clone()]), enums)
+            .is_ok_and(|ty| members.contains(&ty)),
+    })
+}
+
 /// True when `union`, Mago's type of a variable that holds the map `map`, has only keys and
 /// values the map takes. Mago types a map after a write by a literal key with that key, as
 /// a shape (`array{'z': int}` after `$m = []; $m['z'] = 2;`) or beside the key and value
@@ -378,9 +411,16 @@ pub fn fits_map(union: &TUnion, map: &RustType, enums: &TypeNames) -> bool {
     let RustType::Map(key, value) = map else {
         return false;
     };
+    let nullable = matches!(**value, RustType::Option(_));
     let value_fits = |union: &TUnion| {
         if only_null(union) {
-            return matches!(**value, RustType::Option(_));
+            return nullable;
+        }
+        // A union value takes a value of any of its members (P2R-250).
+        if let RustType::Union(name) = value.inner() {
+            return enums
+                .union(name)
+                .is_some_and(|members| within(union, &members, nullable, enums));
         }
         rust_type(union, enums).is_ok_and(|found| found == **value || found == *value.inner())
     };
@@ -403,7 +443,8 @@ pub fn fits_map(union: &TUnion, map: &RustType, enums: &TypeNames) -> bool {
                 known_items: None,
                 ..keyed.clone()
             };
-            map_type(&general, enums).is_ok_and(|found| match found {
+            // Only the key type is read here; `value_fits` checks the values.
+            map_with(&general, |_| Ok(RustType::I64)).is_ok_and(|found| match found {
                 RustType::Map(found_key, _) => found_key == *key || *found_key == RustType::I64,
                 _ => false,
             }) && value_fits(rest)
@@ -417,7 +458,20 @@ pub fn fits_map(union: &TUnion, map: &RustType, enums: &TypeNames) -> bool {
 /// turns stored and lookup keys the same way. Known keys and their values count as keys
 /// and values of the map (P2R-240).
 fn map_type(keyed: &TKeyedArray, enums: &TypeNames) -> Result<RustType, String> {
-    let Some((key, value)) = &keyed.parameters else {
+    map_with(keyed, |values| rust_type(values, enums))
+}
+
+/// The map of a declared `array<K, V>`, whose value type may be a union (P2R-250).
+fn declared_map(keyed: &TKeyedArray, enums: &TypeNames) -> Result<RustType, String> {
+    map_with(keyed, |values| declared_type(values, enums))
+}
+
+/// The map of `keyed`, with `value` giving the Rust type of the value type.
+fn map_with(
+    keyed: &TKeyedArray,
+    value: impl Fn(&TUnion) -> Result<RustType, String>,
+) -> Result<RustType, String> {
+    let Some((key, value_type)) = &keyed.parameters else {
         return Err("an array without key and value types has no Rust type (P2R-22)".into());
     };
     let unknown = || {
@@ -436,7 +490,7 @@ fn map_type(keyed: &TKeyedArray, enums: &TypeNames) -> Result<RustType, String> 
             _ => return Err(unknown()),
         }
     }
-    let mut values = value.types.to_vec();
+    let mut values = value_type.types.to_vec();
     for (known, (_, known_value)) in keyed.known_items.iter().flat_map(|items| items.iter()) {
         match known {
             ArrayKey::Integer(_) => int = true,
@@ -450,7 +504,7 @@ fn map_type(keyed: &TKeyedArray, enums: &TypeNames) -> Result<RustType, String> 
         (_, true) => RustType::String,
         _ => return Err(unknown()),
     };
-    let value = rust_type(&TUnion::from_vec(values), enums)?;
+    let value = value(&TUnion::from_vec(values))?;
     Ok(RustType::Map(Box::new(key), Box::new(value)))
 }
 

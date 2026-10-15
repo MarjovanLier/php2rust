@@ -12,12 +12,13 @@ function printed(int|string $a): void
     echo $a, "\n";
 }
 
-function narrowed(int|string $v): int
+function narrowed(int|string $v, bool $b): int
 {
-    if (is_string($v)) {
-        return strlen($v);
+    // Mago narrows `$v` here, but an or-chain binds nothing (P2R-252).
+    if (!is_string($v) || $b) {
+        return 0;
     }
-    return 0;
+    return strlen($v);
 }
 
 function joined(int|string $v): string

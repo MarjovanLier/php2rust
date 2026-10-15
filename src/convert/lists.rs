@@ -77,6 +77,8 @@ struct Sites<'c> {
     returns: Option<&'c RustType>,
     /// By PHP name without `$`; `None` for a name with two different list types.
     found: HashMap<Vec<u8>, Option<RustType>>,
+    /// The declared map type each name flows into; `None` for two different ones.
+    flowed: HashMap<Vec<u8>, Option<RustType>>,
     /// By PHP name: the type of every site with the `Option` taken off; `None` for a name
     /// whose sites disagree.
     inner: HashMap<Vec<u8>, Option<RustType>>,
@@ -126,7 +128,20 @@ impl Sites<'_> {
                 }
             })
             .or_insert(Some(inner));
-        // A `[]` takes a map type as it takes a list type (P2R-241).
+        // A `[]` takes a map type as it takes a list type (P2R-241). The declared map type a
+        // variable flows into wins over Mago's narrower types of its sites, which fit it
+        // (P2R-250).
+        if flows && matches!(ty, RustType::Map(..)) {
+            self.flowed
+                .entry(name)
+                .and_modify(|seen| {
+                    if seen.as_ref() != Some(&ty) {
+                        *seen = None;
+                    }
+                })
+                .or_insert(Some(ty));
+            return;
+        }
         if !matches!(ty, RustType::Vec(_) | RustType::Map(..)) {
             return;
         }
@@ -232,6 +247,7 @@ impl Converter<'_> {
             enums: &self.type_names,
             returns,
             found: HashMap::new(),
+            flowed: HashMap::new(),
             inner: HashMap::new(),
             nullable: HashSet::new(),
         };
@@ -250,10 +266,9 @@ impl Converter<'_> {
                 None => Some((name.clone(), None)),
             })
             .collect();
-        SiteTypes {
-            lists: sites.found,
-            nulls,
-        }
+        let mut lists = sites.found;
+        lists.extend(sites.flowed);
+        SiteTypes { lists, nulls }
     }
 
     /// An expression whose type is `expected` when it is known, so `[]` and `null` can take

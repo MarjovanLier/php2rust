@@ -1,0 +1,7 @@
+input.php:10:20: the type list<int|string> has no Rust type (P2R-22)
+input.php:18:21: the type int|string has no Rust type (P2R-22)
+input.php:28:20: a map inside a union is not supported yet (P2R-240)
+input.php:38:12: the right side of ?? must have the type IntOrString here (P2R-105)
+input.php:46:12: arithmetic needs two int or two float operands (P2R-43)
+input.php:55:12: a map goes only where a map of the same key and value types is needed, and a list or array shape never goes where a map is needed (P2R-240)
+input.php:63:15: an int where a union type has float and no int is not supported (P2R-231)

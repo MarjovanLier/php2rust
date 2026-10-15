@@ -1,0 +1,5 @@
+input.php:7:12: is_string() converts only on a value of a union type (P2R-251)
+input.php:12:12: the union BoolOrInt has no member that is_string() accepts (P2R-251)
+input.php:17:12: is_int() converts with one argument only (P2R-251)
+input.php:22:12: calls to is_numeric are not supported (P2R-48)
+input.php:22:30: calls to is_array are not supported (P2R-48)

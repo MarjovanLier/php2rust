@@ -179,15 +179,19 @@ converts:
 - declared union types (`int|string $id`, `bool|array{...}|string|null`): each becomes
   a generated enum with one variant per member (`IntOrString { Int(i64), String(String)
   }`), values go into it as `IntOrString::Int(5)`, and `is_scalar()`, `gettype()` and
-  `(string)` on a union value become a `match` over its variants. Other uses of a union
-  value (echo, maths, comparisons) stop.
+  `(string)` on a union value become a `match` over its variants. `is_int()`,
+  `is_float()`, `is_bool()` and `is_string()` on a union value become `matches!`, and
+  `if (!is_string($v)) { continue; }` or `if (is_string($v)) { .. }` binds the string
+  (`let IntOrString::String(v) = v else { continue; };`), as a check against null does.
+  Other uses of a union value (echo, maths, comparisons) stop.
 - `$o?->p` and `$o?->m($x)` on a nullable object become `o.as_ref().map(|o| ..)`,
   and `??` works on the result.
 - maps (`array<string, V>`, `array<int, V>`, `array<array-key, V>`): each becomes an
   `IndexMap`, which keeps PHP's key order. A string or `array-key` key becomes text, so an
   int key `5` and the key `'5'` are one key, as in PHP. A literal with a key on every
-  element, `$m = []`, `$m[k]`, `$m[k] = v`, `unset($m[k])`, `isset($m[k])`,
-  `array_key_exists()`, `$m[k] ?? $d`, `count()` and `foreach` convert.
+  element or none (keys 0, 1, 2), `$m = []`, `$m[k]`, `$m[k] = v`, `unset($m[k])`,
+  `isset($m[k])`, `array_key_exists()`, `$m[k] ?? $d`, `count()` and `foreach` convert.
+  A declared map may hold a union (`array<int|string, scalar>`).
 
 ## What stops the conversion
 
@@ -262,8 +266,11 @@ the others are findings of the Mago analyser. In short:
 - A union inside a list or a shape field, a union whose PHP type and docblock type
   disagree on int and float, `(string)` of a union that may hold a float, a list, a shape
   or an object (outside `is_scalar($v) ? (string) $v : ..`), and a union value passed
-  where another union type is needed.
-- For maps: a value type that is a union, `mixed` or a class that changes its objects, a
+  where another union type is needed. `is_string()` and its kin on a value that is not a
+  union, a narrowing in any other form (`!is_string($v) || ..`), and a write to a narrowed
+  variable while its binding holds.
+- For maps: a value type that is `mixed` or a class that changes its objects, a union
+  value type outside a declared type, a
   map inside a union, a key type other than int, string or `array-key`, a list or shape
   where a map is needed (or the other way round), a map where a map of other key or value
   types is needed (`array<string, int>` for `array<string, ?int>`), a float, bool, null or union key, a

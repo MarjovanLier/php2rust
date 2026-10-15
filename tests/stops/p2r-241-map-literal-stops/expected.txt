@@ -1,5 +1,5 @@
-input.php:10:12: an array literal where a map is needed converts only with a key and a value on every element, never a plain value or a spread (P2R-241)
-input.php:19:12: an array literal where a map is needed converts only with a key and a value on every element, never a plain value or a spread (P2R-241)
+input.php:10:12: an array literal where a map is needed converts only with a key and a value on every element, or with plain values only, never a mix or a spread (P2R-241)
+input.php:19:12: an array literal where a map is needed converts only with a key and a value on every element, or with plain values only, never a mix or a spread (P2R-241)
 input.php:27:13: a map key must be an int or a string; PHP changes a float, bool or null key (P2R-241)
 input.php:27:22: a map key must be an int or a string; PHP changes a float, bool or null key (P2R-241)
 input.php:27:31: a map key must be an int or a string; PHP changes a float, bool or null key (P2R-241)

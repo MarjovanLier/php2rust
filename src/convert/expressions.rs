@@ -77,6 +77,11 @@ impl Converter<'_> {
             Expression::Call(Call::Function(call)) if self.calls_built_in(call, b"gettype") => {
                 self.type_test(call, expression, false)
             }
+            Expression::Call(Call::Function(call))
+                if let Some(test) = self.member_test_of(call) =>
+            {
+                self.member_test(call, expression, test)
+            }
             Expression::Call(Call::Function(call)) if self.calls_built_in(call, b"count") => {
                 self.count(call, expression)
             }

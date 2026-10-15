@@ -8,6 +8,7 @@ use mago_syntax::cst::*;
 
 use super::Converter;
 use super::control::emit;
+use super::flow::Var;
 use super::lists::unparenthesized;
 use crate::printer::{self, RExpr};
 use crate::types::{self, RustType};
@@ -26,6 +27,28 @@ pub(super) enum Test {
     Type,
     /// `(string)`.
     Text,
+}
+
+/// The built-in type tests and the member type each accepts (P2R-251).
+const MEMBER_TESTS: [(&[u8], RustType); 4] = [
+    (b"is_int", RustType::I64),
+    (b"is_float", RustType::F64),
+    (b"is_bool", RustType::Bool),
+    (b"is_string", RustType::String),
+];
+
+/// A type test of P2R-252 on a variable that binds its member value.
+pub(super) struct MemberCheck<'e, 'a> {
+    pub(super) variable: &'e DirectVariable<'a>,
+    pub(super) outer: Var,
+    pub(super) member: RustType,
+    /// `let U::V(v) = S`.
+    pub(super) pattern: String,
+    /// `matches!(v, U::V(_))`, for a test that binds nothing.
+    pub(super) test: String,
+    /// `let v = v.as_str()` after the binding of a string member, which binds a `&String`,
+    /// so it reads as a `&str` does.
+    pub(super) shadow: Option<String>,
 }
 
 /// True for a member type that `is_scalar()` accepts.
@@ -62,17 +85,142 @@ impl Converter<'_> {
     /// True when every member of the type Mago gives a read, `site`, is a member of the
     /// union enum `name`, or null for a nullable one (P2R-232).
     pub(super) fn within_union(&self, site: &TUnion, name: &str, nullable: bool) -> bool {
-        let Some(members) = self.type_names.union(name) else {
-            return false;
+        self.type_names
+            .union(name)
+            .is_some_and(|members| types::within(site, &members, nullable, &self.type_names))
+    }
+
+    /// The type test `call` names and the member type it accepts (P2R-251).
+    pub(super) fn member_test_of(
+        &self,
+        call: &FunctionCall<'_>,
+    ) -> Option<(&'static str, RustType)> {
+        MEMBER_TESTS
+            .iter()
+            .find(|(name, _)| self.calls_built_in(call, name))
+            .map(|(name, member)| {
+                (
+                    std::str::from_utf8(name).unwrap_or_default(),
+                    member.clone(),
+                )
+            })
+    }
+
+    /// `is_int($v)`, `is_float($v)`, `is_bool($v)` or `is_string($v)` on a value of a union
+    /// type, as `matches!` on the variant of `member`; false for null (P2R-251).
+    pub(super) fn member_test(
+        &mut self,
+        call: &FunctionCall<'_>,
+        node: &Expression<'_>,
+        (function, member): (&str, RustType),
+    ) -> Option<(RExpr, RustType)> {
+        let arguments = self.built_in_arguments(
+            call,
+            node,
+            (1, 1),
+            &format!("{function}() converts with one argument only (P2R-251)"),
+        )?;
+        let (expr, ty) = self.expression(arguments[0])?;
+        let RustType::Union(name) = ty.inner() else {
+            self.refuse(
+                node,
+                format!("{function}() converts only on a value of a union type (P2R-251)"),
+            );
+            return None;
         };
-        site.types.iter().all(|atomic| match atomic {
-            TAtomic::Null => nullable,
-            TAtomic::Scalar(TScalar::Generic) => members.iter().any(scalar),
-            TAtomic::Scalar(TScalar::ArrayKey) => members
-                .iter()
-                .any(|member| matches!(member, RustType::I64 | RustType::String)),
-            other => types::rust_type(&TUnion::from_vec(vec![other.clone()]), &self.type_names)
-                .is_ok_and(|ty| members.contains(&ty)),
+        if !self
+            .type_names
+            .union(name)
+            .is_some_and(|members| members.contains(&member))
+        {
+            self.refuse(
+                node,
+                format!("the union {name} has no member that {function}() accepts (P2R-251)"),
+            );
+            return None;
+        }
+        let mut pattern = format!("{name}::{}(_)", types::variant(&member));
+        if matches!(ty, RustType::Option(_)) {
+            pattern = format!("Some({pattern})");
+        }
+        let subject = printer::expr(&expr, false);
+        let call = RExpr::Call(
+            "matches!".to_owned(),
+            vec![RExpr::Path(subject), RExpr::Path(pattern)],
+        );
+        Some((call, RustType::Bool))
+    }
+
+    /// `is_T($v)`, or `!is_T($v)` when not `positive`, on a variable or parameter of a union
+    /// type with a member that the test accepts: the check that binds the member value
+    /// (P2R-252).
+    pub(super) fn member_checked<'e, 'a>(
+        &self,
+        operand: &'e Expression<'a>,
+        positive: bool,
+    ) -> Option<MemberCheck<'e, 'a>> {
+        let tested = match (unparenthesized(operand), positive) {
+            (Expression::Call(Call::Function(call)), true) => call,
+            (Expression::UnaryPrefix(unary), false)
+                if matches!(unary.operator, UnaryPrefixOperator::Not(_)) =>
+            {
+                match unparenthesized(unary.operand) {
+                    Expression::Call(Call::Function(call)) => call,
+                    _ => return None,
+                }
+            }
+            _ => return None,
+        };
+        let (_, member) = self.member_test_of(tested)?;
+        let [Argument::Positional(argument)] = tested.argument_list.arguments.as_slice() else {
+            return None;
+        };
+        let Expression::Variable(Variable::Direct(variable)) = unparenthesized(argument.value)
+        else {
+            return None;
+        };
+        let outer = self.lookup(variable)?;
+        let ty = self.variables.ty(outer)?;
+        let RustType::Union(union) = ty.inner() else {
+            return None;
+        };
+        if !self
+            .type_names
+            .union(union)
+            .is_some_and(|members| members.contains(&member))
+        {
+            return None;
+        }
+        let nullable = matches!(ty, RustType::Option(_));
+        let name = self.variables.name_of(outer);
+        let path = format!("{union}::{}", types::variant(&member));
+        // A test never moves the value: a member that is not Copy is lent (P2R-252).
+        let (copy, borrowed) = (member.is_copy(), self.variables.is_borrowed(name));
+        let (pattern, scrutinee) = match (nullable, borrowed, copy) {
+            (false, false, true) | (false, true, false) => {
+                (format!("{path}({name})"), name.to_owned())
+            }
+            (false, false, false) => (format!("{path}({name})"), format!("&{name}")),
+            (false, true, true) => (format!("{path}({name})"), format!("*{name}")),
+            (true, false, true) | (true, true, false) => {
+                (format!("Some({path}({name}))"), name.to_owned())
+            }
+            (true, false, false) => (format!("Some({path}({name}))"), format!("&{name}")),
+            (true, true, true) => (format!("Some(&{path}({name}))"), name.to_owned()),
+        };
+        let blank = if nullable {
+            format!("Some({path}(_))")
+        } else {
+            format!("{path}(_)")
+        };
+        let shadow = (member == RustType::String).then(|| format!("let {name} = {name}.as_str()"));
+        Some(MemberCheck {
+            variable,
+            outer,
+            member,
+            pattern: format!("let {pattern} = {scrutinee}"),
+            test: format!("matches!({name}, {blank})"),
+            shadow,
         })
     }
 

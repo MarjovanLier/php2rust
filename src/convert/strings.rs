@@ -51,12 +51,13 @@ impl Converter<'_> {
             (1, 1),
             "strlen takes one positional argument (P2R-48)",
         )?;
-        let (expr, ty) = self.expression(arguments[0])?;
-        // Mago may type the argument as a string where it knows more (P2R-104).
-        if matches!(ty, RustType::Option(_)) {
-            self.refuse(arguments[0], nulls::NULL_BUILT_IN);
-            return None;
-        }
+        // Mago may type the argument as a string where it knows more: a value that may be
+        // null (P2R-104), or a union value it narrows (P2R-232).
+        let expr = self.typed_argument(
+            arguments[0],
+            &RustType::String,
+            "strlen converts on a string only (P2R-48)",
+        )?;
         Some((RExpr::Len(Box::new(expr)), RustType::I64))
     }
 

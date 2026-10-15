@@ -474,20 +474,23 @@ impl Converter<'_> {
     }
 
     /// True when the class extends Spatie's `Data`, which the struct leaves out (P2R-350).
+    /// Mago's parser accepts a list of parents, which PHP rejects.
     pub(super) fn extends_data(&self, declaration: &Class<'_>) -> bool {
         declaration.extends.as_ref().is_some_and(|extends| {
-            extends
-                .types
-                .iter()
-                .all(|parent| self.identifier_key(parent) == b"spatie\\laraveldata\\data")
+            extends.types.len() == 1
+                && extends
+                    .types
+                    .iter()
+                    .all(|parent| self.identifier_key(parent) == b"spatie\\laraveldata\\data")
         })
     }
 
     /// True when the attribute is one of laravel-data's, which only the methods of `Data`
-    /// read (P2R-351).
+    /// read, with arguments PHP accepts when it compiles the file (P2R-351).
     fn data_attribute(&self, attribute: &Attribute<'_>) -> bool {
         self.identifier_key(&attribute.name)
             .starts_with(b"spatie\\laraveldata\\attributes\\")
+            && plain_arguments(attribute)
     }
 
     /// Refuses everything a class of these slices may not hold (P2R-130, P2R-140).
@@ -553,6 +556,17 @@ impl Converter<'_> {
             let overrides =
                 array_access && ARRAY_ACCESS_METHODS.contains(&lowercase(method).as_slice());
             self.method_shape(method, overrides);
+            // PHP checks an override against the parent, which Mago does not always do.
+            if data
+                && self
+                    .codebase
+                    .method_exists(b"Spatie\\LaravelData\\Data", method.name.value)
+            {
+                self.refuse(
+                    &method.name,
+                    "Spatie\\LaravelData\\Data has a method of this name, and overriding it is not supported (P2R-350)",
+                );
+            }
             // PHP rejects a parameter that narrows the interface's mixed, and Mago does
             // not report it.
             if overrides {
@@ -2029,6 +2043,44 @@ const DATA_PROPERTIES: [&[u8]; 2] = [b"_additional", b"_dataContext"];
 /// The problem of a property that `Data` already declares (P2R-350).
 const DATA_PROPERTY: &str =
     "Spatie\\LaravelData\\Data already declares a property of this name (P2R-350)";
+
+/// True when every argument of `attribute` is a string or int literal or `Name::class`,
+/// named ones last and each name once. PHP compiles attribute arguments as constant
+/// expressions and rejects other forms, such as a call, when it compiles the file; Mago
+/// does not report them all (P2R-351).
+fn plain_arguments(attribute: &Attribute<'_>) -> bool {
+    let Some(list) = &attribute.argument_list else {
+        return true;
+    };
+    let mut names: Vec<&[u8]> = Vec::new();
+    list.arguments.iter().all(|argument| {
+        let value = match argument {
+            PartialArgument::Positional(positional) => {
+                if !names.is_empty() || positional.ellipsis.is_some() {
+                    return false;
+                }
+                positional.value
+            }
+            PartialArgument::Named(named) => {
+                if names.contains(&named.name.value) {
+                    return false;
+                }
+                names.push(named.name.value);
+                named.value
+            }
+            _ => return false,
+        };
+        match value {
+            Expression::Literal(Literal::String(_) | Literal::Integer(_)) => true,
+            Expression::Access(Access::ClassConstant(access)) => {
+                matches!(access.class, Expression::Identifier(_))
+                    && matches!(&access.constant, ClassLikeConstantSelector::Identifier(constant)
+                        if constant.value.eq_ignore_ascii_case(b"class"))
+            }
+            _ => false,
+        }
+    })
+}
 
 /// True for a class declared `readonly` (P2R-130).
 fn is_readonly(declaration: &Class<'_>) -> bool {

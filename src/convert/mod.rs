@@ -643,7 +643,8 @@ impl<'c> Converter<'c> {
 
     /// The key of the class or enum a class name in a use refers to: a name, or `self` and
     /// `static` inside the body of a class or enum, where `static` is `self` because no
-    /// class extends another (P2R-153). `None` for `parent` or an expression.
+    /// class extends another class of the input (P2R-153). `None` for `parent` or an
+    /// expression.
     fn class_key(&self, class: &Expression<'_>) -> Option<Vec<u8>> {
         match class {
             Expression::Identifier(identifier) => Some(self.identifier_key(identifier)),
@@ -840,6 +841,13 @@ impl<'c> Converter<'c> {
                                     self.refuse(
                                         &declaration.name,
                                         "a class that implements an interface or uses a trait must come before the statements outside functions, because PHP declares it only when execution reaches it (P2R-130, P2R-280)",
+                                    );
+                                } else if ran && self.extends_data(declaration) {
+                                    // PHP declares it early only when Data is loaded before
+                                    // the file compiles, which Composer's autoloader does not do.
+                                    self.refuse(
+                                        &declaration.name,
+                                        "a class that extends Spatie\\LaravelData\\Data must come before the statements outside functions, because PHP declares it only when execution reaches it (P2R-350)",
                                     );
                                 }
                                 if let Some(index) = self.class_index(declaration) {

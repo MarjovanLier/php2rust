@@ -42,6 +42,24 @@ function others(array $maybe, array $words): int
 }
 
 /**
+ * @param list<int> $xs
+ * @return list<int>
+ */
+function widened(array $xs): array
+{
+    return array_map(fn(int $x): float => $x, $xs);
+}
+
+/**
+ * @param list<int> $xs
+ * @return list<int>
+ */
+function optional(array $xs): array
+{
+    return array_map(fn(int $x): ?int => $x, $xs);
+}
+
+/**
  * @param array<string, int> $map
  * @param list<string> $words
  * @param list<list<int>> $nested

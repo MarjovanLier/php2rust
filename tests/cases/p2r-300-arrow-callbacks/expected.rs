@@ -37,14 +37,6 @@ pub fn labelled(xs: &[i64], unit: Unit) -> Vec<String> {
         .collect::<Vec<_>>();
 }
 
-pub fn halves(xs: &[i64]) -> Vec<f64> {
-    return xs
-        .iter()
-        .copied()
-        .map(|x: i64| x as f64)
-        .collect::<Vec<_>>();
-}
-
 pub fn ones(xs: &[i64]) -> Vec<i64> {
     return xs.iter().copied().map(|_x: i64| 1_i64).collect::<Vec<_>>();
 }
@@ -83,8 +75,6 @@ fn main() {
     print!("{}", shown(&shifted(&[1, 2], 10, true, Some(5))));
     print!("\n");
     print!("{}", labelled(&[3, 4], Unit::Foot).join(","));
-    print!("\n");
-    print!("{}", halves(&[1, 2, 3]).len() as i64);
     print!("\n");
     print!("{}", shown(&ones(&[7, 8])));
     print!("\n");

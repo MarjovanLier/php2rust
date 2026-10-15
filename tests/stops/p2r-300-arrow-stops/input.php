@@ -87,3 +87,12 @@ function more(array $xs, int|string $u): array
     return [count($a), count($b), count($c), count($d), count($e), count($f), count($g), count($h),
         count($i), count($j), count($k), $late];
 }
+
+/**
+ * @param list<int> $xs
+ * @return list<string>
+ */
+function checked(array $xs, ?string $name): array
+{
+    return array_map(fn(int $x): string => $name !== null ? $name : 'none', $xs);
+}

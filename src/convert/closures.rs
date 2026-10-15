@@ -199,6 +199,16 @@ impl Converter<'_> {
             }
         };
         let ((list, _), (callback, result)) = (list?, callback?);
+        // Mago types the result from the body, not from a declared return type, and the
+        // places that take the result go by Mago's type.
+        let mapped = RustType::Vec(Box::new(result.clone()));
+        if self.site_type(node).is_ok_and(|ty| ty != mapped) {
+            self.refuse(
+                arguments[0],
+                "a callback whose declared return type differs from the type of its body is not supported in array_map(), because Mago types the result from the body (P2R-301)",
+            );
+            return None;
+        }
         let items = RExpr::MethodCall(Box::new(list), "iter".to_owned(), Vec::new());
         let items = if element.is_copy() {
             RExpr::MethodCall(Box::new(items), "copied".to_owned(), Vec::new())

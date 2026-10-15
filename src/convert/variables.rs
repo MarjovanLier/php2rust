@@ -704,28 +704,8 @@ impl Converter<'_> {
             return None;
         };
         self.variables.read(var, variable.span);
-        // The closure borrows a Copy value, which nothing writes while it runs; anything
-        // else it would borrow or move, where PHP copies it (P2R-300).
-        if self
-            .variables
-            .closure_start
-            .is_some_and(|start| var < start)
-        {
-            let message = if &variable.name[1..] == THIS {
-                "$this in an arrow function is not supported (P2R-300)"
-            } else if self.variables.entries[var]
-                .ty
-                .as_ref()
-                .is_some_and(RustType::is_copy)
-            {
-                ""
-            } else {
-                "an arrow function may read only int, float, bool and enum variables of the enclosing body (P2R-300)"
-            };
-            if !message.is_empty() {
-                self.refuse(variable, message);
-                return None;
-            }
+        if self.refused_capture(var, variable) {
+            return None;
         }
         if self
             .variables
@@ -1760,6 +1740,33 @@ impl Converter<'_> {
         });
         self.variables.write(var, Some(variable.span));
         var
+    }
+
+    /// True, with the problem recorded, when `var` belongs to the body around the arrow
+    /// function that is converting and is `$this` or no Copy value. The closure borrows a
+    /// Copy value, which nothing writes while it runs; anything else it would borrow or
+    /// move, where PHP copies it (P2R-300).
+    pub(super) fn refused_capture(&mut self, var: Var, variable: &DirectVariable<'_>) -> bool {
+        if !self
+            .variables
+            .closure_start
+            .is_some_and(|start| var < start)
+        {
+            return false;
+        }
+        let message = if &variable.name[1..] == THIS {
+            "$this in an arrow function is not supported (P2R-300)"
+        } else if self.variables.entries[var]
+            .ty
+            .as_ref()
+            .is_some_and(RustType::is_copy)
+        {
+            return false;
+        } else {
+            "an arrow function may read only int, float, bool and enum variables of the enclosing body (P2R-300)"
+        };
+        self.refuse(variable, message);
+        true
     }
 
     /// Declares a parameter of an arrow function, of type `ty`, which only the body reads

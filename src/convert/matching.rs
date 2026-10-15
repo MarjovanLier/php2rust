@@ -371,9 +371,14 @@ impl Converter<'_> {
         let condition = match checked {
             Some(((variable, outer, inner), ..)) => {
                 self.variables.read(outer, variable.span);
-                let pattern = self.pattern(outer, &inner);
-                binding = Some((variable, inner));
-                Some(RExpr::Let(pattern))
+                // The check reads the variable without a P2R-34 read (P2R-300).
+                if self.refused_capture(outer, variable) {
+                    None
+                } else {
+                    let pattern = self.pattern(outer, &inner);
+                    binding = Some((variable, inner));
+                    Some(RExpr::Let(pattern))
+                }
             }
             None => self.condition(node.condition),
         };

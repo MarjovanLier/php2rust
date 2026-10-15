@@ -32,15 +32,6 @@ function labelled(array $xs, Unit $unit): array
 
 /**
  * @param list<int> $xs
- * @return list<float>
- */
-function halves(array $xs): array
-{
-    return array_map(fn(int $x): float => $x, $xs);
-}
-
-/**
- * @param list<int> $xs
  * @return list<int>
  */
 function ones(array $xs): array
@@ -80,7 +71,6 @@ function shown(array $xs): string
 echo shown(shifted([1, 2], 10, false, null)), "\n";
 echo shown(shifted([1, 2], 10, true, 5)), "\n";
 echo implode(',', labelled([3, 4], Unit::Foot)), "\n";
-echo count(halves([1, 2, 3])), "\n";
 echo shown(ones([7, 8])), "\n";
 echo shown(keywords([7, 8, 9])), "\n";
 echo implode(',', kept(['a', 'b'])), "\n";

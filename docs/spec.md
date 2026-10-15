@@ -3207,8 +3207,9 @@ later sections.
   of the options and, below one path, in byte order of their paths. An
   included file is never analysed or converted, a Mago finding whose span
   lies in an included file is not printed, and a file that cannot be
-  read, is not valid UTF-8 or does not parse is skipped without a problem
-  line. Mago keeps a symbol of PHP's built-ins or of the input over an
+  read, is not valid UTF-8, does not parse, or has a path below the
+  option's path that is not valid UTF-8 (two such paths could share a
+  name) is skipped without a problem line. Mago keeps a symbol of PHP's built-ins or of the input over an
   included symbol of the same name, so a polyfill in an included file
   changes no built-in function, and an input file that also lies under an
   include path is read as input only. The checks of a name against PHP's

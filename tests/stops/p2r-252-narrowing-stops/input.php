@@ -41,6 +41,21 @@ function forStep(int|string $v): int
 }
 
 /**
+ * A return narrows nothing: `$v` is still the union in the list and the append.
+ *
+ * @return list<string>
+ */
+function listed(int|string $v): array
+{
+    if (is_int($v)) {
+        return [];
+    }
+    $xs = [];
+    $xs[] = $v;
+    return [$v];
+}
+
+/**
  * An or-chain binds nothing, so the member use after it stops.
  */
 function orChain(int|string $v, bool $b): int

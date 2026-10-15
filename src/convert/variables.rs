@@ -51,7 +51,7 @@ use super::flow::{Flow, Var};
 use super::lists::unparenthesized;
 use super::maps::{MAP_APPEND, MAP_MAY_BE_NULL, MAP_PROPERTY_CHANGE, UNSET};
 use super::{
-    Converter, Mode, ParameterSignature, classes, helpers, lists, nulls, numbers, strings,
+    Converter, Mode, ParameterSignature, classes, helpers, lists, nulls, numbers, strings, unions,
 };
 use crate::printer::{self, BinOp, RExpr};
 use crate::types::{self, RustType};
@@ -1090,10 +1090,15 @@ impl Converter<'_> {
             self.refuse(expression, message);
             return None;
         };
-        // Mago may type the value as `T` where it knows more (P2R-104).
+        // Mago may type the value as `T` where it knows more (P2R-104, P2R-232).
         if nulls::null_for_plain(&value_type, element) {
             self.record_write(list);
             self.refuse(expression, nulls::NULL_ELEMENT);
+            return None;
+        }
+        if unions::misplaced(&value_type, element) {
+            self.record_write(list);
+            self.refuse(expression, unions::UNION_PLACE);
             return None;
         }
         // Mago types the `$a` of `$a[]` as the list after the append, so a value of another
@@ -1732,6 +1737,11 @@ impl Converter<'_> {
     ) -> Result<RustType, String> {
         // `[]` has the variable's list or map type (P2R-21, P2R-241).
         if matches!(known, RustType::Vec(_) | RustType::Map(..)) && self.empty_list(node) {
+            return Ok(known.clone());
+        }
+        // The pattern of a null check or a type test fixes the binding's type, and no write
+        // can change it; Mago does not narrow `int|float` by `is_float()` (P2R-104, P2R-252).
+        if self.checked(var) {
             return Ok(known.clone());
         }
         // A map, or a map that may be null, keeps its type where Mago names the keys that

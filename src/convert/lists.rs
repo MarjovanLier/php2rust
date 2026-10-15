@@ -12,7 +12,7 @@ use mago_syntax::cst::*;
 use mago_syntax::walker::Walker;
 
 use super::helpers::Helper;
-use super::{Converter, ParameterSignature, maps, nulls, parameter_index};
+use super::{Converter, ParameterSignature, maps, nulls, parameter_index, unions};
 use crate::printer::RExpr;
 use crate::types::{self, RustType};
 
@@ -378,6 +378,12 @@ impl Converter<'_> {
                     && maps::map_clash(&element, target)
                 {
                     self.refuse(value, maps::MAP_CLASH);
+                    return None;
+                }
+                if let RustType::Vec(target) = &ty
+                    && unions::misplaced(&element, target)
+                {
+                    self.refuse(value, unions::UNION_PLACE);
                     return None;
                 }
                 let expr = self.stored(value, expr, &element, array.span())?;

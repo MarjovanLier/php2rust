@@ -120,6 +120,21 @@ function boolOrFloat(bool|float $v): string
     return $v > 1.5 ? 'big' : 'small';
 }
 
+/**
+ * Mago does not narrow `int|float` by `is_float()`; the binding keeps its type.
+ */
+function bigFloat(int|float $v): string
+{
+    if (is_float($v) && $v > 1.5) {
+        return 'big';
+    }
+    if (!is_float($v)) {
+        return 'int';
+    }
+    return $v * 2.0 > 1.0 ? 'small' : 'tiny';
+}
+
+echo bigFloat(2.5), bigFloat(1.0), bigFloat(3), "\n";
 echo ownedText('ab'), ' ', ownedText(3), "\n";
 echo borrowedText('cd', 'cd') ? 'y' : 'n', borrowedText(4, 'x') ? 'y' : 'n', "\n";
 echo ownedInt(5), ' ', ownedInt('e'), ' ', borrowedInt(6), ' ', borrowedInt('f'), "\n";

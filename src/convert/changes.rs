@@ -10,7 +10,7 @@ use mago_syntax::cst::*;
 
 use super::lists::unparenthesized;
 use super::variables::{chain_root, operation};
-use super::{Converter, maps, nulls, numbers};
+use super::{Converter, maps, nulls, numbers, unions};
 use crate::printer::{self, RExpr};
 use crate::types::RustType;
 
@@ -163,6 +163,11 @@ impl Converter<'_> {
         };
         if nulls::null_for_plain(&value_type, element) {
             self.refuse(expression, nulls::NULL_ELEMENT);
+            return None;
+        }
+        // Mago may narrow a union value with no binding (P2R-232).
+        if unions::misplaced(&value_type, element) {
+            self.refuse(expression, unions::UNION_PLACE);
             return None;
         }
         // P2R-25 would make the int a float, where PHP keeps it.

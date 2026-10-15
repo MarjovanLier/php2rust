@@ -29,6 +29,18 @@ pub(super) enum Test {
     Text,
 }
 
+/// The problem of a union value where another type is needed (P2R-231).
+pub(super) const UNION_PLACE: &str =
+    "a value of a union type goes only into a place of the same union type (P2R-231)";
+
+/// True for a value of a union type `found` where `wanted` is not that union. Mago accepts
+/// a union value where each member fits, also where it narrows the value with no binding,
+/// and PHP may convert a member there (P2R-231, P2R-232).
+pub(super) fn misplaced(found: &RustType, wanted: &RustType) -> bool {
+    matches!(found.inner(), RustType::Union(name)
+        if !matches!(wanted.inner(), RustType::Union(other) if other == name))
+}
+
 /// The built-in type tests and the member type each accepts (P2R-251).
 const MEMBER_TESTS: [(&[u8], RustType); 4] = [
     (b"is_int", RustType::I64),

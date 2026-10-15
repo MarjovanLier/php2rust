@@ -45,15 +45,8 @@ impl Converter<'_> {
             );
             return None;
         }
-        // Mago accepts a union value where each member fits, and PHP may convert a member
-        // there (P2R-231).
-        if let RustType::Union(found) = ty.inner()
-            && !matches!(declared.inner(), RustType::Union(wanted) if wanted == found)
-        {
-            self.refuse(
-                node,
-                "a value of a union type goes only into a place of the same union type (P2R-231)",
-            );
+        if unions::misplaced(ty, declared) {
+            self.refuse(node, unions::UNION_PLACE);
             return None;
         }
         // PHP makes a float of the int for a native union type and keeps the int for a

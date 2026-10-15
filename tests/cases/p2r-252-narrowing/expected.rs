@@ -9,6 +9,12 @@ pub enum BoolOrFloat {
 }
 
 #[derive(Clone, Debug)]
+pub enum FloatOrInt {
+    Float(f64),
+    Int(i64),
+}
+
+#[derive(Clone, Debug)]
 pub enum IntOrString {
     Int(i64),
     String(String),
@@ -133,7 +139,23 @@ pub fn bool_or_float(v: &BoolOrFloat) -> String {
     return (if v > 1.5 { "big" } else { "small" }).to_string();
 }
 
+pub fn big_float(v: &FloatOrInt) -> String {
+    if let FloatOrInt::Float(v) = *v
+        && v > 1.5
+    {
+        return String::from("big");
+    }
+    let FloatOrInt::Float(v) = *v else {
+        return String::from("int");
+    };
+    return (if v * 2.0 > 1.0 { "small" } else { "tiny" }).to_string();
+}
+
 fn main() {
+    print!("{}", big_float(&FloatOrInt::Float(2.5)));
+    print!("{}", big_float(&FloatOrInt::Float(1.0)));
+    print!("{}", big_float(&FloatOrInt::Int(3)));
+    print!("\n");
     print!("{}", owned_text(&IntOrString::String(String::from("ab"))));
     print!(" ");
     print!("{}", owned_text(&IntOrString::Int(3)));

@@ -3209,10 +3209,10 @@ later sections.
   lies in an included file is not printed, and a file that cannot be
   read, is not valid UTF-8, does not parse, or has a path below the
   option's path that is not valid UTF-8 (two such paths could share a
-  name) is skipped without a problem line. Mago keeps a symbol of PHP's built-ins or of the input over an
-  included symbol of the same name, so a polyfill in an included file
-  changes no built-in function, and an input file that also lies under an
-  include path is read as input only. The checks of a name against PHP's
+  name) is skipped without a problem line. Mago keeps a symbol of PHP's
+  built-ins or of the input over an included symbol of the same name, so
+  a polyfill in an included file changes no built-in function, and an
+  input file that also lies under an include path is read as input only. The checks of a name against PHP's
   built-ins (P2R-31, P2R-111, P2R-131, P2R-151) see PHP's built-ins only,
   and an included declaration is not a declaration of the crate
   (P2R-173). A type or call of the input that names an included symbol

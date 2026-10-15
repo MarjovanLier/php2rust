@@ -37,8 +37,8 @@ php2rust app -o crate --include vendor  # also read vendor/ for its types, not c
 path (such as Composer's `vendor/`) for its classes, functions and constants only, so the
 input's types that name them resolve. Included files are never converted or reported, a
 file that cannot be read, is not UTF-8 or does not parse is skipped, and a class or
-function of PHP or of the input keeps
-its meaning over one of the same name in an included file (a polyfill changes nothing).
+function of PHP or of the input keeps its meaning over one of the same name in an
+included file (a polyfill changes nothing).
 A type or call that names an included class still stops the conversion until php2rust
 learns that class.
 

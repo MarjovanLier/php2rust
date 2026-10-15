@@ -234,7 +234,8 @@ requirement IDs.
   a list, or returning it MUST behave as a copy, as in PHP: a later change to
   one variable MUST NOT show in the other. The output copies (`.clone()`, or
   `.to_string()` and `.to_vec()` from a parameter) unless the source is not
-  read again.
+  read again and is not read earlier in the same statement, where Rust may
+  still hold that read's borrow (`pair(&s.b, &show(s))`).
 
 ## 4. Names and structure
 
@@ -2050,7 +2051,7 @@ inside a list or a shape field waits for a later slice.
   a function or method parameter, a return type, a promoted or declared
   property (P2R-140), and the K and V of P2R-220. Each member MUST be an
   int, float, bool or string, an enum, a readonly class (P2R-132), a shape
-  (P2R-200) or a list of a built type; `scalar` counts as
+  (P2R-200), a map (P2R-270) or a list of a built type; `scalar` counts as
   `bool|float|int|string` and `array-key` as `int|string`. Members of one
   Rust type after P2R-21 (`1|2`, `true|string`) give one variant. Each
   variant is named `Int`, `Float`, `Bool`, `String`, `List`, or
@@ -2148,7 +2149,7 @@ inside a list or a shape field waits for a later slice.
   no code between the check and the cast can change. These stop the
   conversion: `(string)` where `U` has a `Float` variant (P2R-46), because
   PHP prints a float its own way; `(string)` where `U` has a `List`,
-  shape, enum or class variant anywhere else, because PHP warns for an
+  `Map`, shape, enum or class variant anywhere else, because PHP warns for an
   array and throws for an object; and these calls on a property read
   (P2R-222) and on any other value that may be null (P2R-106). After
   `is_scalar()`, Mago narrows a `scalar` member to `never` and reports

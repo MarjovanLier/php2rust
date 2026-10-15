@@ -19,6 +19,11 @@ function found(string $text): string
     return str_contains($text, 'b') ? 'yes' : 'no';
 }
 
+function twice(int $n): int
+{
+    return $n * 2;
+}
+
 function year(string $text): string
 {
     $date = DateTime::createFromFormat('!Y', $text);
@@ -29,4 +34,4 @@ function year(string $text): string
 }
 
 $box = new Box(21);
-echo $box->doubled(), ' ', found('abc'), ' ', found('xyz'), ' ', strlen('four') + 1, ' ', year('1980'), "\n";
+echo $box->doubled(), ' ', twice(4), ' ', found('abc'), ' ', found('xyz'), ' ', strlen('four') + 1, ' ', year('1980'), "\n";

@@ -29,6 +29,10 @@ pub fn found(text: &str) -> String {
     return (if text.contains("b") { "yes" } else { "no" }).to_string();
 }
 
+pub fn twice(n: i64) -> i64 {
+    return n * 2;
+}
+
 pub fn year(text: &str) -> String {
     let date = php_date_create_from_format("!Y", text);
     let Some(date) = date else {
@@ -223,6 +227,8 @@ fn php_date_format(date: PhpDateTime, format: &str) -> String {
 fn main() {
     let r#box = Box::new(21);
     print!("{}", r#box.doubled());
+    print!(" ");
+    print!("{}", twice(4));
     print!(" ");
     print!("{}", found("abc"));
     print!(" ");

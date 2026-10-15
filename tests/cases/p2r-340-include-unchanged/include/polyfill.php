@@ -13,6 +13,12 @@ function strlen(string $text): string
     return $text;
 }
 
+// The input declares a function of this name too, and its own declaration wins.
+function twice(string $text): string
+{
+    return $text;
+}
+
 final class DateTime
 {
     public function format(): int

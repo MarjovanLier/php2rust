@@ -261,6 +261,45 @@ fn an_include_path_may_be_a_file() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// P2R-340: how an include path is written changes nothing, a symbolic link as the path is
+/// followed, and a named file is read whatever its name ends in.
+#[cfg(unix)]
+#[test]
+fn an_include_path_reads_the_same_however_written() {
+    let dir = scratch("include-spelling");
+    money(&dir, &dir.join("lib/money.inc"));
+    std::os::unix::fs::symlink(dir.join("lib"), dir.join("linked")).unwrap();
+    let known = "in.php:5:14: the type Lib\\Money has no Rust type (P2R-22)\n";
+    let absolute = dir.join("lib/money.inc");
+    for include in [
+        "lib/money.inc",
+        "./lib/../lib/money.inc",
+        absolute.to_str().unwrap(),
+        "linked/money.inc",
+    ] {
+        assert_eq!(
+            stderr_of(&dir, &["in.php", "--include", include]),
+            known,
+            "{include}"
+        );
+    }
+    // Under a directory only names ending in .php are read.
+    assert!(
+        stderr_of(&dir, &["in.php", "--include", "linked"]).contains("unknown-ref(Lib\\Money)")
+    );
+    // A file that does not parse gives no symbols, even those before the error.
+    std::fs::write(
+        dir.join("lib/broken.php"),
+        "<?php\n\nnamespace Lib;\n\nfinal class Money\n{\n}\n\nfunction (\n",
+    )
+    .unwrap();
+    assert!(
+        stderr_of(&dir, &["in.php", "--include", "lib/broken.php"])
+            .contains("unknown-ref(Lib\\Money)")
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 /// P2R-340: an input file under an include path is read as input only.
 #[test]
 fn an_input_under_an_include_path_stays_input() {
@@ -295,6 +334,47 @@ fn an_include_skips_a_path_that_is_not_utf8() {
     let name = std::ffi::OsStr::from_bytes(b"m\xffoney.php");
     money(&dir, &dir.join("inc").join(name));
     assert!(stderr_of(&dir, &["in.php", "--include", "inc"]).contains("unknown-ref(Lib\\Money)"));
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// P2R-340: an include path that is neither a file nor a directory, and one below which a
+/// directory cannot be listed, exit 2 with the reason and write nothing.
+#[cfg(unix)]
+#[test]
+fn an_include_path_that_cannot_be_walked_exits_2() {
+    use std::os::unix::fs::PermissionsExt;
+    let dir = scratch("include-unwalkable");
+    money(&dir, &dir.join("inc/locked/money.php"));
+    let made = Command::new("mkfifo")
+        .arg("pipe")
+        .current_dir(&dir)
+        .status();
+    assert!(made.unwrap().success());
+    let run = |include: &str| {
+        Command::new(env!("CARGO_BIN_EXE_php2rust"))
+            .args(["in.php", "-o", "out.rs", "--include", include])
+            .current_dir(&dir)
+            .output()
+            .unwrap()
+    };
+    let pipe = run("pipe");
+    assert_eq!(pipe.status.code(), Some(2));
+    assert_eq!(
+        String::from_utf8_lossy(&pipe.stderr),
+        "pipe: the include path is neither a file nor a directory\n"
+    );
+    let locked = dir.join("inc/locked");
+    std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o000)).unwrap();
+    // Root lists the directory anyway, so the refusal cannot happen there.
+    if std::fs::read_dir(&locked).is_err() {
+        let out = run("inc");
+        assert_eq!(out.status.code(), Some(2));
+        assert!(
+            String::from_utf8_lossy(&out.stderr).starts_with("inc: cannot read the include path: ")
+        );
+    }
+    std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o755)).unwrap();
+    assert!(!dir.join("out.rs").exists());
     let _ = std::fs::remove_dir_all(&dir);
 }
 

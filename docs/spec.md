@@ -110,7 +110,10 @@ maps) was written on 15 Oct 2026; it changes P2R-07, P2R-60, P2R-233,
 P2R-240, P2R-250 and the roadmap of section 10. Section 29 (traits with
 constants, string map constants and `strtr`) was written on 15 Oct 2026;
 it changes P2R-07, P2R-110, P2R-111, P2R-130, P2R-156, P2R-173, P2R-175,
-P2R-188 and the roadmap of section 10.
+P2R-188 and the roadmap of section 10. Section 30 (writes after a null
+check, `trim` with a character list and `checkdate`) was written on 15
+Oct 2026; it changes P2R-48, P2R-60, P2R-104, P2R-181, P2R-182, P2R-188
+and the roadmap of section 10.
 
 php2rust converts typed PHP source into normal, readable Rust (`Vec`,
 `String`, `i64`), without AI. It reads PHP with the Mago crates, uses Mago's
@@ -349,7 +352,7 @@ requirement IDs.
 - **P2R-48** These built-in functions MUST convert: `count()` on a list
   (length as `i64`), `strlen()` (byte length as `i64`), `intdiv()` (integer
   division towards zero) and `fdiv()` (IEEE float division), and the
-  functions of sections 17, 19 and 23. A call to any other function not
+  functions of sections 17, 19, 23, 27, 29 and 30. A call to any other function not
   declared in the file stops the conversion.
 - **P2R-49** Literals MUST convert by their PHP value and type, never by
   copying their text:
@@ -433,6 +436,11 @@ requirement IDs.
     empty string when the string is empty.
   - `explode()` with an empty separator that is not a literal: PHP throws a
     `ValueError`, Rust panics (exit code 101).
+  - `trim()`, `ltrim()` or `rtrim()` with a second argument that is not a
+    literal (P2R-291): where it holds a `..` that starts no range, PHP
+    warns and Rust does not, and both remove the same bytes; where its mask
+    holds a byte above `7F`, a cut character gives U+FFFD in Rust, as for
+    `substr()`.
   - The errors above that Rust turns into panics are not exceptions of
     P2R-210, so a `catch (Throwable $e)` (P2R-214) does not catch them.
   - Comments and docblocks are not copied (version 1).
@@ -536,11 +544,12 @@ Each milestone gets its own requirements in this file when its work starts.
   with `is_string()` and its kin (section 26); `preg_replace` and
   `preg_match` without the `u` flag (section 27); maps as union members
   and shapes as maps (section 28); traits with constants, string map
-  constants and `strtr` (section 29); then the rest of the
-  `StringManipulation` library, which `SouthAfricanIDValidator` calls,
-  ordered by how widely each fix applies (writes to a variable a check
-  binds, `trim` with a second argument, `checkdate`), with `DateTime` and
-  patterns with `u` and look-around last;
+  constants and `strtr` (section 29); writes after a null check, `trim`
+  with a character list and `checkdate` (section 30); then the rest of the
+  `StringManipulation` library, which `SouthAfricanIDValidator` calls
+  (`str_replace` and `strtr` with arrays, closures with `array_map` and
+  `preg_replace_callback`, `date_parse`), with `DateTime` and patterns
+  with `u` and look-around last;
   unions as list values; interfaces and inheritance; closures.
   `SouthAfricanIDValidator` calls `StringManipulation::isValidDate`, which
   lives in another package, and P2R-153 resolves calls inside the input
@@ -635,7 +644,8 @@ Sections 3 to 9 apply to nullable values unless this section says otherwise.
   (nested blocks included), stops the conversion. A read or write of `$v` in
   the step of a `for` whose body holds such a `let ... else` at any depth
   stops the conversion: the step also runs at each `continue`, where the
-  binding can shadow the variable or not exist yet.
+  binding can shadow the variable or not exist yet. P2R-290 lets a write
+  after a top-level `let ... else` convert.
 - **P2R-105** `$a ?? $b` MUST convert when `$a` is a variable, parameter,
   function call, static method call (P2R-153), `E::tryFrom()` call
   (P2R-114), `?->` (P2R-234) or array shape element (P2R-203) of Rust type `Option<T>` and
@@ -1581,7 +1591,8 @@ converts those forms.
   signature (P2R-24), and from the copy line on it is an owned local
   variable for every rule (P2R-26, P2R-34, P2R-35, P2R-104, P2R-105,
   P2R-122, P2R-160), so a later foreach key or value may take its name
-  (P2R-41). These still stop: a foreach key or value with the name of a
+  (P2R-41). A write to the owned binding of a null check (P2R-290) does not
+  change the parameter. These still stop: a foreach key or value with the name of a
   parameter that no assignment, `.=` or append changes (P2R-24), a parameter
   of a type that changes its objects (P2R-143), and a promoted constructor
   parameter.
@@ -1590,7 +1601,7 @@ converts those forms.
   of type `String`: helpers (P2R-160) that remove the bytes PHP removes by
   default, space, `\t`, `\n`, `\r`, `\0` and `\x0B`, where Rust's `trim`
   also removes `\x0C` and Unicode spaces and keeps `\0`. A second argument
-  stops the conversion.
+  converts by P2R-291.
 - **P2R-183** `strtolower($s)` and `strtoupper($s)` with a `string` argument
   MUST convert to `s.to_ascii_lowercase()` and `s.to_ascii_uppercase()`,
   which change only ASCII letters, as PHP 8.2 and later do. `ucfirst($s)`
@@ -1637,7 +1648,9 @@ converts those forms.
 - **P2R-188** The helpers of P2R-160 MUST include, after `php_substr` and in
   this order, `php_trim`, `php_ltrim`, `php_rtrim`, `php_ucfirst`,
   `php_lcfirst`, `php_replace`, `php_explode`, `php_preg_replace`,
-  `php_preg_match` (P2R-261, P2R-262) and `php_strtr` (P2R-282), each written only when the
+  `php_preg_match` (P2R-261, P2R-262), `php_strtr` (P2R-282), `php_charmask`,
+  `php_trim_chars`, `php_ltrim_chars`, `php_rtrim_chars` (P2R-291) and
+  `php_checkdate` (P2R-292), each written only when the
   output calls it, and P2R-31 covers their names. A case folder runs each of
   them on many values against PHP (P2R-72).
 
@@ -2652,6 +2665,72 @@ forms unblock `searchWords`, `utf8Ansi` and `removeAccents`.
   argument (P2R-169).
   A function, variable or parameter named `php_strtr` stops by P2R-31,
   and P2R-188 places `php_strtr` after `php_preg_match`.
+
+## 30. Writes after a null check, trim with a character list, and checkdate (milestone 2, slice 20)
+
+`StringManipulation::nameFix` checks its `?string` parameter against null
+at the top of its body and then assigns it six times; its `trim` passes
+a second argument to PHP's `trim`; and `isValidTimePart` calls
+`checkdate`. These forms give eight of the problem lines of the combined
+run of both packages at the start of this slice.
+
+- **P2R-290** A check `if ($v === null)` (or `null === $v`) that P2R-104
+  makes a `let ... else` MUST give an owned binding when all of these
+  hold: the `if` is a top-level statement of the body of a function or
+  method; the last statement of its body is a `return` or a `throw`; the
+  inner type of `$v` is `string`, `list<T>` of a type that does not
+  change its objects (P2R-143), `int`, `float`, `bool` or an enum; and a
+  later top-level statement of that body writes `$v` (an assignment, `.=`
+  or an append, at any depth). The line after the `let ... else` is then
+  a copy line, as P2R-181 writes one for a parameter:
+  `let mut v = v.to_string();`, `let mut v = v.to_vec();`, or
+  `let mut v = v;` for an int, float, bool or enum. From the copy line on,
+  `$v` is an owned local variable of the inner type for every rule
+  (P2R-26, P2R-34, P2R-35, P2R-105, P2R-122, P2R-160), and each later
+  write of `$v`, also in a nested block, writes it. A write after the
+  check whose value may be null stops the conversion (P2R-34, P2R-106),
+  because from the check on the variable has the inner type. For P2R-181
+  such a write does not change the parameter, so a parameter that only
+  such writes change gets no copy line of its own. The rule holds at the
+  top level of the body only: the PHP variable outlives a nested block
+  and keeps its value into the next pass of a loop, while the Rust
+  binding ends with its block, so a write there would not reach the
+  `Option` outside. These still stop: a write in the body of the `if let`
+  form of P2R-104; a write after a `let ... else` that is not a top-level
+  statement of the body, or whose body does not end with a `return` or a
+  `throw`; a write after a type test of P2R-252 (a later slice); and a
+  write after a check of a shape or an object, which P2R-201 and P2R-143
+  do not let change.
+- **P2R-291** `trim($s, $characters)`, `ltrim($s, $characters)` and
+  `rtrim($s, $characters)` with two `string` arguments MUST convert to
+  `php_trim_chars(s, characters)`, `php_ltrim_chars(s, characters)` and
+  `php_rtrim_chars(s, characters)`, of type `String`. Each of these helpers
+  gets PHP's byte mask from the helper
+  `php_charmask(characters) -> [bool; 256]`, which the output then holds
+  too, removes the bytes of the mask from the start, from the end or from
+  both, as PHP does, and gives the rest through `String::from_utf8_lossy`.
+  `php_charmask` walks the bytes as PHP's `php_charmask` does: a byte,
+  `..` and a byte that is not lower than the first add the range from
+  the first to the last; a `..` that starts no such range adds nothing,
+  and the walk goes on at the next byte (PHP warns there); every other
+  byte adds itself. Where the second argument is a string literal, the
+  tool does the same walk when it converts, and these stop the
+  conversion: a `..` that starts no range, which PHP warns about, and a
+  byte above `7F` in the mask, which can cut a character of more than one
+  byte. Any other second argument converts, and its differences at run
+  time are listed by P2R-60. A named or spread argument stops the
+  conversion (P2R-169). A function, variable or parameter named like one
+  of the four helpers stops by P2R-31.
+- **P2R-292** `checkdate($month, $day, $year)` with three `int` arguments
+  MUST convert to `php_checkdate(month, day, year)`, of type `bool`, a
+  helper that gives true when the year is 1 to 32767, the month 1 to 12,
+  and the day 1 to the number of days of that month, with a 29th of
+  February in a year that 4 divides and 100 does not, or that 400
+  divides, as PHP does. The helper uses only comparisons and `%` by a
+  positive number, so no argument value overflows. Another argument count,
+  and a named or spread argument (P2R-169), stop the conversion. P2R-188
+  places `php_charmask`, `php_trim_chars`, `php_ltrim_chars`,
+  `php_rtrim_chars` and `php_checkdate` after `php_strtr`, in this order.
 
 ## Spec checklist
 

@@ -2820,7 +2820,9 @@ This section converts a closure only as such a callback.
   `array_map` elements in weak mode, so `fn(string $x)` on ints would
   convert them), a list of any other element type, `Option` included (a
   later slice), a result whose Rust type is not that of the type Mago
-  gives the call (Mago types the result from the callback's body, not
+  gives the call, where that type has one (where it has none, every
+  place that takes the result stops by P2R-22 or checks the value's own
+  type) (Mago types the result from the callback's body, not
   from its declared return type, so `fn(int $x): float => $x` or
   `fn(int $x): ?int => $x` stops, because the places that take the result
   go by Mago's type), and a named or spread argument (P2R-169).

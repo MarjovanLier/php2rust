@@ -109,8 +109,8 @@ is in both engines. Section 28 (maps as union members, and shapes as
 maps) was written on 15 Oct 2026; it changes P2R-07, P2R-60, P2R-233,
 P2R-240, P2R-250 and the roadmap of section 10. Section 29 (traits with
 constants, string map constants and `strtr`) was written on 15 Oct 2026;
-it changes P2R-07, P2R-140, P2R-156, P2R-175, P2R-188 and the roadmap of
-section 10.
+it changes P2R-07, P2R-110, P2R-140, P2R-156, P2R-173, P2R-175, P2R-188
+and the roadmap of section 10.
 
 php2rust converts typed PHP source into normal, readable Rust (`Vec`,
 `String`, `i64`), without AI. It reads PHP with the Mago crates, uses Mago's
@@ -679,7 +679,8 @@ Sections 3 to 9 apply to nullable values unless this section says otherwise.
     P2R-12 `declare`, a function, enum or class declaration: PHP
     declares an enum only when execution reaches it, so an earlier use dies
     with `Class "E" not found`;
-  - an enum with `implements` or `use`, or a backing value of any other
+  - an enum with `implements` or a `use` other than one of a trait of
+    constants (P2R-280), or a backing value of any other
     form (`1 + 1`, `PHP_INT_MAX`); section 16 converts methods and
     constants (P2R-155, P2R-156);
   - a case without a value in a backed enum, a case with a value in a pure
@@ -821,7 +822,11 @@ Sections 3 to 9 apply to nullable values unless this section says otherwise.
   may refine `array` to `list<T>` or to an array shape (P2R-23, P2R-201). A
   class without a constructor
   gets a `new` without parameters. PHP declares such a class before any
-  statement runs, so it may come after the statements outside functions.
+  statement runs, so it may come after the statements outside functions;
+  a class that implements an interface (P2R-220) or uses a trait
+  (P2R-280) PHP declares only when execution reaches it, as it does an
+  enum (P2R-110), so such a class after a statement outside functions
+  stops.
   These stop the conversion:
   - `extends`, `implements` (other than the `ArrayAccess` of P2R-220),
     `abstract`, a trait other than one of constants (P2R-280), a property that is not
@@ -1238,8 +1243,8 @@ file. Converting several files together is a later slice.
   other than the string map of P2R-281, heredoc, and a
   case written `static::Small`, which PHP rejects in a constant's value and
   Mago does not report); a
-  declared type other than `int`, `float`, `bool`, `string` or an enum of
-  the file; two constants in one `const` statement; two constants of one
+  declared type other than `int`, `float`, `bool`, `string`, an enum of
+  the file, or the `array` of P2R-281; two constants in one `const` statement; two constants of one
   class or enum with the same Rust name (`X` and `x`); a constant whose
   Rust name equals the Rust name of a case of its enum (`case X` and
   `const x`), or whose PHP name is the name of a case (PHP rejects it, and
@@ -1468,7 +1473,7 @@ Rust module. One input file still converts as sections 1 to 17 say.
   name that no other enum, class or function of the crate has, in any
   module, because a module names the items of other modules by their Rust
   name alone (P2R-174). Two declarations whose Rust names are equal, and
-  two enums or classes, or two functions, whose fully qualified names are
+  two enums, classes or traits (P2R-280; a trait has no Rust name), or two functions, whose fully qualified names are
   equal ignoring letter case, stop the conversion at each declaration, with
   the span of the whole declaration; an enum and a function of one name
   (`App\Item` and `App\item`) are apart in PHP and in Rust. The struct of an
@@ -2581,20 +2586,29 @@ forms unblock `searchWords`, `utf8Ansi` and `removeAccents`.
 
 - **P2R-280** A trait declared at the top level MUST convert when its
   members are constants only, and a class or enum of the input that uses
-  it (`use T;` or `use T1, T2;` at the top of its body, the trait named
-  as P2R-150 names a class) MUST hold each constant of the trait as if
-  its body declared it there, by P2R-156 and P2R-281, in the order of the
-  `use` statements and then the trait's own order, before the constants
-  the body declares. The trait itself writes nothing, and a trait that no
-  class or enum uses writes nothing either. For P2R-175 and P2R-172 a
-  trait declaration counts as a declaration, not a statement, and a
-  namespace that declares only traits gets no module. These stop the
-  conversion: a trait with a method, a property, an abstract member or a
-  `use` of another trait (a later slice); a `use` with a block of
-  conflict rules (`use T { a as b; }`); a `use` of a trait that the input
-  does not declare; a trait constant whose name the class or enum, or
-  another trait it uses, declares too, which PHP rejects unless the two
-  constants match; and a trait declared inside a function or block.
+  it (`use T;` or `use T1, T2;` in its body, the trait named as P2R-150
+  names a class) MUST hold each constant of the trait as if its body
+  declared it there, by P2R-156 and P2R-281, in the order of the `use`
+  statements and then the trait's own order, before the constants the
+  body declares. The trait itself writes nothing, and a trait that no
+  class or enum uses writes nothing either: its constants are converted,
+  and checked by the tool, only where a class or enum uses it (Mago still
+  checks them, P2R-11). For P2R-33, P2R-110, P2R-172 and P2R-175 a trait
+  declaration counts as a declaration, not a statement, so a file with a
+  trait may still be a library, and a namespace that declares only traits
+  gets no module. These stop the conversion: a trait with a method, a
+  property, an abstract member or a `use` of another trait (a later
+  slice); a `use` with a block of conflict rules (`use T { a as b; }`); a
+  `use` of a trait that the input does not declare; a trait named twice
+  in one class or enum, which PHP takes once; a trait constant whose name
+  the class or enum, or another trait it uses, declares too, which PHP
+  rejects unless the two constants match, at the second declaration in
+  that order (the class's own constant after a trait's); a trait whose
+  fully qualified name equals, ignoring letter case, that of another
+  trait, class or enum of the input (P2R-173), or of a class-like PHP has
+  built in (P2R-111); a class that uses a trait after a statement outside
+  functions, because PHP declares it only when execution reaches it
+  (P2R-130); and a trait declared inside a function or block.
 - **P2R-281** A class, enum or trait constant whose value is an array
   literal with a string literal key and a string literal value on every
   element, and whose declared type is `array` or none, MUST convert to
@@ -2603,22 +2617,32 @@ forms unblock `searchWords`, `utf8Ansi` and `removeAccents`.
   of the literal, escapes decoded (P2R-49). Its uses MUST be the second
   argument of `strtr` (P2R-282) only; every other use stops (a read by
   key, a value passed, returned or stored, `foreach`, `count`,
-  `isset`). These stop the conversion: an element without a key, with an
-  int, float or constant key, or with a value that is not a string
-  literal; an empty key, which `strtr` ignores with a warning; a key that
-  appears twice, which Mago reports (P2R-11); and an empty array.
+  `isset`). PHP stores a key that is a canonical decimal integer string
+  (`'1'`, `'-5'`) as an int key; `strtr` turns every key back to text, so
+  the slice holds PHP's result here, and a later slice that reads such a
+  constant by key or in a `foreach` must handle it. These stop the
+  conversion: an element without a key, with an
+  int, float or constant key, or with a key or value that is not a
+  single- or double-quoted string literal (heredoc and nowdoc included);
+  an empty key, which `strtr` ignores with a warning; a key that
+  appears twice, compared by its string value, which Mago also reports
+  (P2R-11); and an empty array.
 - **P2R-282** `strtr($s, C)`, where `$s` is a string and `C` reads a
-  constant of P2R-281 (`self::C`, `static::C` or `Name::C`), MUST convert
+  constant of P2R-281 (`self::C`, `static::C` or `Name::C`, `Name` a class
+  or enum, never a trait, whose trait constant PHP does not let be read
+  through the trait), MUST convert
   to `php_strtr(s, Name::C)`, a call of the helper below with the
   constant's Rust path, giving an owned `String`. The output then holds
   `fn php_strtr(text: &str, pairs: &[(&str, &str)]) -> String`, which
   walks the text from the start: where one or more keys match, it appends
   the value of the longest of them and moves past that key; where none
   matches, it appends the next character and moves past it. Because every
-  key is valid UTF-8 and `text` is a `&str`, stepping by characters gives
-  PHP's byte result. These stop the conversion: `strtr` with three
-  arguments, with an array literal or any array other than such a
-  constant (a later slice), and with a named or spread argument (P2R-169).
+  key is valid UTF-8 (P2R-49 stops a string literal that is not) and
+  `text` is a `&str`, stepping by characters gives PHP's byte result.
+  These stop the conversion: `strtr` with three arguments, with an array
+  literal or any array other than such a constant (a later slice), with a
+  first argument that is not a string, and with a named or spread
+  argument (P2R-169).
   A function, variable or parameter named `php_strtr` stops by P2R-31,
   and P2R-188 places `php_strtr` after `php_preg_match`.
 

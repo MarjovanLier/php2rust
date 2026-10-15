@@ -12,7 +12,7 @@ use mago_syntax::cst::*;
 
 use super::helpers::Helper;
 use super::{Converter, lists, nulls, unions};
-use crate::printer::RExpr;
+use crate::printer::{self, RExpr};
 use crate::types::{self, RustType};
 
 /// A part of a joined string.
@@ -20,6 +20,28 @@ enum Piece {
     Text(String),
     /// A value printed with `{}`, with its type.
     Value(RExpr, RustType),
+}
+
+/// A search or replacement of `str_replace()` (P2R-185, P2R-310).
+enum Replaced {
+    /// A string, lent.
+    Text(RExpr),
+    /// An array: its slice of `&str`, and the flag that the value is a string after all,
+    /// which only a union decides at run time.
+    Array { slice: RExpr, text: RExpr },
+}
+
+impl Replaced {
+    /// The slice and the flag that `php_str_replace` takes.
+    fn parts(self) -> (RExpr, RExpr) {
+        match self {
+            Replaced::Text(text) => (
+                RExpr::Raw(format!("&[{}]", printer::expr(&text, false))),
+                RExpr::Bool(true),
+            ),
+            Replaced::Array { slice, text } => (slice, text),
+        }
+    }
 }
 
 impl Converter<'_> {
@@ -134,6 +156,14 @@ impl Converter<'_> {
             Expression::Access(Access::ClassConstant(access)) => {
                 (self.pairs_constant(access), self.refused_constant(access))
             }
+            Expression::Array(array) => {
+                let pairs = self.strtr_pairs(array);
+                let text = self.borrowed(text?, &RustType::String);
+                return Some((
+                    self.helper_call(Helper::PhpStrtr, vec![text, pairs?]),
+                    RustType::String,
+                ));
+            }
             _ => (None, false),
         };
         // A refused constant is the problem reported for its reads (P2R-03).
@@ -153,6 +183,53 @@ impl Converter<'_> {
             self.helper_call(Helper::PhpStrtr, vec![text, RExpr::Path(pairs)]),
             RustType::String,
         ))
+    }
+
+    /// The pairs of an array literal for `strtr()`, as `&[(k, v), ..]` of lent strings, or
+    /// `None` with a problem recorded (P2R-311).
+    fn strtr_pairs(&mut self, array: &Array<'_>) -> Option<RExpr> {
+        let message = "an array literal in strtr() converts only with a string key and a string value on every element (P2R-311)";
+        let mut pairs = Vec::new();
+        let mut fine = true;
+        for element in array.elements.iter() {
+            let ArrayElement::KeyValue(pair) = element else {
+                match element {
+                    ArrayElement::Value(element) => self.record_refused(element.value),
+                    ArrayElement::Variadic(element) => self.record_refused(element.value),
+                    _ => {}
+                }
+                self.refuse(element, message);
+                fine = false;
+                continue;
+            };
+            if let Expression::Literal(Literal::String(key)) = lists::unparenthesized(pair.key)
+                && key.value == Some(&b""[..])
+            {
+                self.record_refused(pair.value);
+                self.refuse(
+                    pair.key,
+                    "an empty key in strtr() is not supported, because PHP ignores it with a warning (P2R-311)",
+                );
+                fine = false;
+                continue;
+            }
+            // Both convert, so problems in each are reported.
+            let key = self.typed_argument(pair.key, &RustType::String, message);
+            let value = self.typed_argument(pair.value, &RustType::String, message);
+            match (key, value) {
+                (Some(key), Some(value)) => {
+                    let key = self.borrowed(key, &RustType::String);
+                    let value = self.borrowed(value, &RustType::String);
+                    pairs.push(format!(
+                        "({}, {})",
+                        printer::expr(&key, false),
+                        printer::expr(&value, false)
+                    ));
+                }
+                _ => fine = false,
+            }
+        }
+        fine.then(|| RExpr::Raw(format!("&[{}]", pairs.join(", "))))
     }
 
     /// `substr($s, $start)` and `substr($s, $start, $length)`, with PHP 8's rules for a
@@ -385,8 +462,9 @@ impl Converter<'_> {
         ))
     }
 
-    /// `str_replace($search, $replace, $subject)` on three strings, as the helper
-    /// `php_replace` in PHP's order (P2R-185).
+    /// `str_replace($search, $replace, $subject)`: on three strings as the helper
+    /// `php_replace` in PHP's order (P2R-185), and with a list, map, list literal or union
+    /// search or replacement as `php_str_replace` (P2R-310).
     pub(super) fn str_replace(
         &mut self,
         call: &FunctionCall<'_>,
@@ -396,19 +474,171 @@ impl Converter<'_> {
             call,
             node,
             (3, 3),
-            "str_replace() converts with three string arguments only (P2R-185)",
+            "str_replace() converts with three arguments only (P2R-185, P2R-310)",
         )?;
-        let message = "str_replace() is supported only on three strings (P2R-185)";
-        let converted: Vec<Option<RExpr>> = arguments
-            .iter()
-            .map(|argument| self.typed_argument(argument, &RustType::String, message))
-            .collect();
-        let converted = converted.into_iter().collect::<Option<Vec<RExpr>>>()?;
-        let lent = converted
-            .into_iter()
-            .map(|text| self.borrowed(text, &RustType::String))
-            .collect();
-        Some((self.helper_call(Helper::PhpReplace, lent), RustType::String))
+        // All three convert first, so problems in each are reported.
+        let search = self.replace_argument(arguments[0]);
+        let replace = self.replace_argument(arguments[1]);
+        let subject = self.typed_argument(
+            arguments[2],
+            &RustType::String,
+            "str_replace() converts on a string subject only (P2R-185, P2R-310)",
+        );
+        let (search, replace, subject) = (search?, replace?, subject?);
+        let subject = self.borrowed(subject, &RustType::String);
+        let arguments = match (search, replace) {
+            (Replaced::Text(search), Replaced::Text(replace)) => {
+                return Some((
+                    self.helper_call(Helper::PhpReplace, vec![search, replace, subject]),
+                    RustType::String,
+                ));
+            }
+            (
+                Replaced::Text(_),
+                Replaced::Array {
+                    text: RExpr::Bool(false),
+                    ..
+                },
+            ) => {
+                self.refuse(
+                    arguments[1],
+                    "str_replace() with a string search and an array replacement is not supported, because PHP throws a TypeError (P2R-310)",
+                );
+                return None;
+            }
+            (search, replace) => {
+                let (searches, search_is_text) = search.parts();
+                let (replaces, replace_is_text) = replace.parts();
+                vec![searches, search_is_text, replaces, replace_is_text, subject]
+            }
+        };
+        Some((
+            self.helper_call(Helper::PhpStrReplace, arguments),
+            RustType::String,
+        ))
+    }
+
+    /// A search or replacement of `str_replace()` converted, or `None` with a problem
+    /// recorded (P2R-185, P2R-310).
+    fn replace_argument(&mut self, value: &Expression<'_>) -> Option<Replaced> {
+        // A list literal without keys lends each element.
+        if let Expression::Array(array) = lists::unparenthesized(value)
+            && array
+                .elements
+                .iter()
+                .all(|element| matches!(element, ArrayElement::Value(_)))
+        {
+            let message =
+                "a list literal in str_replace() converts only with string elements (P2R-310)";
+            let items: Vec<Option<RExpr>> = array
+                .elements
+                .iter()
+                .filter_map(|element| match element {
+                    ArrayElement::Value(element) => Some(element.value),
+                    _ => None,
+                })
+                .map(|item| {
+                    let item = self.typed_argument(item, &RustType::String, message)?;
+                    Some(self.borrowed(item, &RustType::String))
+                })
+                .collect();
+            let items = items.into_iter().collect::<Option<Vec<_>>>()?;
+            let items: Vec<String> = items
+                .iter()
+                .map(|item| printer::expr(item, false))
+                .collect();
+            return Some(Replaced::Array {
+                slice: RExpr::Raw(format!("&[{}]", items.join(", "))),
+                text: RExpr::Bool(false),
+            });
+        }
+        let (expr, ty) = self.expression(value)?;
+        let lent = |values: RExpr| {
+            let lent = RExpr::MethodCall(
+                Box::new(values),
+                "map".to_owned(),
+                vec![RExpr::Path("String::as_str".to_owned())],
+            );
+            let collected =
+                RExpr::MethodCall(Box::new(lent), "collect::<Vec<_>>".to_owned(), Vec::new());
+            RExpr::Ref(Box::new(collected))
+        };
+        let string = RustType::String;
+        match &ty {
+            RustType::String => Some(Replaced::Text(self.borrowed(expr, &ty))),
+            RustType::Vec(element) if **element == string => Some(Replaced::Array {
+                slice: lent(RExpr::MethodCall(
+                    Box::new(expr),
+                    "iter".to_owned(),
+                    Vec::new(),
+                )),
+                text: RExpr::Bool(false),
+            }),
+            RustType::Map(_, element) if **element == string => Some(Replaced::Array {
+                slice: lent(RExpr::MethodCall(
+                    Box::new(expr),
+                    "values".to_owned(),
+                    Vec::new(),
+                )),
+                text: RExpr::Bool(false),
+            }),
+            RustType::Union(name) => self.replace_union(value, expr, name),
+            _ => {
+                self.refuse(
+                    value,
+                    "str_replace() converts only on strings, lists and maps of strings, and unions of a string and one of them (P2R-310)",
+                );
+                None
+            }
+        }
+    }
+
+    /// A union search or replacement of `str_replace()`, whose members must be a string
+    /// and one list or map of strings, as a `match` for the slice and `matches!` for the
+    /// flag. Both read the value, so it must have no effect (P2R-186, P2R-310).
+    fn replace_union(
+        &mut self,
+        value: &Expression<'_>,
+        expr: RExpr,
+        name: &str,
+    ) -> Option<Replaced> {
+        let string = RustType::String;
+        let many = match self.type_names.union(name).as_deref() {
+            Some([first, second]) if *first == string || *second == string => {
+                match if *first == string { second } else { first } {
+                    RustType::Vec(element) if **element == string => {
+                        Some("List(list) => list.iter()")
+                    }
+                    RustType::Map(_, element) if **element == string => {
+                        Some("Map(map) => map.values()")
+                    }
+                    _ => None,
+                }
+            }
+            _ => None,
+        };
+        let Some(many) = many else {
+            self.refuse(
+                value,
+                "a union in str_replace() converts only with a string and one list or map of strings as its members (P2R-310)",
+            );
+            return None;
+        };
+        if !no_effect(&expr) {
+            self.refuse(
+                value,
+                "a union in str_replace() must be a variable, a parameter or a chain of property reads on one of them, because the conversion reads it twice (P2R-310)",
+            );
+            return None;
+        }
+        let scrutinee = printer::expr(&RExpr::Ref(Box::new(expr)), false);
+        let slice = format!(
+            "&match {scrutinee} {{ {name}::String(text) => vec![text.as_str()], {name}::{many}.map(String::as_str).collect() }}"
+        );
+        Some(Replaced::Array {
+            slice: RExpr::Raw(slice),
+            text: RExpr::Raw(format!("matches!({scrutinee}, {name}::String(_))")),
+        })
     }
 
     /// `implode($glue, $list)` on a string and a list of strings, as `list.join(glue)`.

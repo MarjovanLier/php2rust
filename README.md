@@ -164,14 +164,17 @@ converts:
   `in_array($v, [...], true)` on a list literal, `trim()`, `ltrim()` and `rtrim()` with
   one argument or with a character list (`'a..z'` ranges as PHP reads them),
   `ucfirst()`, `lcfirst()`, `ucwords()` with one argument, `strtolower()`,
-  `strtoupper()`, `str_repeat()`, `str_replace()` on three strings, `implode()` of a
+  `strtoupper()`, `str_repeat()`, `str_replace()` on strings and on lists, maps, list
+  literals and string-or-array unions of strings (replaced in PHP's order by
+  `php_str_replace`), `implode()` of a
   list of strings, `explode()` without a limit, `checkdate()`, and `sprintf()` with a
   literal format of text, `%s`, `%d` and `%%`. Where PHP's rules differ from Rust's
   standard library, the output holds a small private helper function that copies them
   (`php_int`, `php_offset`, `php_substr`, `php_trim`, `php_ltrim`, `php_rtrim`,
   `php_ucfirst`, `php_lcfirst`, `php_replace`, `php_explode`, `php_charmask`,
   `php_trim_chars`, `php_ltrim_chars`, `php_rtrim_chars`, `php_checkdate`,
-  `php_ucwords`, `php_preg_replace_callback`, `ctype_digit`), only when it calls one.
+  `php_ucwords`, `php_preg_replace_callback`, `php_str_replace`, `ctype_digit`), only
+  when it calls one.
 - arrow functions as the callback of `array_map` or `preg_replace_callback`, which run
   it at once: `array_map(fn(int $x): int => $x * $by, $xs)` becomes
   `xs.iter().copied().map(|x: i64| x * by).collect::<Vec<_>>()`, and a string list goes
@@ -239,7 +242,9 @@ converts:
   array of string keys and string values becomes a slice of pairs
   (`pub const MAP: &[(&str, &str)] = &[("a", "b")];`) that `strtr($s, self::MAP)` reads
   as `php_strtr(s, Name::MAP)`, a helper with PHP's rule: the longest key that matches
-  at each position wins, and replaced text is not read again.
+  at each position wins, and replaced text is not read again. `strtr($s, [$k => $v])`
+  with an array literal of string keys and values becomes
+  `php_strtr(s, &[(k, v)])`.
 
 ## What stops the conversion
 
@@ -261,8 +266,10 @@ the others are findings of the Mago analyser. In short:
   63, and a write to a string offset.
 - For the string functions: a `trim()`, `ltrim()` or `rtrim()` character list, written
   as a literal or a class constant, with a `..` that starts no range or a byte above
-  `7F`, a `str_repeat()` count that may be negative, an array argument of
-  `str_replace()`, `implode()` with one argument or
+  `7F`, a `str_repeat()` count that may be negative, a `str_replace()` with a string
+  search and an array replacement (PHP throws a `TypeError`), an array subject, a list
+  of other elements, an array literal with keys, or a union read from a call,
+  `implode()` with one argument or
   with a glue other than a literal, constant, variable, parameter or property read on
   one of them, `explode()` with a limit or an empty separator, and any
   `sprintf()` format other than text, `%s`, `%d` and `%%`, or with an argument count
@@ -285,7 +292,8 @@ the others are findings of the Mago analyser. In short:
   function. A
   string map constant with an empty or repeated key, a key or value that is not a string
   literal, no pairs, or a use other than the second argument of `strtr`. `strtr` with
-  three arguments or with an array other than such a constant.
+  three arguments, with an array other than such a constant or a literal of string
+  pairs, or with an empty or int key in the literal.
 - For callbacks: an arrow function anywhere else, without a parameter type or with
   more than one parameter, `fn&`, a read of a string, list, object or map of the
   enclosing body, a write, a call that throws or `?? throw` in the body, `$this`, a
@@ -509,6 +517,10 @@ php2rust refuses some valid PHP that version 1 converts in other forms:
   separator that is empty at run time: PHP throws a `ValueError` (exit code 255 when
   uncaught), Rust panics (exit code 101), or `str_repeat()` of an empty string gives an
   empty string.
+- `str_replace()` where the search is a string at run time and the replacement an
+  array (a union hides it from the tool): PHP throws a `TypeError`, Rust panics.
+- `strtr()` with an array literal whose key is empty at run time, on a text that is
+  not empty: PHP warns and skips the key, Rust skips it without the warning.
 - The errors above that Rust turns into panics are not exceptions, so a
   `catch (Throwable $e)` does not catch them.
 - An uncaught exception writes a shorter message than PHP's (no file, line or stack

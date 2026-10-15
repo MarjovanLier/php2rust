@@ -28,10 +28,11 @@ pub(super) enum Helper {
     PhpCheckdate,
     PhpUcwords,
     PhpPregReplaceCallback,
+    PhpStrReplace,
 }
 
 impl Helper {
-    const ALL: [Helper; 21] = [
+    const ALL: [Helper; 22] = [
         Helper::CtypeDigit,
         Helper::PhpInt,
         Helper::PhpOffset,
@@ -53,6 +54,7 @@ impl Helper {
         Helper::PhpCheckdate,
         Helper::PhpUcwords,
         Helper::PhpPregReplaceCallback,
+        Helper::PhpStrReplace,
     ];
 
     fn name(self) -> &'static str {
@@ -78,6 +80,7 @@ impl Helper {
             Helper::PhpCheckdate => "php_checkdate",
             Helper::PhpUcwords => "php_ucwords",
             Helper::PhpPregReplaceCallback => "php_preg_replace_callback",
+            Helper::PhpStrReplace => "php_str_replace",
         }
     }
 
@@ -105,6 +108,7 @@ impl Helper {
             Helper::PhpCheckdate => PHP_CHECKDATE,
             Helper::PhpUcwords => PHP_UCWORDS,
             Helper::PhpPregReplaceCallback => PHP_PREG_REPLACE_CALLBACK,
+            Helper::PhpStrReplace => PHP_STR_REPLACE,
         }
     }
 
@@ -423,4 +427,33 @@ const PHP_PREG_REPLACE_CALLBACK: &str = r#"fn php_preg_replace_callback(
     }
     out.extend_from_slice(&bytes[last..]);
     String::from_utf8_lossy(&out).into_owned()
+}"#;
+
+/// `str_replace()` with an array: each search in order, a later one seeing what the earlier
+/// ones put in, with the replacement at its position, "" where they run out, or the one
+/// string replacement; an empty search is skipped (P2R-310).
+const PHP_STR_REPLACE: &str = r#"fn php_str_replace(
+    searches: &[&str],
+    search_is_text: bool,
+    replaces: &[&str],
+    replace_is_text: bool,
+    subject: &str,
+) -> String {
+    if search_is_text && !replace_is_text {
+        panic!(
+            "str_replace(): Argument #2 ($replace) must be of type string when argument #1 ($search) is a string"
+        );
+    }
+    let mut out = subject.to_string();
+    for (at, search) in searches.iter().enumerate() {
+        let replace = if replace_is_text {
+            replaces[0]
+        } else {
+            replaces.get(at).copied().unwrap_or("")
+        };
+        if !search.is_empty() {
+            out = out.replace(search, replace);
+        }
+    }
+    out
 }"#;

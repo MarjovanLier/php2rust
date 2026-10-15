@@ -1,0 +1,6 @@
+input.php:10:20: Invalid argument type for argument #2 of `strtr`: expected `array<string, string>|string`, but found `list{string('a'), string('b')}`. (invalid-argument)
+input.php:11:20: Possible argument type mismatch for argument #2 of `strtr`: expected `array<string, string>|string`, but possibly received `array{1: string('one')}`. (possibly-invalid-argument)
+input.php:12:20: Invalid argument type for argument #2 of `strtr`: expected `array<string, string>|string`, but found `non-empty-array<int, string('n')>`. (invalid-argument)
+input.php:13:20: Possible argument type mismatch for argument #2 of `strtr`: expected `array<string, string>|string`, but possibly received `array{'a': int}`. (possibly-invalid-argument)
+input.php:14:21: an empty key in strtr() is not supported, because PHP ignores it with a warning (P2R-311)
+input.php:15:33: an array literal in strtr() converts only with a string key and a string value on every element (P2R-311)

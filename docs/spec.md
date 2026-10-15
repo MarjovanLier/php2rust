@@ -102,7 +102,10 @@ the Copy members, the forms for the `&U` binding of a null check, and
 the exceptions in P2R-106 and P2R-232; the build added plain-value
 literals where a map is needed and the declared map type of a `[]`.
 Section 27 (regular expressions without the `u` flag) was written on 15
-Oct 2026; it changes P2R-07, P2R-60 and the roadmap of section 10.
+Oct 2026; it changes P2R-07, P2R-60, P2R-171, P2R-188 and the roadmap of
+section 10. Its final review stopped `[.a.]`, `[=a=]` and a count after
+a group, which PCRE rejects, and let `[:]` convert as the plain class it
+is in both engines.
 
 php2rust converts typed PHP source into normal, readable Rust (`Vec`,
 `String`, `i64`), without AI. It reads PHP with the Mago crates, uses Mago's
@@ -1398,7 +1401,7 @@ Rust module. One input file still converts as sections 1 to 17 say.
   span rule of P2R-03 compares problems of one file only. Mago analyses
   every input file together, so a class, enum or function of one file is
   known in every other file. For a directory input, "the file" in sections
-  1 to 17, 19 and 21 to 23 means every input file together (P2R-31, P2R-43, P2R-48,
+  1 to 17, 19, 21 to 23 and 27 means every input file together (P2R-31, P2R-43, P2R-48,
   P2R-111, P2R-115, P2R-120, P2R-131, P2R-151, P2R-153, P2R-156, P2R-160,
   P2R-163, P2R-168, P2R-169 and others), except in P2R-12, P2R-13, P2R-110
   and P2R-150, which apply to each file alone (a `use` in one file may name
@@ -2400,13 +2403,15 @@ those patterns.
     `[:punct:]`, `[:space:]`, `[:upper:]`, `[:word:]` and `[:xdigit:]`,
     each also with `^`, inside a class;
   - groups `( )` and `(?: )`, and alternation;
-  - the quantifiers `*`, `+`, `?`, `{n}`, `{n,}` and `{n,m}`, with counts
-    up to 65535, and their lazy forms, each after a literal, `.`, an
-    escape class, a character class or a group;
+  - the quantifiers `*`, `+` and `?` after a literal, `.`, an escape
+    class, a character class or a group, and `{n}`, `{n,}` and `{n,m}`,
+    with counts up to 65535, after any of these but a group, and their
+    lazy forms;
   - `^`, `\A` and `\z`, and `$` with the `m` flag.
 
   It converts to the Rust pattern `(?-u)` followed by `(?i)`, `(?m)` and
-  `(?s)` for its flags and by the body, as a raw string literal (`r"(?-u)\D"`,
+  `(?s)` for its flags, in this order and each once however often PHP's
+  flags name it, and by the body, as a raw string literal (`r"(?-u)\D"`,
   `r#".."#` when the body holds `"`), and the tool compiles each
   converted pattern with `regex::bytes::Regex` of `regex` 1.13.1 when it
   converts (`regex::Regex` rejects a `(?-u)` class that can match bytes
@@ -2419,11 +2424,18 @@ those patterns.
   not match after a newline that ends the subject; `\v`, which PCRE reads
   as every vertical space; `\b{`; inside a class, `[` other than a listed
   POSIX class, `&&`, `--` and `~~`, which `regex` reads as nested classes
-  and set operators, and a range from a POSIX class; a POSIX class outside
-  a class; a quantifier after another quantifier or an assertion (`a**`,
-  `^*`), which PCRE rejects; a repeat other than `?` of a part that can
-  match the empty string (`(?:a?|b)*`), because PCRE ends the loop where
-  that part matches empty and `regex` goes on; `\Z`, `\G`, `\K`, `\Q..\E`,
+  and set operators, and a range from a POSIX class; a class that starts
+  with `[:`, `[.` or `[=` and has the form PCRE checks for a POSIX class
+  (`[:alpha:]`, `[.a.]`, `[=a=]` outside a class), which PCRE rejects,
+  while `[:]` and `[^:ab:]` are plain classes in both engines; a
+  quantifier after another quantifier or an assertion (`a**`, `^*`), which
+  PCRE rejects; a count after a group (`(?:a){2}`), because PCRE copies
+  the group once per count and rejects the pattern past a size limit that
+  depends on the group; a repeat that can run more than once of a part
+  that can match both the empty string and a longer one (`(?:a?|b)*`),
+  because PCRE ends the loop where that part matches empty and `regex`
+  goes on; whitespace before the delimiter or among the flags, which PHP
+  skips; `\Z`, `\G`, `\K`, `\Q..\E`,
   `\p`, look-around, backreferences, `\k`, atomic groups, possessive
   quantifiers, conditionals, recursion and octal escapes; and a pattern
   that does not compile.
@@ -2466,7 +2478,9 @@ those patterns.
   its dependencies fixed by its `Cargo.lock`, a test MUST check that this
   lock and the tool's own `Cargo.lock` hold the same `regex` version, and
   the README MUST say that
-  such output needs `regex = "1"` in the `Cargo.toml` that builds it. A
+  such output needs `regex = "1.13"` in the `Cargo.toml` that builds it
+  (the escapes of any ASCII punctuation the output keeps need 1.8 or
+  later, and 1.13 is the version the tests run). A
   function, variable or parameter named `php_preg_replace` or
   `php_preg_match` stops by P2R-31.
 

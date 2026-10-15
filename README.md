@@ -523,9 +523,9 @@ php2rust refuses some valid PHP that version 1 converts in other forms:
   when its arguments read the same object, even another property of it
   (`$this->items[0]->add($this->qty)`). Read the value into a variable first.
 - A docblock type that uses a cycle of `@psalm-type` or `@phpstan-type` aliases
-  (`X = Y` and `Y = X`), in the input or in an included class whose method the input
-  calls, makes Mago 1.55 recurse without end: php2rust aborts with a stack overflow
-  (exit 134) and prints no reason.
+  (`X = Y` and `Y = X`), in the input or in an included class whose method (its
+  constructor too) the input calls, makes Mago 1.55 recurse without end: php2rust aborts
+  with a stack overflow (exit 134) and prints no reason.
 
 ## Known differences from PHP
 

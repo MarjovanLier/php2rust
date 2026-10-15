@@ -182,7 +182,8 @@ requirement IDs.
   failing, so the parse check is explicit. One known exception: Mago 1.55
   recurses without end when a docblock type uses a cycle of
   `@psalm-type` or `@phpstan-type` aliases (`X = Y` and `Y = X`), in the
-  input or in an included class whose method the input calls (P2R-340);
+  input or in an included class whose method, its constructor included,
+  the input calls (P2R-340);
   the tool then overflows its stack and aborts with no reason (exit 134).
   A larger stack would not help, because the recursion has no end.
 - **P2R-05** On exit 1 or 2 the tool MUST write nothing to stdout and MUST

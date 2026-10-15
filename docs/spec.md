@@ -150,7 +150,9 @@ spec reviewers found that PHP rejects attribute arguments that are not
 constant expressions, a list of parents and an incompatible override
 when it compiles the file, where Mago does not always report them, and
 that with Composer's autoloader PHP declares such a class only when
-execution reaches it.
+execution reaches it. Section 37 (Spatie's `Optional`) was written on
+16 Oct 2026; it changes P2R-07, P2R-168, P2R-333 and the roadmap of
+section 10.
 
 php2rust converts typed PHP source into normal, readable Rust (`Vec`,
 `String`, `i64`), without AI. It reads PHP with the Mago crates, uses Mago's
@@ -200,7 +202,7 @@ requirement IDs.
   the same stdout bytes, the same output file bytes and the same stderr
   bytes.
 - **P2R-07** Only the constructs that sections 3 to 5, 11 to 19 and 21 to
-  36 list as converting may convert. Any other construct MUST stop the conversion,
+  37 list as converting may convert. Any other construct MUST stop the conversion,
   which means it is reported as a problem under P2R-03. Examples that stop
   in version 1 (section 16 converts `namespace`, `use` and class
   constants, and section 17 two casts):
@@ -651,8 +653,8 @@ Each milestone gets its own requirements in this file when its work starts.
   `SouthAfricanIDValidator` calls (section 34); then, for a Laravel
   application, the classes of Composer's `vendor/` folder read for their
   types only (section 35), Spatie's `Data` classes as plain structs
-  (section 36) and later their `from()` and `toArray()`, and the
-  framework's other forms;
+  (section 36), their `Optional` properties (section 37) and later their
+  `from()` and `toArray()`, and the framework's other forms;
   unions as list values; interfaces and inheritance; closures.
   `SouthAfricanIDValidator` calls `StringManipulation::isValidDate`, which
   lives in another package, and P2R-153 resolves calls inside the input
@@ -1485,8 +1487,10 @@ small helper function that copies PHP's rules.
   (`-0` for a `float` gives `0.0`, P2R-156), a bool literal, a
   single-quoted string literal or a double-quoted one without
   interpolation, `null` for a parameter whose declared type is nullable
-  (`?T` or `T|null`), `[]` for a list or nullable list type, or a case of
-  an enum of the file written `E::Case` or `self::Case`. A call that leaves
+  (`?T` or `T|null`, also `T|Optional|null` of P2R-360, where it is
+  `PhpOptional::Present(None)`), `[]` for a list or nullable list type,
+  or a case of an enum of the file written `E::Case` or `self::Case`. A
+  call that leaves
   the parameter out MUST pass the default, converted at its declaration
   (`self` names the class or enum that declares the parameter) and passed
   as an argument for that parameter (P2R-24, P2R-25, P2R-102): a filled-in
@@ -3177,8 +3181,8 @@ read takes the current date or time.
   `!$v instanceof DateTime` and `$v === false` as it takes `$v ===
   null`, for its `if let` and `let ... else` bindings of type
   `PhpDateTime`. These stop the conversion: `instanceof` with another
-  class or on a value of another type, and a class given by a variable
-  or a string.
+  class (other than the `Optional` of P2R-362) or on a value of another
+  type, and a class given by a variable or a string.
 - **P2R-334** `if (X || B) { .. }`, where `X` is a check that P2R-104
   turns into `let Some(v) = .. else` (`$v === null`, `!$v instanceof
   DateTime`, `$v === false`, and their mirrored forms), it is the first
@@ -3353,6 +3357,59 @@ parent to a later section.
   and Mago does not report them all. Every other attribute there, and
   one with another argument, stops (P2R-07), and an attribute group
   (`#[A, B]`) that holds an attribute that stops, stops as a whole.
+
+## 37. Spatie's Optional in a Data class (milestone 2, slice 27)
+
+A `Data` class of section 36 marks a property that a request may leave
+out with the type `Spatie\LaravelData\Optional`: `string|Optional`, or
+`string|Optional|null` where the request may also send `null`. 27 of the
+60 `Data` classes of the Laravel app hold such a property, and code
+fills one with `new Optional`, `Optional::create()` or a value, and
+reads it back with `$dto->name instanceof Optional`. In version 4.18.0,
+`Optional` is a class with one static method, `create()`, which returns
+`new self()`: no parent, interface, trait, property, constant,
+constructor or other magic method. This section gives such a union a
+Rust type and converts the forms above; reading the value inside, which
+needs the check to narrow the type, waits for a later section.
+
+- **P2R-360** A declared or analysed type that is a union of
+  `\Spatie\LaravelData\Optional` (any letter case) and exactly one other
+  type `T` with a Rust type, alone or with `null`, MUST become
+  `PhpOptional<T>` for `T|Optional` and `PhpOptional<Option<T>>` for
+  `T|Optional|null`, whatever the order of the members, where
+  `PhpOptional` is the generic enum
+  `pub enum PhpOptional<T> { Absent, Present(T) }` with
+  `#[derive(Clone, Debug, PartialEq, Eq)]`, written once at the crate
+  root after the shapes and unions when an item names it, with the `use`
+  line of every module that names it (P2R-174). A parameter of that type
+  is borrowed as `&PhpOptional<T>` and its value cloned where it is
+  stored, as a union is (P2R-232). This holds only when an included file
+  declares `Optional` with the shape above; an `Optional` that the input
+  declares is a class of the input (P2R-230), and one of another shape,
+  or no included `Optional`, gives the union no Rust type (P2R-22). These
+  stop too: `Optional` alone, with `T` itself nullable through `?T`
+  inside the union, with more than one other type, as a list or map
+  element, and with `T` a `PhpOptional` or `DateTime|false`. A class or
+  function named `PhpOptional` stops (P2R-31), because the helper takes
+  that name.
+- **P2R-361** Where a value of type `PhpOptional<T>` is due (an argument,
+  a return value, a property or a variable of that type), `new Optional`,
+  `new Optional()` and `Optional::create()` MUST convert to
+  `PhpOptional::Absent`; a value of type `T` to `PhpOptional::Present(v)`;
+  for `PhpOptional<Option<T>>` a value of type `T` to
+  `PhpOptional::Present(Some(v))` and `null` to
+  `PhpOptional::Present(None)`; and a value of the same `PhpOptional`
+  type to itself. `new Optional`
+  or `Optional::create()` anywhere else stops, because its PHP type is
+  `Optional` alone.
+- **P2R-362** `$v instanceof Optional` on a value of type `PhpOptional<T>`
+  MUST convert to `matches!(v, PhpOptional::Absent)`, and
+  `!$v instanceof Optional`, which PHP reads as
+  `!($v instanceof Optional)`, to its negation. Every other use of such a
+  value stops: `===`, `!==`, `==` and `!=`, `??`, `?->`, `echo` and
+  concatenation, a cast, and the value where a `T` is due, because PHP's
+  type there depends on a check this section does not narrow (P2R-07,
+  P2R-22).
 
 ## Spec checklist
 

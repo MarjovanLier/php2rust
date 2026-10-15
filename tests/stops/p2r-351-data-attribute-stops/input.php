@@ -25,6 +25,8 @@ final class Grouped extends Data
     ) {}
 }
 
+// The stop names the group that holds the other attribute.
+#[MapInputName('ok')]
 #[\AllowDynamicProperties]
 final class Dynamic extends Data
 {

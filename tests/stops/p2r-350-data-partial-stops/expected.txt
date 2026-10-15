@@ -1,0 +1,1 @@
+input.php:10:19: Spatie\LaravelData\Data names a trait or interface that no included file declares, so its methods are not all known; include the whole package (P2R-350)

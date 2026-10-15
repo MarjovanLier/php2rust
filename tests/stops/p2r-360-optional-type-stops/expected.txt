@@ -1,0 +1,7 @@
+input.php:25:33: a nullable, union or map type that holds objects whose class changes them is not supported (P2R-141, P2R-240)
+input.php:31:22: this class holds itself, so the Rust struct would have no size (P2R-130)
+input.php:39:17: an array shape that holds Spatie's Optional is not supported yet (P2R-360)
+input.php:45:17: a map of Spatie's Optional is not supported yet (P2R-360)
+input.php:50:16: the type DateTime|Spatie\LaravelData\Optional|null has no Rust type (P2R-22)
+input.php:55:18: the type Spatie\LaravelData\Optional|true has no Rust type (P2R-22)
+input.php:60:18: the type Spatie\LaravelData\Optional|null has no Rust type (P2R-22)

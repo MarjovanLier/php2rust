@@ -4,4 +4,5 @@ input.php:24:29: strtr() converts only with a string map constant as its second 
 input.php:29:16: a named or spread argument of a built-in function is not supported (P2R-169)
 input.php:34:22: strtr() converts on a string only (P2R-282)
 input.php:39:29: strtr() converts only with a string map constant as its second argument (P2R-282)
+input.php:43:7: a trait that no class or enum of the input uses is not supported, because the tool checks its constants only where they are copied (P2R-280)
 input.php:48:10: this name is the Rust name of a helper the output may hold, which it would hide (P2R-31)

@@ -255,7 +255,8 @@ the others are findings of the Mago analyser. In short:
 - For traits and `strtr`: a trait with a method, a property or a `use` of another
   trait, a `use` with a block of conflict rules, a trait the input does not declare, a
   trait constant whose name the class or another trait it uses declares too, a trait
-  named twice in one class, a trait named like another class-like, and a trait inside a
+  named twice in one class, a trait named like another class-like or with a name PHP
+  reserves, a trait that no class or enum of the input uses, and a trait inside a
   function. A
   string map constant with an empty or repeated key, a key or value that is not a string
   literal, no pairs, or a use other than the second argument of `strtr`. `strtr` with

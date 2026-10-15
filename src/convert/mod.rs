@@ -514,6 +514,8 @@ struct Converter<'c> {
     /// The innermost statement converting, whose earlier reads of a variable a move in it
     /// must not break (P2R-26).
     statement: Option<Span>,
+    /// The keys of the traits a class or enum of the input uses (P2R-280).
+    used_traits: HashSet<Vec<u8>>,
 }
 
 impl<'c> Converter<'c> {
@@ -550,6 +552,7 @@ impl<'c> Converter<'c> {
             shape_orders: BTreeMap::new(),
             shape_maps: Vec::new(),
             statement: None,
+            used_traits: HashSet::new(),
         }
     }
 

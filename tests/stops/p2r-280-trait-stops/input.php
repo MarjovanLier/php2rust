@@ -83,6 +83,30 @@ trait Shape
     abstract public function area(): int;
 }
 
+trait Mixed
+{
+    public const string E = 'e';
+}
+
+final class UsesMixed
+{
+    use Mixed;
+}
+
+trait Unused
+{
+    public const string F = 'f';
+}
+
+final class Modifiers
+{
+    static const G = 1;
+
+    public private const H = 2;
+
+    final final public const I = 3;
+}
+
 trait Countable
 {
     public const string D = 'd';

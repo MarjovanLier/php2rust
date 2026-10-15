@@ -181,12 +181,26 @@ impl Converter<'_> {
         if let Some(attributes) = declaration.attribute_lists.first() {
             self.refuse(attributes, "attributes are not supported (P2R-07)");
         }
-        // PHP rejects a trait with the name of a class-like it has built in.
+        // PHP rejects a trait with the name of a class-like it has built in, or a name it
+        // reserves.
         let key = self.name_key(&declaration.name, declaration.name.value);
-        if self.built_in_classes.contains(&key) {
+        let lower = String::from_utf8_lossy(declaration.name.value).to_ascii_lowercase();
+        if self.built_in_classes.contains(&key)
+            || super::enums::RESERVED
+                .split_whitespace()
+                .any(|word| word == lower)
+        {
             self.refuse(
                 &declaration.name,
-                "a trait cannot take the name of a class, interface, enum or trait PHP has built in (P2R-280)",
+                "a trait cannot take a name PHP reserves or the name of a class, interface, enum or trait PHP has built in (P2R-280)",
+            );
+        }
+        // Its constants are checked only where a class or enum copies them, and PHP checks
+        // them when it reads the file.
+        if !self.used_traits.contains(&key) {
+            self.refuse(
+                &declaration.name,
+                "a trait that no class or enum of the input uses is not supported, because the tool checks its constants only where they are copied (P2R-280)",
             );
         }
         for member in declaration.members.iter() {
@@ -243,7 +257,10 @@ impl Converter<'_> {
                         _ => None,
                     });
                 match declared {
-                    Some(declaration) => found.extend(declaration.members.iter()),
+                    Some(declaration) => {
+                        self.used_traits.insert(key);
+                        found.extend(declaration.members.iter());
+                    }
                     None => self.refuse(
                         name,
                         "a use of a trait that the input does not declare is not supported (P2R-280)",
@@ -1152,6 +1169,13 @@ impl Converter<'_> {
                 self.refuse(&item.name, "PHP reserves the constant name class (P2R-156)");
                 continue;
             }
+            if bad_constant_modifiers(&constant.modifiers) {
+                self.refuse(
+                    constant,
+                    "a constant takes one visibility and final at most, which PHP checks (P2R-156)",
+                );
+                continue;
+            }
             if final_private(&constant.modifiers) {
                 self.refuse(
                     constant,
@@ -2010,6 +2034,20 @@ fn static_modifier(parameter: &FunctionLikeParameter<'_>) -> bool {
 fn final_private(modifiers: &Sequence<'_, Modifier<'_>>) -> bool {
     modifiers.iter().any(|m| matches!(m, Modifier::Final(_)))
         && modifiers.iter().any(|m| matches!(m, Modifier::Private(_)))
+}
+
+/// True for constant modifiers PHP rejects when it compiles the file, and Mago does not
+/// report: anything but one visibility and one `final` (P2R-156).
+fn bad_constant_modifiers(modifiers: &Sequence<'_, Modifier<'_>>) -> bool {
+    let count = |test: fn(&Modifier<'_>) -> bool| modifiers.iter().filter(|m| test(m)).count();
+    let visibility = count(|m| {
+        matches!(
+            m,
+            Modifier::Public(_) | Modifier::Protected(_) | Modifier::Private(_)
+        )
+    });
+    let finals = count(|m| matches!(m, Modifier::Final(_)));
+    visibility > 1 || finals > 1 || visibility + finals < modifiers.len()
 }
 
 /// How `new` stores a parameter in its field: a Copy value or a value it takes by value as

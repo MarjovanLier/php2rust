@@ -3323,17 +3323,19 @@ parent to a later section.
   `rules()`); a class whose parent, as Mago knows it, names a trait or
   interface that no included file declares (an `--include` of
   `Data.php` alone), because then the methods of `Data` are not all
-  known; a class whose parent, as Mago knows it, has a method that PHP
-  calls by itself (`__construct`, `__destruct`, `__get`, `__set`,
-  `__isset`, `__unset`, `__call` or `__toString`), which version 4.18.0
-  does not have and the struct would drop; and such a class after a
+  known; a class whose parent, as Mago knows it, extends another class,
+  which version 4.18.0 does not; a class whose parent, as Mago knows it,
+  has a method that PHP calls by itself (`__construct`, `__destruct`,
+  `__get`, `__set`, `__isset`, `__unset`, `__call` or `__toString`),
+  which version 4.18.0 does not have and the struct would drop; and
+  such a class after a
   statement outside functions, because PHP declares it before any
   statement runs only when `Data` is loaded before the file compiles,
   which Composer's autoloader does not do. These checks see the `Data`
   that `--include` gives: a stand-in that declares fewer methods than
   the package (as the test folders use) hides an override of the
-  others. Without `--include` of the package, Mago does not know the
-  parent and reports the class, so the conversion stops (P2R-340).
+  others. Without `--include` of the package, no included file declares
+  `Data`, so the class stops by P2R-130 (P2R-340).
 - **P2R-351** On a class of P2R-350, an attribute whose class PHP
   resolves, in any letter case, to a name that starts with
   `\Spatie\LaravelData\Attributes\` (`MapInputName`, `MapOutputName`,

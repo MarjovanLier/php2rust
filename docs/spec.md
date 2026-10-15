@@ -105,7 +105,9 @@ Section 27 (regular expressions without the `u` flag) was written on 15
 Oct 2026; it changes P2R-07, P2R-60, P2R-171, P2R-188 and the roadmap of
 section 10. Its final review stopped `[.a.]`, `[=a=]` and a count after
 a group, which PCRE rejects, and let `[:]` convert as the plain class it
-is in both engines.
+is in both engines. Section 28 (maps as union members, and shapes as
+maps) was written on 15 Oct 2026; it changes P2R-07, P2R-60, P2R-233,
+P2R-240, P2R-250 and the roadmap of section 10.
 
 php2rust converts typed PHP source into normal, readable Rust (`Vec`,
 `String`, `i64`), without AI. It reads PHP with the Mago crates, uses Mago's
@@ -149,7 +151,7 @@ requirement IDs.
   the same stdout bytes, the same output file bytes and the same stderr
   bytes.
 - **P2R-07** Only the constructs that sections 3 to 5, 11 to 19 and 21 to
-  27 list as converting may convert. Any other construct MUST stop the conversion,
+  28 list as converting may convert. Any other construct MUST stop the conversion,
   which means it is reported as a problem under P2R-03. Examples that stop
   in version 1 (section 16 converts `namespace`, `use` and class
   constants, and section 17 two casts):
@@ -415,6 +417,9 @@ requirement IDs.
     gives null or `false`, so the default of `??` applies and `!== 0` is
     true where a condition and `=== 1` are false; the `regex` crate has no
     such limit and gives the match.
+  - A shape that P2R-271 turns into a map, where a PHP caller outside the
+    input built the array in another key order than the input's literals:
+    the Rust map has the input's order, because a struct has none.
   - `(int)` of a string of 19 digits above `PHP_INT_MAX` followed by `e+`
     or `e-` without exponent digits (`"9300000000000000000e+"`): PHP's
     number parser reads one byte late and gives a wrapped value
@@ -524,16 +529,19 @@ Each milestone gets its own requirements in this file when its work starts.
   as plain methods (section 23, not Rust's `Index`, which cannot throw);
   declared unions as generated enums and `?->` (section 24); maps on
   `indexmap` (section 25); unions as map values, narrowing a union value
-  with `is_string()` and its kin (section 26), and unions as list values
-  and maps as union members; `preg_replace` and `preg_match` without the
-  `u` flag (section 27), then patterns with `u` and look-around;
-  interfaces and
-  inheritance; closures; then the
-  `StringManipulation` library, which `SouthAfricanIDValidator` calls.
+  with `is_string()` and its kin (section 26); `preg_replace` and
+  `preg_match` without the `u` flag (section 27); maps as union members
+  and shapes as maps (section 28); then the rest of the
+  `StringManipulation` library, which `SouthAfricanIDValidator` calls,
+  ordered by how widely each fix applies (writes to a variable a check
+  binds, traits with array constants, `strtr`, `trim` with a second
+  argument), with `DateTime` and patterns with `u` and look-around last;
+  unions as list values; interfaces and inheritance; closures.
   `SouthAfricanIDValidator` calls `StringManipulation::isValidDate`, which
   lives in another package, and P2R-153 resolves calls inside the input
-  only, so the validator converts completely only once the tool takes
-  both packages in one run. Real `mixed` (facades, arrays of mixed values)
+  only, so the validator converts completely only in one run of a
+  directory that holds both packages' sources, and only once every line
+  of `StringManipulation` converts too. Real `mixed` (facades, arrays of mixed values)
   still needs a dynamic value type, which no section specifies yet.
   Three points are open:
   - PHP functions with no counterpart in Rust's standard library
@@ -2126,7 +2134,7 @@ inside a list or a shape field waits for a later slice.
   P2R-104. `is_scalar()` gives `matches!(v, ..)` with the `Int`, `Float`,
   `Bool` and `String` variants, so every other variant and `None` give
   `false`. `gettype()` gives a `match` with `"integer"`, `"double"`,
-  `"boolean"`, `"string"`, `"array"` for `List` and a shape, `"object"`
+  `"boolean"`, `"string"`, `"array"` for `List`, `Map` and a shape, `"object"`
   for an enum or class, and `"NULL"` for `None`. `(string)` gives a
   `match` with `x.to_string()` for `Int`, `"1"` or `""` for `Bool`, the
   text for `String` and `""` for `None`; an arm that does not read its
@@ -2211,7 +2219,8 @@ application's `array<string, mixed>` values keep P2R-22.
   (P2R-22, `array<string, mixed>` included); a value type that is or holds
   a class that changes its objects (P2R-141), because such a class derives
   no `Clone`; a union value type outside a declared type (P2R-250), and a
-  map as a union member (a later slice); a value of a list or shape type where a map type is needed, a
+  map as a union member outside P2R-270; a value of a list type where a
+  map type is needed, and of a shape type outside P2R-271, a
   map where a list or shape is needed, and a map where a map of another
   key or value type is needed (`array<string, int>` where
   `array<string, ?int>` or `array<string, float>` is declared, at any
@@ -2331,8 +2340,8 @@ key order, which Mago does not keep (P2R-200).
   starts, and as the value of another map, a `foreach` value included.
   Only a map type with no declared origin, such as the type of an array
   literal or of a `@var` docblock, keeps P2R-22. These stop the conversion: a union as a list element type or a
-  shape field type, and a map as a member of a union (P2R-230; a later
-  slice); a value of the union type that is not a member value (P2R-231).
+  shape field type, and a map as a member of a union outside P2R-270; a
+  value of the union type that is not a member value (P2R-231).
 - **P2R-251** `is_int($v)`, `is_float($v)`, `is_bool($v)` and `is_string($v)`
   (also written `\is_string`), with one positional argument whose Rust type
   is a union enum `U` or `Option<U>`, MUST convert to
@@ -2486,6 +2495,53 @@ those patterns.
   later, and 1.13 is the version the tests run). A
   function, variable or parameter named `php_preg_replace` or
   `php_preg_match` stops by P2R-31.
+
+## 28. Maps as union members, and shapes as maps (milestone 2, slice 18)
+
+The validator's `IDValidationResult::toArray()` declares
+`array<string, bool|array<string, string>|string|null>` and puts
+`$this->dateComponents?->toArray()`, a value of the shape
+`array{year: string, month: string, day: string}`, where the map member is
+needed. This is its last problem line when it converts together with
+`StringManipulation`, whose `strReplace` declares `array|string`
+parameters typed `string|string[]`. A shape converts to a struct
+(P2R-200), whose fields have no order, and Mago keeps no key order for a
+shape, but P2R-200 lets nothing change a shape after an array literal
+builds it, so the run-time key order of a shape value is the key order of
+the literal that built it.
+
+- **P2R-270** A declared type (P2R-230) MAY have one member that is a map
+  (P2R-240, with a union value type by P2R-250), beside members of other
+  Rust types and `null`. The map member MUST become the variant
+  `Map(IndexMap<K, V>)` of the union enum, named `Map` in the enum's name
+  (`bool|array<string, string>|string|null` gives
+  `Option<BoolOrMapOrString>`). A map value goes into the union as
+  `U::Map(..)` (P2R-231). `is_scalar()` gives `false` and `gettype()`
+  gives `"array"` for the `Map` variant (P2R-233), and no type test of
+  P2R-251 matches it. A map type that Mago infers inside a body keeps
+  P2R-22, as P2R-230 keeps an inferred union. These stop the conversion:
+  `(string)` of a union value with a `Map` variant, because PHP gives
+  `"Array"` with a warning; two map members (P2R-230 names both `Map`);
+  and every other use of the `Map` variant's value (P2R-232).
+- **P2R-271** A value of a shape type `S`, or `Option<S>`, MUST convert
+  where a map with text keys is needed (`IndexMap<String, V>`: a map
+  place of P2R-241, a parameter, a return value or a property of that
+  type, or the `Map` variant of P2R-270), when every field of `S` has the
+  Rust type `V`, to `IndexMap::from(s)`, or `s.map(IndexMap::from)` for
+  `Option<S>`, and a value that is not owned is copied first as P2R-26
+  copies it. The output then holds, after the struct `S`,
+  `impl From<S> for IndexMap<String, V>`, whose `from` builds the map with
+  `IndexMap::from([(String::from("k"), s.k), ..])` in one key order: the
+  order in which the array literals of the input that build `S` (P2R-202)
+  list their keys. Every such literal MUST list the keys in one order; two
+  literals in different orders, and a shape that no literal of the input
+  builds, stop the conversion at each place that needs the map, because
+  the key order would not be PHP's. A PHP caller outside the input may
+  build `S` in another order; that is a known difference (P2R-60). These
+  also stop: a field whose Rust type is not `V` (an `int` field where `V`
+  is `String`, a field where `V` is a union enum); a map with int keys
+  (`IndexMap<i64, V>`), because a shape key is text; and a shape where a
+  list is needed (P2R-240).
 
 ## Spec checklist
 

@@ -9,3 +9,4 @@ input.php:14:21: a pattern with the u flag converts only in preg_match() read as
 input.php:15:21: a pattern converts with a closing delimiter (P2R-260)
 input.php:16:21: a pattern with the u flag converts only in preg_match() read as a bool, as (?<!\p{L}) then ASCII letters and digits then (?! ), with no other flag (P2R-320)
 input.php:17:21: a pattern converts with only printable ASCII bytes (P2R-260)
+input.php:18:21: a pattern with the u flag converts only in preg_match() read as a bool, as (?<!\p{L}) then ASCII letters and digits then (?! ), with no other flag (P2R-320)

@@ -15,5 +15,6 @@ function forms(string $s): string
     $i = preg_match('<(?<!\p{L})mc(?! )>u', $s) === 1;
     $j = preg_match('!(?<!\p{L})mc(?! )!u', $s) === 1;
     $k = preg_match("\t(?<!\\p{L})mc(?! )\tu", $s) === 1;
-    return $a . $b . ($c || $d || $e || $f || $g || $h || $i || $j || $k ? '1' : '0');
+    $l = preg_match('#(?<!\p{L})mc(?!\p{L})#u', $s) === 1;
+    return $a . $b . ($c || $d || $e || $f || $g || $h || $i || $j || $k || $l ? '1' : '0');
 }

@@ -109,8 +109,8 @@ is in both engines. Section 28 (maps as union members, and shapes as
 maps) was written on 15 Oct 2026; it changes P2R-07, P2R-60, P2R-233,
 P2R-240, P2R-250 and the roadmap of section 10. Section 29 (traits with
 constants, string map constants and `strtr`) was written on 15 Oct 2026;
-it changes P2R-07, P2R-110, P2R-130, P2R-156, P2R-173, P2R-175, P2R-188
-and the roadmap of section 10.
+it changes P2R-07, P2R-110, P2R-111, P2R-130, P2R-156, P2R-173, P2R-175,
+P2R-188 and the roadmap of section 10.
 
 php2rust converts typed PHP source into normal, readable Rust (`Vec`,
 `String`, `i64`), without AI. It reads PHP with the Mago crates, uses Mago's

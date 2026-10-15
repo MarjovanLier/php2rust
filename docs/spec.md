@@ -2791,9 +2791,12 @@ This section converts a closure only as such a callback.
   later slice); a write in the body (an assignment, `++` or `--`), which
   in PHP changes only the closure's copy; a call that throws (P2R-211) or
   `?? throw` in the body, whose `?` would leave the closure instead of
-  the function; `$this` in the body; a nested arrow function; and a
-  closure of the long form (`function () use (..) { .. }`), also with
-  `static` (a later slice).
+  the function; `$this` in the body; a `match` as the body (P2R-120); a
+  nested arrow function, also as the callback inside the body of another
+  (an `array_map` call as the list argument of another still converts,
+  because the list converts before the callback); and a closure of the
+  long form (`function () use (..) { .. }`), also with `static` (a later
+  slice).
 - **P2R-301** `array_map(CB, $list)` with two positional arguments, where
   `$list` is any expression whose value is a list (`Vec<T>`, not a map)
   of ints, floats, bools, enums or strings, a temporary such as

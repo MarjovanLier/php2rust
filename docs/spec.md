@@ -3217,18 +3217,19 @@ later sections.
   input file that also lies under an include path is read as input only.
   The checks of a name against PHP's built-ins (P2R-31, P2R-111, P2R-131,
   P2R-151) see PHP's built-ins only, and an included declaration is not a
-  declaration of the crate (P2R-173). A type or call of the input that names an included symbol
-  converts by the rules of the earlier sections, so it stops (a class
-  type by P2R-22, a call by P2R-48 or P2R-153) until a later section maps
-  it. An unqualified call in a namespace whose function of that short
-  name an included file declares calls that function in PHP, not the
-  built-in or a global function of the input, so it stops by P2R-48. An
-  attribute stops by P2R-07 whether or not an included file declares its
-  class, on a function, a parameter or an arrow function as on a class
-  or a member, other than the one of P2R-341. The option works for a
-  file input and for a directory input. An include path that does not
-  exist, that is neither a file nor a directory (a named pipe), or below
-  which a directory cannot be listed exits 2 with its reason (P2R-04).
+  declaration of the crate (P2R-173). A type or call of the input that
+  names an included symbol converts by the rules of the earlier sections,
+  so it stops (a class type by P2R-22, a call by P2R-48 or P2R-153) until
+  a later section maps it. An unqualified call in a namespace whose
+  function of that short name an included file declares calls that
+  function in PHP, not the built-in or a global function of the input,
+  so it stops by P2R-48. An attribute stops by P2R-07 whether or not an
+  included file declares its class, on a function, a parameter or an
+  arrow function as on a class or a member, other than the one of
+  P2R-341. The option works for a file input and for a directory input.
+  An include path that does not exist, that is neither a file nor a
+  directory (a named pipe), or below which a directory cannot be listed
+  exits 2 with its reason (P2R-04).
 - **P2R-341** The attribute `#[SensitiveParameter]` (any name PHP
   resolves to `\SensitiveParameter`), written alone on a parameter that
   is not promoted, of a function, a method or an arrow function, and

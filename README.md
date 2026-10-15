@@ -236,7 +236,10 @@ converts:
   `\d \w \s \b` and their capitals, `\t \n \r \f \xhh`, `\x{..}` up to `7F`, classes
   with ranges and POSIX names, `( )`, `(?: )`, `|`, the quantifiers and their lazy
   forms (a count `{n}` not after a group), `^`, `\A`, `\z`, and `$` with the `m` flag;
-  the flags `i`, `m` and `s`.
+  the flags `i`, `m` and `s`. One form with `u` converts in `preg_match()` read as a
+  bool: `'#(?<!\p{L})mc(?! )#u'`, with any word of ASCII letters and digits in place
+  of `mc`, becomes `r"(?:^|\P{L})mc(?:[^ ]|$)"`, which matches where the look-around
+  does.
 - traits that hold only constants: `use T;` in a class or enum copies the trait's
   constants into it, and the trait itself writes nothing. A constant whose value is an
   array of string keys and string values becomes a slice of pairs
@@ -277,7 +280,9 @@ the others are findings of the Mago analyser. In short:
   `sprintf()` format other than text, `%s`, `%d` and `%%`, or with an argument count
   that does not match.
 - For patterns: a pattern that is not a literal or a constant of the input, the `u`
-  flag and every flag other than `i`, `m` and `s`, a byte that is not printable ASCII (a
+  flag outside the one `preg_match()` form above (also that form with another flag, or
+  in `preg_replace()` and `preg_replace_callback()`), every flag other than `i`, `m`
+  and `s`, a byte that is not printable ASCII (a
   real tab), `$` without `m`, `^` with `m`, look-around, backreferences, `\v`, `\Z`, a
   quantifier after a quantifier or an assertion, a count after a group, a repeat of a
   part that can match the empty string, and every form not listed above.
@@ -507,6 +512,13 @@ php2rust refuses some valid PHP that version 1 converts in other forms:
   `preg_replace()` and `preg_replace_callback()` give `null`, so `??` gives the
   default, and `preg_match()` gives `false`. Rust's `regex` has no such limit and gives
   the full result.
+- The `u` form of `preg_match()` where a letter that only one Unicode version has
+  stands next to the word: Rust's `\p{L}` follows Unicode 16.0 (`regex-syntax`
+  0.8.11), PHP's follows the PCRE2 it links (17.0 for PCRE2 10.48, 14.0 for 10.42), so
+  one matches and the other does not.
+- The `u` form of `preg_match()` on a subject that is not valid UTF-8 in PHP (after a
+  cut character, above): PHP gives `false`; the Rust subject holds U+FFFD there and
+  matches as any other.
 - An array shape that becomes a map, where a PHP caller outside the converted code
   built the array in another key order: the Rust map has the order of the converted
   code's literals, because a struct has no order.

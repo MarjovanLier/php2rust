@@ -1,5 +1,6 @@
 //! PHP patterns without the `u` flag as patterns of `regex::bytes` in `(?-u)` mode, from an
-//! allow-list of the syntax both engines read alike (P2R-260).
+//! allow-list of the syntax both engines read alike (P2R-260), and one look-around form with
+//! `u`, rewritten for `preg_match` (P2R-320).
 
 use mago_syntax::cst::*;
 use regex_syntax::hir::{Class, Hir, HirKind};
@@ -22,7 +23,9 @@ impl Converter<'_> {
     }
 
     /// The pattern argument `node` converted, or `None` with a problem recorded (P2R-260).
-    fn pattern_argument(&mut self, node: &Expression<'_>) -> Option<Pattern> {
+    /// `as_bool` is true for `preg_match`, the one function that also takes the form of
+    /// P2R-320.
+    fn pattern_argument(&mut self, node: &Expression<'_>, as_bool: bool) -> Option<Pattern> {
         let Some(text) = self.literal_text(node) else {
             self.record_refused(node);
             self.refuse(
@@ -31,7 +34,8 @@ impl Converter<'_> {
             );
             return None;
         };
-        match rust_pattern(text.as_bytes()) {
+        let converted = as_bool.then(|| lookaround(text.as_bytes())).flatten();
+        match converted.unwrap_or_else(|| rust_pattern(text.as_bytes())) {
             Ok(pattern) => Some(pattern),
             Err(message) => {
                 self.refuse(node, message);
@@ -54,7 +58,7 @@ impl Converter<'_> {
             (3, 3),
             "preg_replace() converts with three arguments only (P2R-261)",
         )?;
-        let pattern = self.pattern_argument(arguments[0]);
+        let pattern = self.pattern_argument(arguments[0], false);
         let replacement = match self.literal_text(arguments[1]) {
             Some(text) if !text.contains(['$', '\\']) => Some(text),
             found => {
@@ -127,7 +131,7 @@ impl Converter<'_> {
             (3, 3),
             "preg_replace_callback() converts with three arguments only (P2R-302)",
         )?;
-        let pattern = self.pattern_argument(arguments[0]);
+        let pattern = self.pattern_argument(arguments[0], false);
         let matches = RustType::Map(Box::new(RustType::String), Box::new(RustType::String));
         let callback = match unparenthesized(arguments[1]) {
             Expression::ArrowFunction(arrow)
@@ -192,7 +196,7 @@ impl Converter<'_> {
             (2, 2),
             "preg_match() converts with two arguments only (P2R-262)",
         )?;
-        let pattern = self.pattern_argument(arguments[0]);
+        let pattern = self.pattern_argument(arguments[0], true);
         let subject = self.typed_argument(
             arguments[1],
             &RustType::String,
@@ -330,6 +334,34 @@ pub(super) fn rust_pattern(php: &[u8]) -> Result<Pattern, String> {
         text,
         empty,
         wide: wide(&hir),
+    })
+}
+
+/// The Rust pattern of `#(?<!\p{L})word(?! )#u`, or the problem of another pattern with the
+/// `u` flag, or `None` for a pattern without it (P2R-320). Read as a bool, each look-around
+/// tests one character next to the word, or the end, so a consuming alternative equals it.
+fn lookaround(php: &[u8]) -> Option<Result<Pattern, String>> {
+    let (body, flags) = split(php).ok()?;
+    if !flags.contains(&b'u') {
+        return None;
+    }
+    let word = body
+        .strip_prefix(br"(?<!\p{L})")
+        .and_then(|rest| rest.strip_suffix(b"(?! )"))
+        .filter(|word| !word.is_empty() && word.iter().all(u8::is_ascii_alphanumeric));
+    Some(match word {
+        Some(word) if flags == b"u" => Ok(Pattern {
+            text: format!(
+                r"(?:^|\P{{L}}){}(?:[^ ]|$)",
+                String::from_utf8_lossy(word)
+            ),
+            empty: false,
+            wide: true,
+        }),
+        _ => Err(
+            r"a pattern with the u flag converts only in preg_match() read as a bool, as (?<!\p{L}) then ASCII letters and digits then (?! ), with no other flag (P2R-320)"
+                .to_owned(),
+        ),
     })
 }
 
@@ -712,6 +744,33 @@ mod tests {
         }
         assert!(text(&format!("/{}/", "[ab]".repeat(1990))).is_err());
         assert!(text(&format!("/{}/", "[ab]".repeat(1000))).is_ok());
+    }
+
+    #[test]
+    fn the_u_lookaround_form_converts_alone() {
+        let text = |php: &str| lookaround(php.as_bytes()).map(|found| found.map(|p| p.text));
+        assert_eq!(
+            text(r"#(?<!\p{L})mc(?! )#u"),
+            Some(Ok(r"(?:^|\P{L})mc(?:[^ ]|$)".to_owned()))
+        );
+        assert_eq!(
+            text(r"/(?<!\p{L})Mac2(?! )/u"),
+            Some(Ok(r"(?:^|\P{L})Mac2(?:[^ ]|$)".to_owned()))
+        );
+        assert_eq!(text("/mc/"), None);
+        for php in [
+            r"#(?<!\p{L})mc(?! )#ui",
+            r"#(?<!\p{L})mc#u",
+            r"#mc(?! )#u",
+            r"#(?<!\p{L})(?! )#u",
+            r"#(?<!\p{L})m-c(?! )#u",
+            r"#(?<! )mc(?! )#u",
+            r"#(?<!\p{L})mc(?!\p{L})#u",
+            r"#a(?<!\p{L})mc(?! )#u",
+            "/mc/u",
+        ] {
+            assert!(matches!(text(php), Some(Err(_))), "{php} converted");
+        }
     }
 
     #[test]

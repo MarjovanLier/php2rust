@@ -1,0 +1,8 @@
+input.php:7:23: a pattern converts with the flags i, m and s only (P2R-260)
+input.php:8:32: a pattern converts with the flags i, m and s only (P2R-260)
+input.php:9:21: a pattern with the u flag converts only in preg_match() read as a bool, as (?<!\p{L}) then ASCII letters and digits then (?! ), with no other flag (P2R-320)
+input.php:10:21: a pattern with the u flag converts only in preg_match() read as a bool, as (?<!\p{L}) then ASCII letters and digits then (?! ), with no other flag (P2R-320)
+input.php:11:21: a pattern with the u flag converts only in preg_match() read as a bool, as (?<!\p{L}) then ASCII letters and digits then (?! ), with no other flag (P2R-320)
+input.php:12:21: a pattern with the u flag converts only in preg_match() read as a bool, as (?<!\p{L}) then ASCII letters and digits then (?! ), with no other flag (P2R-320)
+input.php:13:21: a pattern with the u flag converts only in preg_match() read as a bool, as (?<!\p{L}) then ASCII letters and digits then (?! ), with no other flag (P2R-320)
+input.php:14:21: a pattern with the u flag converts only in preg_match() read as a bool, as (?<!\p{L}) then ASCII letters and digits then (?! ), with no other flag (P2R-320)

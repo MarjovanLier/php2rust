@@ -113,7 +113,10 @@ it changes P2R-07, P2R-110, P2R-111, P2R-130, P2R-156, P2R-173, P2R-175,
 P2R-188 and the roadmap of section 10. Section 30 (writes after a null
 check, `trim` with a character list and `checkdate`) was written on 15
 Oct 2026; it changes P2R-48, P2R-60, P2R-104, P2R-181, P2R-182, P2R-188
-and the roadmap of section 10.
+and the roadmap of section 10. Section 31 (closures as callbacks of
+`array_map` and `preg_replace_callback`, and `ucwords`) was written on 15
+Oct 2026; it changes P2R-07, P2R-48, P2R-75, P2R-188 and the roadmap of
+section 10.
 
 php2rust converts typed PHP source into normal, readable Rust (`Vec`,
 `String`, `i64`), without AI. It reads PHP with the Mago crates, uses Mago's
@@ -157,7 +160,7 @@ requirement IDs.
   the same stdout bytes, the same output file bytes and the same stderr
   bytes.
 - **P2R-07** Only the constructs that sections 3 to 5, 11 to 19 and 21 to
-  29 list as converting may convert. Any other construct MUST stop the conversion,
+  31 list as converting may convert. Any other construct MUST stop the conversion,
   which means it is reported as a problem under P2R-03. Examples that stop
   in version 1 (section 16 converts `namespace`, `use` and class
   constants, and section 17 two casts):
@@ -352,7 +355,7 @@ requirement IDs.
 - **P2R-48** These built-in functions MUST convert: `count()` on a list
   (length as `i64`), `strlen()` (byte length as `i64`), `intdiv()` (integer
   division towards zero) and `fdiv()` (IEEE float division), and the
-  functions of sections 17, 19, 23, 25, 26, 27, 29 and 30. A call to any other function not
+  functions of sections 17, 19, 23, 25, 26, 27, 29, 30 and 31. A call to any other function not
   declared in the file stops the conversion.
 - **P2R-49** Literals MUST convert by their PHP value and type, never by
   copying their text:
@@ -477,7 +480,7 @@ requirement IDs.
   stderr MUST equal `expected.txt`, its stdout MUST be empty, no output file
   may be created, and every file in the folder MUST be unchanged.
 - **P2R-75** Every requirement ID from P2R-07 to P2R-49 and from P2R-100 to
-  P2R-299 MUST appear in the name of at least one case or stop folder. A
+  P2R-399 MUST appear in the name of at least one case or stop folder. A
   test MUST check this from the folder names.
 - **P2R-76** One command named in the README MUST rewrite every `expected.rs`
   and `expected.txt` from the current tool output; CI MUST NOT run it. A
@@ -545,11 +548,12 @@ Each milestone gets its own requirements in this file when its work starts.
   `preg_match` without the `u` flag (section 27); maps as union members
   and shapes as maps (section 28); traits with constants, string map
   constants and `strtr` (section 29); writes after a null check, `trim`
-  with a character list and `checkdate` (section 30); then the rest of the
-  `StringManipulation` library, which `SouthAfricanIDValidator` calls
-  (`str_replace` and `strtr` with arrays, closures with `array_map` and
-  `preg_replace_callback`, `date_parse`), with `DateTime` and patterns
-  with `u` and look-around last;
+  with a character list and `checkdate` (section 30); closures as
+  callbacks of `array_map` and `preg_replace_callback`, and `ucwords`
+  (section 31); then the rest of the `StringManipulation` library, which
+  `SouthAfricanIDValidator` calls (`str_replace` and `strtr` with arrays,
+  `date_parse`), with `DateTime` and patterns with `u` and look-around
+  last;
   unions as list values; interfaces and inheritance; closures.
   `SouthAfricanIDValidator` calls `StringManipulation::isValidDate`, which
   lives in another package, and P2R-153 resolves calls inside the input
@@ -1649,8 +1653,9 @@ converts those forms.
   this order, `php_trim`, `php_ltrim`, `php_rtrim`, `php_ucfirst`,
   `php_lcfirst`, `php_replace`, `php_explode`, `php_preg_replace`,
   `php_preg_match` (P2R-261, P2R-262), `php_strtr` (P2R-282), `php_charmask`,
-  `php_trim_chars`, `php_ltrim_chars`, `php_rtrim_chars` (P2R-291) and
-  `php_checkdate` (P2R-292), each written only when the
+  `php_trim_chars`, `php_ltrim_chars`, `php_rtrim_chars` (P2R-291),
+  `php_checkdate` (P2R-292), `php_ucwords` (P2R-303) and
+  `php_preg_replace_callback` (P2R-302), each written only when the
   output calls it, and P2R-31 covers their names. A case folder runs each of
   them on many values against PHP (P2R-72).
 
@@ -2744,6 +2749,77 @@ run of both packages at the start of this slice.
   places `php_charmask`, `php_trim_chars`, `php_ltrim_chars`,
   `php_rtrim_chars` and `php_checkdate` after `php_strtr`, in this order.
 
+## 31. Closures as callbacks of array_map and preg_replace_callback, and ucwords (milestone 2, slice 21)
+
+`StringManipulation::nameFix` capitalises the parts of a hyphenated name
+with `array_map(ucwords(...), explode('-', $name))` and lowers name
+prefixes with `preg_replace_callback(P, static fn(array $matches): string
+=> strtolower($matches[1]), $name) ?? ''`. Closures are common in
+application code (the Laravel `app/` holds about 70), and these two
+built-ins run their callback at once, before the enclosing body goes on,
+so a Rust closure that borrows what it reads behaves as PHP's copy does.
+This section converts a closure only as such a callback.
+
+- **P2R-300** An arrow function (`fn(T $x): R => expr`, with or without
+  `static` and the return type) MUST convert to a Rust closure
+  `|x: T| expr` where it is the callback argument of P2R-301 or P2R-302,
+  and nowhere else. Its parameters are new variables of the parameter
+  types of P2R-24 (`&str` for a string), which only its body reads, and
+  which hide a variable of the same name of the enclosing body there, as
+  in PHP. The body may read a variable or parameter of the enclosing body
+  whose Rust type is an int, float, bool or enum, which Rust copies into
+  the closure. These stop the conversion: an arrow function anywhere
+  else (stored, returned, or passed to a function of the input or to
+  another built-in); a parameter without a declared type, by reference,
+  variadic or with a default; a read of a variable of the enclosing body
+  of any other type (a later slice); a write in the body (an assignment,
+  `++` or `--`), which in PHP changes only the closure's copy; `$this` in
+  the body; a nested arrow function; and a closure of the long form
+  (`function () use (..) { .. }`), also with `static` (a later slice).
+- **P2R-301** `array_map(CB, $list)` with two positional arguments, where
+  `$list` is a list (`Vec<T>`, not a map) of ints, floats, bools, enums or
+  strings, MUST convert to
+  `list.iter().copied().map(CB).collect::<Vec<_>>()` for a Copy element,
+  and `list.iter().map(String::as_str).map(CB).collect::<Vec<_>>()` for a
+  string element, a `Vec` of the callback's return type in the list's
+  order, as PHP keeps a list's keys. `CB` is an arrow function of P2R-300
+  with one parameter of the element type, or a first-class callable
+  `f(...)` that converts as the closure `|x: T| f(x)` would: `f` a
+  function of the input with one parameter of the element type, that
+  returns a value and does not throw (P2R-211), or one of the built-ins
+  `strtolower`, `strtoupper`, `ucfirst`, `lcfirst`, `ucwords`, `trim`,
+  `ltrim` and `rtrim` on a string element. These stop the conversion: a
+  map, more than one list, a `null` callback, a callback of any other
+  form (a string such as `'trim'`, a variable, a static method callable),
+  a callback whose parameter type is not the element type, and a list of
+  any other element type (a later slice).
+- **P2R-302** `preg_replace_callback(P, CB, S) ?? 'literal'`, where `P` is
+  a pattern of P2R-260 that cannot match the empty string, `S` is a
+  string, and `CB` is an arrow function of P2R-300 with one parameter
+  declared `array` and a declared `string` return type, MUST convert to
+  `php_preg_replace_callback(r"..", |matches: &IndexMap<String, String>|
+  body, s)`, with the `??` default dropped as P2R-261 drops it. The
+  parameter is a map of P2R-240 with text keys, which is what Mago types
+  it (`array<array-key, string>`), so `$matches[1]` reads `matches["1"]`
+  (P2R-242). The helper walks the matches from left to right; for each it
+  calls the closure with the keys `"0"` (the whole match) to `"n"`, where
+  `n` is the last group that took part in the match, and `""` for a group
+  before it that did not, as PHP does, and it joins the text between the
+  matches with the closure's results. The text is matched as bytes, as in
+  P2R-261, and the result goes through `String::from_utf8_lossy`. These
+  stop the conversion: a pattern that can match the empty string (P2R-261
+  gives the reason), a fourth or fifth argument, a callback of any other
+  form, a parameter declared with another type, a missing or other return
+  type, `preg_replace_callback` without `??`, and a default that is not a
+  string literal.
+- **P2R-303** `ucwords($s)` with one string argument MUST convert to
+  `php_ucwords(s)`, of type `String`, a helper that makes the first byte,
+  and each byte after a space, `\t`, `\r`, `\n`, `\f` or `\v`, an ASCII
+  capital, as PHP does; it changes ASCII letters only. A second argument
+  (the delimiters) stops the conversion (a later slice). P2R-188 places
+  `php_ucwords` and `php_preg_replace_callback` after `php_checkdate`, in
+  this order, and P2R-31 covers their names.
+
 ## Spec checklist
 
 - [x] No `[NEEDS CLARIFICATION]` markers left. Decided in review: problems
@@ -2752,7 +2828,7 @@ run of both packages at the start of this slice.
   takes its element type from the same variable or the declared type it
   flows into (P2R-21); a file of only functions becomes a library (P2R-33).
 - [x] Every requirement is testable: P2R-07 to P2R-49 and P2R-100 to
-  P2R-299 by case and stop folders (P2R-75 enforces this), P2R-01 to P2R-06
+  P2R-399 by case and stop folders (P2R-75 enforces this), P2R-01 to P2R-06
   by error folders and tests, P2R-50 to P2R-52 by P2R-71, the rest by CI or
   a file in the
   repository. Stated review concerns (P2R-05 partial write, P2R-72 case

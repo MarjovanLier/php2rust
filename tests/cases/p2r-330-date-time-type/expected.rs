@@ -41,6 +41,17 @@ pub fn chosen(kind: i64, text: &str) -> Option<PhpDateTime> {
     };
 }
 
+pub fn held(text: &str) -> Option<PhpDateTime> {
+    let result = false;
+    if text != "" {
+        return parse(text);
+    }
+    return {
+        let _ = result;
+        None
+    };
+}
+
 pub fn given(date: Option<PhpDateTime>) -> String {
     let Some(date) = date else {
         return String::from("false");
@@ -260,5 +271,9 @@ fn main() {
     print!("{}", given(chosen(2, "2001-02-03")));
     print!(" ");
     print!("{}", given(None));
+    print!(" ");
+    print!("{}", given(held("")));
+    print!(" ");
+    print!("{}", given(held("1990-01-01")));
     print!("\n");
 }

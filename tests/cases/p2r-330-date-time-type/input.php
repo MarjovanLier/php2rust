@@ -38,6 +38,15 @@ function chosen(int $kind, string $text): DateTime|false
     };
 }
 
+function held(string $text): DateTime|false
+{
+    $result = false;
+    if ($text !== '') {
+        return parse($text);
+    }
+    return $result;
+}
+
 function given(DateTime|false $date): string
 {
     if ($date === false) {
@@ -57,4 +66,4 @@ echo describe('1980-2-30'), "\n";
 echo describe('1980/02/29'), "\n";
 echo either('2000-01-01'), ' ', either('x'), "\n";
 echo given(maybe('')), ' ', given(maybe('1999-12-31')), ' ', given(chosen(1, '2001-02-03')), ' ',
-    given(chosen(2, '2001-02-03')), ' ', given(false), "\n";
+    given(chosen(2, '2001-02-03')), ' ', given(false), ' ', given(held('')), ' ', given(held('1990-01-01')), "\n";

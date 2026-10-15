@@ -53,5 +53,6 @@ enum Level: string
 
 echo Cleaner::greek("\u{03b1}\u{03b2}\u{03b3} \u{03b2}\u{03b1}"), "\n";
 echo Cleaner::marks('a.b,c\\d'), "\n";
+echo '[', Cleaner::greek(''), '] [', Cleaner::marks(',.,'), '] [', Cleaner::greek("x\u{03b1}"), "]\n";
 echo Cleaner::label(), "\n";
 echo Level::tidy('x.y,z'), ' ', Level::Low->value, ' ', Level::LIMIT, "\n";

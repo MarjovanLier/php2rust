@@ -254,7 +254,9 @@ the others are findings of the Mago analyser. In short:
   (`=== false`, `== 1`, stored).
 - For traits and `strtr`: a trait with a method, a property or a `use` of another
   trait, a `use` with a block of conflict rules, a trait the input does not declare, a
-  trait constant whose name the class declares too, and a trait inside a function. A
+  trait constant whose name the class or another trait it uses declares too, a trait
+  named twice in one class, a trait named like another class-like, and a trait inside a
+  function. A
   string map constant with an empty or repeated key, a key or value that is not a string
   literal, no pairs, or a use other than the second argument of `strtr`. `strtr` with
   three arguments or with an array other than such a constant.
@@ -290,7 +292,9 @@ the others are findings of the Mago analyser. In short:
   rejects (two imports with one name, an import named like a class or function of the
   file, `as self`) or warns about (`use Foo;` outside a namespace).
 - A class that is abstract, extends a class, implements an interface other than
-  `ArrayAccess`, uses a trait, or
+  `ArrayAccess`, uses a trait other than one of constants, implements `ArrayAccess` or
+  uses a trait and comes after code outside functions (PHP declares it only when
+  execution reaches it), or
   holds a static property, a constructor with a body or a method whose name starts with
   `__`. A declared property without a type or a literal default, or that is static,
   readonly or hooked. A nullable type that holds objects whose class changes them
@@ -343,7 +347,8 @@ the others are findings of the Mago analyser. In short:
   null, with a condition that is not a literal or an enum case, with two `default`
   arms or two conditions of the same value, or without `default` where its arms leave a
   value out (every int or string `match` needs `default`).
-- An enum with an interface, a trait, an attribute or a backing value that is not a
+- An enum with an interface, a trait other than one of constants, an attribute or a
+  backing value that is not a
   plain literal, an enum declared inside a function or a block, and an enum declared
   after other code outside functions: PHP declares an enum only when execution reaches
   it.

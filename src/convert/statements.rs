@@ -88,6 +88,10 @@ impl Converter<'_> {
                 &declaration.name,
                 "a class must be declared outside functions and blocks (P2R-130)",
             ),
+            Statement::Trait(declaration) => self.refuse(
+                &declaration.name,
+                "a trait must be declared outside functions and blocks (P2R-280)",
+            ),
             other => self.refuse(
                 other,
                 format!(

@@ -130,10 +130,16 @@ impl Converter<'_> {
             &RustType::String,
             "strtr() converts on a string only (P2R-282)",
         );
-        let pairs = match super::lists::unparenthesized(arguments[1]) {
-            Expression::Access(Access::ClassConstant(access)) => self.pairs_constant(access),
-            _ => None,
+        let (pairs, refused) = match super::lists::unparenthesized(arguments[1]) {
+            Expression::Access(Access::ClassConstant(access)) => {
+                (self.pairs_constant(access), self.refused_constant(access))
+            }
+            _ => (None, false),
         };
+        // A refused constant is the problem reported for its reads (P2R-03).
+        if refused {
+            return None;
+        }
         let Some(pairs) = pairs else {
             self.record_refused(arguments[1]);
             self.refuse(

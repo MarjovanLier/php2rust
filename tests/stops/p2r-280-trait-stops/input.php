@@ -51,6 +51,38 @@ final class Twice
     use Plain, Plain;
 }
 
+trait First
+{
+    public const string SAME = 'first';
+}
+
+trait Second
+{
+    public const string SAME = 'second';
+}
+
+final class Both
+{
+    use First, Second;
+}
+
+trait Low
+{
+    public const string Low = 'low';
+}
+
+enum Level: string
+{
+    use Low;
+
+    case Low = 'low';
+}
+
+trait Shape
+{
+    abstract public function area(): int;
+}
+
 trait Countable
 {
     public const string D = 'd';

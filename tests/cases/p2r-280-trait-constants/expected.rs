@@ -74,6 +74,13 @@ fn main() {
     print!("\n");
     print!("{}", Cleaner::marks("a.b,c\\d"));
     print!("\n");
+    print!("[");
+    print!("{}", Cleaner::greek(""));
+    print!("] [");
+    print!("{}", Cleaner::marks(",.,"));
+    print!("] [");
+    print!("{}", Cleaner::greek("xα"));
+    print!("]\n");
     print!("{}", Cleaner::label());
     print!("\n");
     print!("{}", Level::tidy("x.y,z"));

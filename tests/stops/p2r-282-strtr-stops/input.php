@@ -28,6 +28,21 @@ final class Swap
     {
         return strtr(string: $text, from: self::MAP);
     }
+
+    public static function number(int $value): string
+    {
+        return strtr($value, self::MAP);
+    }
+
+    public static function viaTrait(string $text): string
+    {
+        return strtr($text, Pairs::PAIRS);
+    }
+}
+
+trait Pairs
+{
+    public const array PAIRS = ['x' => 'y'];
 }
 
 function php_strtr(string $text): string

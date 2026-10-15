@@ -16,8 +16,49 @@ final class Tables
 
     private const array WIDE = ['a' => 'A', "a" => 'B'];
 
+    private const ?array NULLABLE = ['a' => 'b'];
+
+    private const iterable ITERABLE = ['a' => 'b'];
+
+    private const array HEREDOC = [<<<EOT
+        a
+        EOT => 'b'];
+
+    private const array NOWDOC = ['a' => <<<'EOT'
+        b
+        EOT];
+
+    private const array FLOAT_KEY = [1.5 => 'b'];
+
+    private const array CONSTANT_KEY = [PHP_EOL => 'b'];
+
     /** @var array<string, string> */
     private const array GOOD = ['x' => 'y'];
+
+    public static function refused(string $text): string
+    {
+        return strtr($text, self::WIDE);
+    }
+
+    public static function has(): bool
+    {
+        return isset(self::GOOD['x']);
+    }
+
+    public static function each(): string
+    {
+        $out = '';
+        foreach (self::GOOD as $value) {
+            $out .= $value;
+        }
+        return $out;
+    }
+
+    public static function stored(): int
+    {
+        $copy = self::GOOD;
+        return count($copy);
+    }
 
     public static function read(): string
     {

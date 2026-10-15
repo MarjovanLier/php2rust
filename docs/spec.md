@@ -2912,8 +2912,8 @@ array replacement.
   or list literal replacement, which PHP always rejects with that
   `TypeError`; a subject that is not a string; an element that is not a
   string or a spread in a list literal; an array literal with keys, which
-  P2R-202 stops (passing its values in order would differ where two keys
-  are equal at run time); a legacy `array(..)` literal, which P2R-07
+  P2R-202 stops, or this rule where P2R-202 reads it as a shape (passing
+  its values in order would differ where two keys are equal at run time); a legacy `array(..)` literal, which P2R-07
   stops; a union with other members; a union argument of any other form;
   and a fourth argument. P2R-188 places `php_str_replace` after
   `php_preg_replace_callback`, and P2R-31 covers its name.

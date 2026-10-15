@@ -2773,8 +2773,9 @@ This section converts a closure only as such a callback.
   leading `_`, as a foreach binding does, and is no P2R-35 problem. The
   body converts as the value of `return` in a function whose return type
   is the declared one, or the type Mago gives the body when none is
-  declared (P2R-25, P2R-26, P2R-49, P2R-102), so an int body widens to a
-  declared `float` and a string becomes owned. The body may read a
+  declared (P2R-25, P2R-26, P2R-49, P2R-102), so a string becomes owned
+  and a literal gets its type; P2R-301 stops a declared return type that
+  differs from the body's type. The body may read a
   variable or parameter of the enclosing body whose Rust type is Copy (an
   int, float or bool, an enum of P2R-110, or an `Option` of one of these),
   which the closure borrows; such a read counts as a read at the place of
@@ -2817,8 +2818,12 @@ This section converts a closure only as such a callback.
   string such as `'trim'`, a variable, a static method callable), a
   callback whose parameter type is not the element type (PHP passes
   `array_map` elements in weak mode, so `fn(string $x)` on ints would
-  convert them), a list of any other element type (a later slice), and a
-  named or spread argument (P2R-169).
+  convert them), a list of any other element type, `Option` included (a
+  later slice), a result whose Rust type is not that of the type Mago
+  gives the call (Mago types the result from the callback's body, not
+  from its declared return type, so `fn(int $x): float => $x` or
+  `fn(int $x): ?int => $x` stops, because the places that take the result
+  go by Mago's type), and a named or spread argument (P2R-169).
 - **P2R-302** `preg_replace_callback(P, CB, S) ?? 'literal'`, where `P` is
   a pattern of P2R-260 that cannot match the empty string, `S` is a
   string, and `CB` is an arrow function of P2R-300 with one parameter

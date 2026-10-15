@@ -30,7 +30,16 @@ run `rustup component add rustfmt`.
 php2rust input.php            # Rust on stdout
 php2rust input.php -o out.rs  # Rust in out.rs
 php2rust src -o crate         # every .php file under src as one library crate in crate/
+php2rust app -o crate --include vendor  # also read vendor/ for its types, not converted
 ```
+
+`--include <path>`, which may be given more than once, reads every `.php` file under the
+path (such as Composer's `vendor/`) for its classes, functions and constants only, so the
+input's types that name them resolve. Included files are never converted or reported, a
+file that does not parse is skipped, and a class or function of PHP or of the input keeps
+its meaning over one of the same name in an included file (a polyfill changes nothing).
+A type or call that names an included class still stops the conversion until php2rust
+learns that class.
 
 With a directory, php2rust analyses all its `.php` files together, so a class of one file
 is known in the others, and writes one Rust module for each PHP namespace below the
@@ -55,7 +64,7 @@ its callback takes the matches as an `IndexMap`.
 |---|---|
 | 0 | Converted. |
 | 1 | The file holds PHP that php2rust does not convert yet. Each problem is printed as `path:line:column: message`. Nothing is written. |
-| 2 | The arguments are wrong, the file cannot be read, is not UTF-8 or is not valid PHP, rustfmt cannot be run, fails on the output or changes its own layout when run again, or the output cannot be written. For a directory: no `-o`, an `-o` directory that exists or sits inside the input, or no `.php` file. Nothing is written. |
+| 2 | The arguments are wrong, the file cannot be read, is not UTF-8 or is not valid PHP, rustfmt cannot be run, fails on the output or changes its own layout when run again, or the output cannot be written. For a directory: no `-o`, an `-o` directory that exists or sits inside the input, or no `.php` file. An `--include` path that does not exist. Nothing is written. |
 
 The output compiles with no warnings under `rustc --edition 2024 -D warnings` (given the
 `indexmap` crate for map output and the `regex` crate for pattern output), and

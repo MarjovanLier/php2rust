@@ -1,0 +1,2 @@
+input.php:7:16: the type Lib\Money has no Rust type (P2R-22)
+input.php:14:12: calls to \Lib\cents are not supported (P2R-48)

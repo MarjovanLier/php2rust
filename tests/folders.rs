@@ -52,7 +52,12 @@ fn run(program: &str, args: &[&str], dir: &Path) -> Output {
 }
 
 fn tool(args: &[&str], dir: &Path) -> Output {
-    run(env!("CARGO_BIN_EXE_php2rust"), args, dir)
+    // A folder with a directory `include/` reads it for its symbols only (P2R-73, P2R-340).
+    let mut args = args.to_vec();
+    if dir.join("include").is_dir() {
+        args.extend(["--include", "include"]);
+    }
+    run(env!("CARGO_BIN_EXE_php2rust"), &args, dir)
 }
 
 /// The rustc arguments that give output its crates, indexmap 2.14.2 for maps and regex

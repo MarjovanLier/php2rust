@@ -22,12 +22,20 @@ struct Cli {
     /// directory to create for the crate; it must not exist yet.
     #[arg(short = 'o', value_name = "OUTPUT")]
     output: Option<PathBuf>,
+    /// Read the PHP files under this path for their classes, functions and constants only,
+    /// such as Composer's vendor folder; they are not converted. May be given more than once.
+    #[arg(long = "include", value_name = "PATH")]
+    include: Vec<PathBuf>,
 }
 
 fn main() -> ExitCode {
     let cli = Cli::parse();
+    let included = match included_files(&cli.include) {
+        Ok(included) => included,
+        Err(reason) => return invalid(reason),
+    };
     if cli.input.is_dir() {
-        return convert_directory(&cli.input, cli.output.as_deref());
+        return convert_directory(&cli.input, cli.output.as_deref(), included);
     }
     let path = cli.input.display().to_string();
     let source = match fs::read(&cli.input) {
@@ -42,7 +50,7 @@ fn main() -> ExitCode {
     {
         return invalid(reason);
     }
-    let rust = match convert::convert(&path, source) {
+    let rust = match convert::convert(&path, source, included) {
         Ok(rust) => laid_out(&path, vec![("out.rs".to_owned(), rust)], "out.rs"),
         Err(failure) => Err(failure),
     };
@@ -75,7 +83,11 @@ fn main() -> ExitCode {
 
 /// Converts every `.php` file under `input` into one crate in the new directory `output`
 /// (P2R-170).
-fn convert_directory(input: &Path, output: Option<&Path>) -> ExitCode {
+fn convert_directory(
+    input: &Path,
+    output: Option<&Path>,
+    included: Vec<convert::Included>,
+) -> ExitCode {
     let Some(output) = output else {
         return invalid(format!(
             "{}: a directory input needs -o with the directory to create for the crate",
@@ -129,7 +141,9 @@ fn convert_directory(input: &Path, output: Option<&Path>) -> ExitCode {
             source,
         });
     }
-    match convert::convert_crate(inputs).and_then(|files| laid_out(&shown, files, "lib.rs")) {
+    match convert::convert_crate(inputs, included)
+        .and_then(|files| laid_out(&shown, files, "lib.rs"))
+    {
         Ok(files) => match write_crate(output, &files) {
             Ok(()) => ExitCode::SUCCESS,
             Err(err) => invalid(format!("{}: cannot write output: {err}", output.display())),
@@ -147,6 +161,41 @@ fn convert_directory(input: &Path, output: Option<&Path>) -> ExitCode {
 
 /// Adds the path below `dir` of every regular `.php` file under it to `found`, without
 /// following symbolic links (P2R-170).
+/// The `.php` files under each `--include` path, in byte order of their paths, read for
+/// their symbols only; a file that cannot be read or is not UTF-8 is skipped. A path that
+/// does not exist is refused (P2R-340).
+fn included_files(paths: &[PathBuf]) -> Result<Vec<convert::Included>, String> {
+    let mut included = Vec::new();
+    for root in paths {
+        let shown = root.display().to_string();
+        let mut relative = Vec::new();
+        if root.is_dir() {
+            php_files(root, Path::new(""), &mut relative)
+                .map_err(|err| format!("{shown}: cannot read the include path: {err}"))?;
+        } else if root.is_file() {
+            relative.push(PathBuf::new());
+        } else {
+            return Err(format!("{shown}: the include path does not exist"));
+        }
+        relative.sort_by(|a, b| {
+            a.as_os_str()
+                .as_encoded_bytes()
+                .cmp(b.as_os_str().as_encoded_bytes())
+        });
+        for path in relative {
+            let Ok(source) = fs::read(root.join(&path)) else {
+                continue;
+            };
+            if std::str::from_utf8(&source).is_err() {
+                continue;
+            }
+            let name = Path::new(&shown).join(&path).display().to_string();
+            included.push(convert::Included { name, source });
+        }
+    }
+    Ok(included)
+}
+
 fn php_files(root: &Path, dir: &Path, found: &mut Vec<PathBuf>) -> std::io::Result<()> {
     for entry in fs::read_dir(root.join(dir))? {
         let entry = entry?;

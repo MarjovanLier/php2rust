@@ -14,7 +14,7 @@ use mago_codex::populator::populate_codebase;
 use mago_codex::reference::SymbolReferences;
 use mago_codex::scanner::scan_program;
 use mago_codex::ttype::union::TUnion;
-use mago_database::file::{File, FileId};
+use mago_database::file::{File, FileId, FileType};
 use mago_names::ResolvedNames;
 use mago_names::resolver::NameResolver;
 use mago_php_version::PHPVersion;
@@ -79,27 +79,41 @@ pub struct Input {
     pub source: Vec<u8>,
 }
 
+/// A file of `--include`, read for its symbols only: the name Mago knows it by, and its
+/// bytes (P2R-340).
+pub struct Included {
+    pub name: String,
+    pub source: Vec<u8>,
+}
+
 /// Converts one PHP file. `path` is the input path as given on the command line.
-pub fn convert(path: &str, source: Vec<u8>) -> Result<String, Failure> {
+pub fn convert(path: &str, source: Vec<u8>, included: Vec<Included>) -> Result<String, Failure> {
     let input = Input {
         shown: path.to_owned(),
         name: path.to_owned(),
         source,
     };
-    let mut written = analyse(vec![input], false)?;
+    let mut written = analyse(vec![input], false, included)?;
     Ok(written.remove(0).1)
 }
 
 /// Converts the PHP files of a directory into the module files of one library crate, each
 /// with its path inside the crate (P2R-170 to P2R-175).
-pub fn convert_crate(inputs: Vec<Input>) -> Result<Vec<(String, String)>, Failure> {
-    analyse(inputs, true)
+pub fn convert_crate(
+    inputs: Vec<Input>,
+    included: Vec<Included>,
+) -> Result<Vec<(String, String)>, Failure> {
+    analyse(inputs, true, included)
 }
 
 /// Parses, analyses and converts the input files together: Mago scans every file into one
 /// codebase, so a class of one file is known in the others (P2R-171). One file converts
 /// to one output file; a `library` converts to the module files of a crate.
-fn analyse(inputs: Vec<Input>, library: bool) -> Result<Vec<(String, String)>, Failure> {
+fn analyse(
+    inputs: Vec<Input>,
+    library: bool,
+    included: Vec<Included>,
+) -> Result<Vec<(String, String)>, Failure> {
     let shown: Vec<String> = inputs.iter().map(|input| input.shown.clone()).collect();
     let files: Vec<File> = inputs
         .into_iter()
@@ -162,6 +176,29 @@ fn analyse(inputs: Vec<Input>, library: bool) -> Result<Vec<(String, String)>, F
             file,
             program,
             names,
+            PHPVersion::PHP85,
+        ));
+    }
+    // Each included file enters the codebase as vendored code, which never replaces a
+    // built-in or an input symbol; its own arena goes once it is scanned (P2R-340).
+    for included in included {
+        let file = File::new(
+            Cow::Owned(included.name.into_bytes()),
+            FileType::Vendored,
+            None,
+            Cow::Owned(included.source),
+        );
+        let arena = LocalArena::new();
+        let program = parse_file(&arena, &file);
+        if !program.errors.is_empty() {
+            continue;
+        }
+        let names = NameResolver::new(&arena).resolve(program);
+        codebase.extend(scan_program(
+            &arena,
+            &file,
+            program,
+            &names,
             PHPVersion::PHP85,
         ));
     }

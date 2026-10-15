@@ -3240,6 +3240,9 @@ later sections.
   by error folders and tests, P2R-50 to P2R-52 by P2R-71, the rest by CI or
   a file in the
   repository. Stated review concerns (P2R-05 partial write, P2R-72 case
-  coverage, P2R-176 calls between files checked by rustc only) are the only
-  parts not checked mechanically.
+  coverage, P2R-176 calls between files checked by rustc only, and in
+  P2R-340 the dropped Mago findings in an included file, which no known
+  input reaches, and which of two included declarations of one name
+  wins, which no output shows) are the only parts not checked
+  mechanically.
 - [x] No speculative features: later milestones carry no requirements yet.

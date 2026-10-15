@@ -417,6 +417,11 @@ impl Converter<'_> {
             .into_iter()
             .map(|value| {
                 let (expr, element) = self.value(value, wanted.as_ref())?;
+                // A `PhpOptional` read keeps its type where Mago narrows it (P2R-360).
+                if matches!(element, RustType::Optional(_)) {
+                    self.refuse(value, super::optionals::OPTIONAL_USE);
+                    return None;
+                }
                 // Mago may type the element as `T` where it knows more (P2R-104).
                 if let RustType::Vec(target) = &ty
                     && nulls::null_for_plain(&element, target)

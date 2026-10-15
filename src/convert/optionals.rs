@@ -40,6 +40,19 @@ impl Converter<'_> {
             .files
             .iter()
             .any(|analysed| analysed.file == optional.span.file_id)
+            && optional.kind.is_class()
+            && !optional.flags.is_abstract()
+            // `Optional::create()` becomes `Absent`, so it must be callable without anything.
+            && self
+                .codebase
+                .get_method(b"Spatie\\LaravelData\\Optional", b"create")
+                .is_some_and(|create| {
+                    create.parameters.is_empty()
+                        && create
+                            .method_metadata
+                            .as_ref()
+                            .is_some_and(|method| method.is_static && method.visibility.is_public())
+                })
             && optional.direct_parent_class.is_none()
             && optional.all_parent_interfaces.is_empty()
             && optional.used_traits.is_empty()
@@ -78,6 +91,10 @@ impl Converter<'_> {
                     && matches!(&call.method, ClassLikeMemberSelector::Identifier(method)
                         if method.value.eq_ignore_ascii_case(b"create"))
                     && call.argument_list.arguments.is_empty()
+                    // The declared return type of `create()` decides what PHP returns.
+                    && self.expression_type(expression).is_some_and(|union| {
+                        matches!(&union.types[..], [only] if types::is_optional(only, &self.type_names))
+                    })
             }
             _ => false,
         };

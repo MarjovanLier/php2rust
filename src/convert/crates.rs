@@ -288,8 +288,12 @@ impl Converter<'_> {
                 .filter(|(_, (owner, _))| *owner != module)
                 .map(|(name, (_, kind))| (name.clone(), *kind))
                 .collect();
+            // The generic enum of Spatie's `Optional` names no item: its `T`, `Absent` and
+            // `Present` are its own (P2R-360).
+            let optional = super::optionals::optional_lines();
             let mut text = items
                 .iter()
+                .filter(|group| **group != optional)
                 .flatten()
                 .cloned()
                 .collect::<Vec<_>>()

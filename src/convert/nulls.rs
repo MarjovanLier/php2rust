@@ -83,6 +83,16 @@ pub(super) fn member_path(ty: &RustType, target: &RustType) -> Option<String> {
     }
 }
 
+/// The problem of a `??` whose left side has the Rust type `left`, which is no `Option`
+/// (P2R-105, P2R-362).
+fn not_null_left(left: &RustType) -> &'static str {
+    if matches!(left, RustType::Optional(_)) {
+        super::optionals::OPTIONAL_USE
+    } else {
+        "the left side of ?? cannot be null here (P2R-105)"
+    }
+}
+
 /// True for `DateTime|false`, an `Option` in Rust whose `None` is PHP's `false`, not `null`
 /// (P2R-330).
 pub(super) fn date_or_false(ty: &RustType) -> bool {
@@ -432,7 +442,7 @@ impl Converter<'_> {
         self.raise = outer;
         let ((left, left_type), (right, right_type)) = (left?, right?);
         let RustType::Option(inner) = &left_type else {
-            self.refuse(binary, "the left side of ?? cannot be null here (P2R-105)");
+            self.refuse(binary, not_null_left(&left_type));
             return None;
         };
         if date_or_false(&left_type) {
@@ -499,7 +509,7 @@ impl Converter<'_> {
         let exception = self.thrown_lazily(throw);
         let ((left, left_type), exception) = (left?, exception?);
         let RustType::Option(inner) = &left_type else {
-            self.refuse(binary, "the left side of ?? cannot be null here (P2R-105)");
+            self.refuse(binary, not_null_left(&left_type));
             return None;
         };
         let option = if inner.is_copy() {

@@ -239,7 +239,10 @@ pub fn built(ty: &RustType) -> bool {
         RustType::Vec(element) | RustType::Map(_, element) => {
             built(element) && !matches!(**element, RustType::Optional(_))
         }
-        RustType::Option(inner) => !matches!(**inner, RustType::Option(_)) && built(inner),
+        // A variable written both `T|Optional|null` and `null` waits too (P2R-360).
+        RustType::Option(inner) => {
+            !matches!(**inner, RustType::Option(_) | RustType::Optional(_)) && built(inner)
+        }
     }
 }
 

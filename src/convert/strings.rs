@@ -1012,9 +1012,14 @@ impl Converter<'_> {
             return false;
         };
         // Mago may type the value as a string where it knows more (P2R-104), and a union
-        // value keeps its enum where Mago narrows it (P2R-232).
+        // value keeps its enum where Mago narrows it (P2R-232), as a `PhpOptional` read
+        // keeps its type (P2R-360).
         if matches!(ty, RustType::Option(_)) {
             self.refuse(value, nulls::NULL_JOINED);
+            return false;
+        }
+        if matches!(ty, RustType::Optional(_)) {
+            self.refuse(value, super::optionals::OPTIONAL_USE);
             return false;
         }
         if matches!(ty, RustType::Union(_)) {

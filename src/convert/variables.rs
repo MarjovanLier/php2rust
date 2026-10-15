@@ -1547,6 +1547,8 @@ impl Converter<'_> {
                 Some(RustType::Shape(_))
             ) {
                 "an array shape parameter cannot be assigned, because Rust borrows it (P2R-201)"
+            } else if matches!(entry.ty, Some(RustType::Optional(_))) {
+                "a T|Optional parameter cannot be assigned, because Rust borrows it (P2R-360)"
             } else if matches!(entry.ty.as_ref().map(RustType::inner), Some(RustType::Vec(element)) if self.is_changing(element))
             {
                 // Its copy would copy objects that never copy (P2R-145).

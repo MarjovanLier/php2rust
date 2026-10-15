@@ -64,7 +64,7 @@ its callback takes the matches as an `IndexMap`.
 |---|---|
 | 0 | Converted. |
 | 1 | The file holds PHP that php2rust does not convert yet. Each problem is printed as `path:line:column: message`. Nothing is written. |
-| 2 | The arguments are wrong, the file cannot be read, is not UTF-8 or is not valid PHP, rustfmt cannot be run, fails on the output or changes its own layout when run again, or the output cannot be written. For a directory: no `-o`, an `-o` directory that exists or sits inside the input, or no `.php` file. An `--include` path that does not exist. Nothing is written. |
+| 2 | The arguments are wrong, the file cannot be read, is not UTF-8 or is not valid PHP, rustfmt cannot be run, fails on the output or changes its own layout when run again, or the output cannot be written. For a directory: no `-o`, an `-o` directory that exists or sits inside the input, or no `.php` file. An `--include` path that does not exist, is neither a file nor a directory, or holds a directory that cannot be listed. Nothing is written. |
 
 The output compiles with no warnings under `rustc --edition 2024 -D warnings` (given the
 `indexmap` crate for map output and the `regex` crate for pattern output), and

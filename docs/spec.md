@@ -131,8 +131,13 @@ its Rust spec reviewer found the missing `use` line of a module whose
 helper alone names `PhpDateTime`; the build found that Mago types
 `date_parse()` as `mixed` and that `DateTime|false` must not take the
 forms of `null`. Section 35 (code that the input uses but does not
-convert) was written on 15 Oct 2026; it changes P2R-73 and the roadmap
-of section 10.
+convert) was written on 15 Oct 2026; it changes P2R-73, P2R-82 and the
+roadmap of section 10. Its tool spec reviewer found that a namespaced
+included function must block the built-in of its short name, that an
+included file needs a name no input can have, and that Mago's findings
+in an included file must not be printed; its Mago spec reviewer found
+that the same holds for a global function of the input, and that an
+attribute on a function or a parameter converted, against P2R-07.
 
 php2rust converts typed PHP source into normal, readable Rust (`Vec`,
 `String`, `i64`), without AI. It reads PHP with the Mago crates, uses Mago's
@@ -526,10 +531,11 @@ requirement IDs.
   and `expected.txt`. Run from inside the folder, once as
   `php2rust input.php` and once as `php2rust input.php -o out.rs`, the tool
   MUST exit 1 both times, its stderr MUST equal `expected.txt`, its stdout
-  MUST be empty, and `out.rs` MUST NOT exist afterwards. A case or stop
-  folder that holds a directory `include/` runs the tool with the added
-  option `--include` naming that directory (P2R-340); the PHP run of
-  P2R-72 does not load it.
+  MUST be empty, and `out.rs` MUST NOT exist afterwards. A case, stop or
+  error folder that holds a directory `include/` runs the tool with the
+  added option `--include` naming that directory (P2R-340); the PHP run
+  of P2R-72 does not load it, so an included file that changes what the
+  input does belongs in a stop folder.
 - **P2R-74** Each error folder `tests/errors/<slug>/` holds `args.txt` (the
   command-line arguments, one per line), an optional `input.php` and
   `expected.txt`. Run from inside the folder, the tool MUST exit 2, its
@@ -559,8 +565,8 @@ requirement IDs.
   (`cargo install --locked`), that it needs `rustfmt` on `PATH` (P2R-190),
   which rustup's minimal profile leaves out, how to run it, the supported
   PHP, the refusal rules in short, the known differences (P2R-60), the
-  `indexmap` dependency of output with a map (P2R-243) and the command of
-  P2R-76.
+  `indexmap` dependency of output with a map (P2R-243), the option
+  `--include` (P2R-340) and the command of P2R-76.
 - **P2R-83** The Rust toolchain MUST be pinned in `rust-toolchain.toml`. The
   `rust-version` in `Cargo.toml` MUST equal the `rust-version` of the pinned
   Mago crates (1.99.0 for Mago 1.55.0), and the pinned toolchain MUST be at
@@ -3188,24 +3194,38 @@ later sections.
 
 - **P2R-340** The option `--include <PATH>`, which may be given more than
   once, MUST make every regular file whose name ends in `.php` under each
-  path, at any depth and without following symbolic links (a file path
-  names that one file), known to Mago as a file of kind
-  `FileType::Vendored` before the input is analysed: its classes,
-  interfaces, traits, enums, functions and constants enter Mago's
-  codebase, so a type or call of the input that names one resolves. An
-  included file is never analysed, reported or converted, and a file that
-  cannot be read, is not valid UTF-8 or does not parse is skipped without
-  a problem line. Mago keeps a symbol of PHP's built-ins or of the input
-  over an included symbol of the same name, so a polyfill in an included
-  file changes no built-in function, and an input file that also lies
-  under an include path is read as input only. The checks of a name
-  against PHP's built-ins (P2R-31, P2R-111, P2R-131, P2R-151) see PHP's
-  built-ins only. A type or call of the input that names an included
-  symbol converts by the rules of the earlier sections, so it stops (a
-  class type by P2R-22, a call by P2R-48 or P2R-153) until a later
-  section maps it. The option works for a file input and for a directory
-  input. An include path that does not exist exits 2 with its reason
-  (P2R-04).
+  path, at any depth and without following a symbolic link below the
+  path, known to Mago as a file of kind `FileType::Vendored` before the
+  input is analysed: its classes, interfaces, traits, enums, functions
+  and constants enter Mago's codebase, so a type or call of the input
+  that names one resolves. A path that is a symbolic link is followed,
+  and a path that names a file names that one file, whatever its name
+  ends in. Mago knows an included file by a name that no input file can
+  have and that is the same on every machine: the position of its option
+  on the command line and its path below the option's path. The input
+  files enter the codebase first, then the included files, in the order
+  of the options and, below one path, in byte order of their paths. An
+  included file is never analysed or converted, a Mago finding whose span
+  lies in an included file is not printed, and a file that cannot be
+  read, is not valid UTF-8 or does not parse is skipped without a problem
+  line. Mago keeps a symbol of PHP's built-ins or of the input over an
+  included symbol of the same name, so a polyfill in an included file
+  changes no built-in function, and an input file that also lies under an
+  include path is read as input only. The checks of a name against PHP's
+  built-ins (P2R-31, P2R-111, P2R-131, P2R-151) see PHP's built-ins only,
+  and an included declaration is not a declaration of the crate
+  (P2R-173). A type or call of the input that names an included symbol
+  converts by the rules of the earlier sections, so it stops (a class
+  type by P2R-22, a call by P2R-48 or P2R-153) until a later section maps
+  it. An unqualified call in a namespace whose function of that short
+  name an included file declares calls that function in PHP, not the
+  built-in or a global function of the input, so it stops by P2R-48. An
+  attribute stops by P2R-07 whether or not an included file declares its
+  class, on a function, a parameter or an arrow function as on a class
+  or a member. The option works for a file input and
+  for a directory input. An include path that does not exist, that is
+  neither a file nor a directory (a named pipe), or below which a
+  directory cannot be listed exits 2 with its reason (P2R-04).
 
 ## Spec checklist
 

@@ -222,9 +222,19 @@ impl Converter<'_> {
         node: &Expression<'_>,
     ) -> Option<(RExpr, RustType)> {
         match self.string_function_name(call)? {
-            "trim" => self.string_helper(call, node, "trim", Helper::PhpTrim),
-            "ltrim" => self.string_helper(call, node, "ltrim", Helper::PhpLtrim),
-            "rtrim" => self.string_helper(call, node, "rtrim", Helper::PhpRtrim),
+            "trim" => self.trim(call, node, "trim", (Helper::PhpTrim, Helper::PhpTrimChars)),
+            "ltrim" => self.trim(
+                call,
+                node,
+                "ltrim",
+                (Helper::PhpLtrim, Helper::PhpLtrimChars),
+            ),
+            "rtrim" => self.trim(
+                call,
+                node,
+                "rtrim",
+                (Helper::PhpRtrim, Helper::PhpRtrimChars),
+            ),
             "ucfirst" => self.string_helper(call, node, "ucfirst", Helper::PhpUcfirst),
             "lcfirst" => self.string_helper(call, node, "lcfirst", Helper::PhpLcfirst),
             "strtolower" => self.ascii_case(call, node, "strtolower", "to_ascii_lowercase"),
@@ -238,8 +248,7 @@ impl Converter<'_> {
     }
 
     /// A built-in function of one `string` argument that converts to a helper call, of
-    /// type `String`: `trim`, `ltrim`, `rtrim`, `ucfirst` and `lcfirst` (P2R-182,
-    /// P2R-183).
+    /// type `String`: `ucfirst` and `lcfirst` (P2R-183).
     pub(super) fn string_helper(
         &mut self,
         call: &FunctionCall<'_>,
@@ -247,21 +256,68 @@ impl Converter<'_> {
         name: &str,
         helper: Helper,
     ) -> Option<(RExpr, RustType)> {
-        let id = if name.ends_with("trim") {
-            "P2R-182"
-        } else {
-            "P2R-183"
-        };
         let arguments = self.built_in_arguments(
             call,
             node,
             (1, 1),
-            &format!("{name}() converts with one string argument only ({id})"),
+            &format!("{name}() converts with one string argument only (P2R-183)"),
         )?;
-        let message = format!("{name}() is supported only on a string ({id})");
+        let message = format!("{name}() is supported only on a string (P2R-183)");
         let text = self.typed_argument(arguments[0], &RustType::String, &message)?;
         let text = self.borrowed(text, &RustType::String);
         Some((self.helper_call(helper, vec![text]), RustType::String))
+    }
+
+    /// `trim()`, `ltrim()` and `rtrim()`: `plain` removes PHP's default bytes (P2R-182),
+    /// and `chars` the bytes of a character list as PHP's `php_charmask` walks it
+    /// (P2R-291).
+    fn trim(
+        &mut self,
+        call: &FunctionCall<'_>,
+        node: &Expression<'_>,
+        name: &str,
+        (plain, chars): (Helper, Helper),
+    ) -> Option<(RExpr, RustType)> {
+        let arguments = self.built_in_arguments(
+            call,
+            node,
+            (1, 2),
+            &format!("{name}() converts with one or two string arguments only (P2R-182, P2R-291)"),
+        )?;
+        let message = format!("{name}() is supported only on strings (P2R-182, P2R-291)");
+        // Both convert first, so problems in both are reported.
+        let converted: Vec<Option<RExpr>> = arguments
+            .iter()
+            .map(|&argument| self.typed_argument(argument, &RustType::String, &message))
+            .collect();
+        let converted: Vec<RExpr> = converted.into_iter().collect::<Option<_>>()?;
+        // A list whose value the tool knows: a literal, or a class constant (P2R-260).
+        let known = match arguments.get(1).map(|&value| lists::unparenthesized(value)) {
+            Some(Expression::Literal(Literal::String(literal))) => {
+                literal.value.map(<[u8]>::to_vec)
+            }
+            Some(Expression::Access(Access::ClassConstant(access))) => {
+                self.constant_text(access).map(String::into_bytes)
+            }
+            _ => None,
+        };
+        if let Some(problem) = known.as_deref().and_then(mask_problem) {
+            self.refuse(arguments[1], problem);
+            return None;
+        }
+        let converted = converted
+            .into_iter()
+            .map(|text| self.borrowed(text, &RustType::String))
+            .collect::<Vec<_>>();
+        let helper = if converted.len() == 1 {
+            plain
+        } else {
+            // The trim helper builds its mask with php_charmask.
+            self.helpers
+                .insert((self.current_module, Helper::PhpCharmask));
+            chars
+        };
+        Some((self.helper_call(helper, converted), RustType::String))
     }
 
     /// `strtolower()` and `strtoupper()` as the `str` method `method`, which changes only
@@ -829,4 +885,34 @@ fn joined(mut pieces: Vec<Piece>) -> RExpr {
     } else {
         RExpr::Format(format, values)
     }
+}
+
+/// The problem of a literal `trim()` character list, walked as PHP's `php_charmask`
+/// walks it: a `..` that starts no range, which PHP warns about, or a byte above `7F`,
+/// which can cut a character of more than one byte (P2R-291).
+fn mask_problem(input: &[u8]) -> Option<&'static str> {
+    let mut at = 0;
+    while at < input.len() {
+        let first = input[at];
+        let last = if at + 3 < input.len()
+            && input[at + 1..at + 3] == *b".."
+            && input[at + 3] >= first
+        {
+            at += 4;
+            input[at - 1]
+        } else if first == b'.' && input.get(at + 1) == Some(&b'.') {
+            return Some(
+                "a trim() character list with a .. that starts no range is not supported, because PHP warns (P2R-291)",
+            );
+        } else {
+            at += 1;
+            first
+        };
+        if last > 0x7F {
+            return Some(
+                "a trim() character list with a byte above 7F is not supported, because it can cut a character (P2R-291)",
+            );
+        }
+    }
+    None
 }

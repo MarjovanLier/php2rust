@@ -2,11 +2,14 @@
 
 declare(strict_types=1);
 
-function bump(?int $n): int
+function bump(?int $n, bool $flag): int
 {
-    if ($n === null) {
-        return 0;
+    if ($flag) {
+        if ($n === null) {
+            return 0;
+        }
+        $n = $n + 1;
+        return $n;
     }
-    $n = $n + 1;
-    return $n;
+    return 1;
 }

@@ -21,10 +21,15 @@ pub(super) enum Helper {
     PhpPregReplace,
     PhpPregMatch,
     PhpStrtr,
+    PhpCharmask,
+    PhpTrimChars,
+    PhpLtrimChars,
+    PhpRtrimChars,
+    PhpCheckdate,
 }
 
 impl Helper {
-    const ALL: [Helper; 14] = [
+    const ALL: [Helper; 19] = [
         Helper::CtypeDigit,
         Helper::PhpInt,
         Helper::PhpOffset,
@@ -39,6 +44,11 @@ impl Helper {
         Helper::PhpPregReplace,
         Helper::PhpPregMatch,
         Helper::PhpStrtr,
+        Helper::PhpCharmask,
+        Helper::PhpTrimChars,
+        Helper::PhpLtrimChars,
+        Helper::PhpRtrimChars,
+        Helper::PhpCheckdate,
     ];
 
     fn name(self) -> &'static str {
@@ -57,6 +67,11 @@ impl Helper {
             Helper::PhpPregReplace => "php_preg_replace",
             Helper::PhpPregMatch => "php_preg_match",
             Helper::PhpStrtr => "php_strtr",
+            Helper::PhpCharmask => "php_charmask",
+            Helper::PhpTrimChars => "php_trim_chars",
+            Helper::PhpLtrimChars => "php_ltrim_chars",
+            Helper::PhpRtrimChars => "php_rtrim_chars",
+            Helper::PhpCheckdate => "php_checkdate",
         }
     }
 
@@ -77,6 +92,11 @@ impl Helper {
             Helper::PhpPregReplace => PHP_PREG_REPLACE,
             Helper::PhpPregMatch => PHP_PREG_MATCH,
             Helper::PhpStrtr => PHP_STRTR,
+            Helper::PhpCharmask => PHP_CHARMASK,
+            Helper::PhpTrimChars => PHP_TRIM_CHARS,
+            Helper::PhpLtrimChars => PHP_LTRIM_CHARS,
+            Helper::PhpRtrimChars => PHP_RTRIM_CHARS,
+            Helper::PhpCheckdate => PHP_CHECKDATE,
         }
     }
 
@@ -273,4 +293,79 @@ const PHP_STRTR: &str = r"fn php_strtr(text: &str, pairs: &[(&str, &str)]) -> St
         }
     }
     out
+}";
+
+/// PHP's byte mask of a `trim()` character list: `a..z` adds a range, and a `..` that
+/// starts no range adds nothing, where PHP warns (P2R-291).
+const PHP_CHARMASK: &str = r"fn php_charmask(characters: &str) -> [bool; 256] {
+    let input = characters.as_bytes();
+    let mut mask = [false; 256];
+    let mut at = 0;
+    while at < input.len() {
+        let first = input[at];
+        if at + 3 < input.len()
+            && input[at + 1] == b'.'
+            && input[at + 2] == b'.'
+            && input[at + 3] >= first
+        {
+            for byte in first..=input[at + 3] {
+                mask[usize::from(byte)] = true;
+            }
+            at += 4;
+        } else if at + 1 < input.len() && first == b'.' && input[at + 1] == b'.' {
+            at += 1;
+        } else {
+            mask[usize::from(first)] = true;
+            at += 1;
+        }
+    }
+    mask
+}";
+
+/// `trim()`, `ltrim()` and `rtrim()` with a character list, on bytes (P2R-291).
+const PHP_TRIM_CHARS: &str = r"fn php_trim_chars(text: &str, characters: &str) -> String {
+    let mask = php_charmask(characters);
+    let bytes = text.as_bytes();
+    let start = bytes
+        .iter()
+        .position(|&byte| !mask[usize::from(byte)])
+        .unwrap_or(bytes.len());
+    let end = bytes
+        .iter()
+        .rposition(|&byte| !mask[usize::from(byte)])
+        .map_or(start, |last| last + 1);
+    String::from_utf8_lossy(&bytes[start..end]).into_owned()
+}";
+
+const PHP_LTRIM_CHARS: &str = r"fn php_ltrim_chars(text: &str, characters: &str) -> String {
+    let mask = php_charmask(characters);
+    let bytes = text.as_bytes();
+    let start = bytes
+        .iter()
+        .position(|&byte| !mask[usize::from(byte)])
+        .unwrap_or(bytes.len());
+    String::from_utf8_lossy(&bytes[start..]).into_owned()
+}";
+
+const PHP_RTRIM_CHARS: &str = r"fn php_rtrim_chars(text: &str, characters: &str) -> String {
+    let mask = php_charmask(characters);
+    let bytes = text.as_bytes();
+    let end = bytes
+        .iter()
+        .rposition(|&byte| !mask[usize::from(byte)])
+        .map_or(0, |last| last + 1);
+    String::from_utf8_lossy(&bytes[..end]).into_owned()
+}";
+
+/// `checkdate()`: a year from 1 to 32767 and a day of that month, with the Gregorian
+/// leap years (P2R-292).
+const PHP_CHECKDATE: &str = r"fn php_checkdate(month: i64, day: i64, year: i64) -> bool {
+    let days = match month {
+        1 | 3 | 5 | 7 | 8 | 10 | 12 => 31,
+        4 | 6 | 9 | 11 => 30,
+        2 if year % 4 == 0 && (year % 100 != 0 || year % 400 == 0) => 29,
+        2 => 28,
+        _ => return false,
+    };
+    (1..=32767).contains(&year) && (1..=days).contains(&day)
 }";

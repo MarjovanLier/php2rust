@@ -124,7 +124,8 @@ enum Pending {
         /// `v.is_none()`, or `!matches!(v, U::T(_))`.
         test: String,
         /// `let v = v.as_str()` after the let-else of a string member of a union, so the
-        /// binding reads as a `&str` (P2R-252).
+        /// binding reads as a `&str` (P2R-252), or the copy line of an owned binding
+        /// (P2R-290).
         shadow: Option<String>,
     },
     /// The closing line of a guard: `};` after a let-else, otherwise `}`.
@@ -184,6 +185,8 @@ struct Binding {
     /// The binding of `if ($v !== null)` or of a let-else, which nothing may assign
     /// (P2R-104).
     null_check: bool,
+    /// A let-else binding with a copy line, which later writes assign (P2R-290).
+    owned: bool,
 }
 
 /// One operand of the top-level `&&` chain of a condition that checks a variable against
@@ -243,6 +246,9 @@ pub(super) struct Variables {
     /// The step also runs at each `continue`, where the binding may shadow the variable or
     /// not exist yet, so the step must not read or write them (P2R-104).
     pub(super) step_guards: Vec<Vec<u8>>,
+    /// The spans of the top-level `if ($v === null)` statements whose binding is owned
+    /// where the type allows it (P2R-290); see `functions::owned_checks`.
+    pub(super) owned_checks: HashSet<Span>,
 }
 
 impl Default for Variables {
@@ -267,6 +273,7 @@ impl Default for Variables {
             null_types: HashMap::new(),
             guards: Vec::new(),
             step_guards: Vec::new(),
+            owned_checks: HashSet::new(),
         }
     }
 }
@@ -385,6 +392,19 @@ impl Variables {
     pub(super) fn set_guard(&mut self, guard: usize, var: Var) {
         if let Some(Pending::Guard { binding, .. }) = self.pending.get_mut(guard) {
             *binding = Some(var);
+        }
+    }
+
+    /// Makes `var`, the binding of the guard at `guard`, an owned variable from the copy
+    /// line `copy` on, which later writes assign (P2R-290).
+    pub(super) fn own_binding(&mut self, guard: usize, var: Var, copy: String) {
+        let entry = &mut self.entries[var];
+        entry.borrowed = false;
+        if let Some(binding) = &mut entry.binding {
+            binding.owned = true;
+        }
+        if let Some(Pending::Guard { shadow, .. }) = self.pending.get_mut(guard) {
+            *shadow = Some(copy);
         }
     }
 
@@ -1590,8 +1610,13 @@ impl Converter<'_> {
     /// of the loop body (P2R-34, P2R-41). `ty` is `None` when a problem with the list is
     /// recorded.
     pub(super) fn bind(&mut self, variable: &DirectVariable<'_>, ty: Option<RustType>) -> Var {
+        // An owned binding stops here too: the loop variable would shadow it, so a write
+        // in the loop body would not reach it (P2R-290).
         if let Some(checked) = self.lookup(variable)
-            && self.checked(checked)
+            && self.variables.entries[checked]
+                .binding
+                .as_ref()
+                .is_some_and(|b| b.null_check && !b.closed)
         {
             self.refuse(variable, CHECKED);
         }
@@ -1621,6 +1646,7 @@ impl Converter<'_> {
             rewritten: false,
             closed: false,
             null_check: false,
+            owned: false,
         });
         entry.assigned = Some(variable.span);
         entry.ty = ty.filter(|_| named);
@@ -1691,17 +1717,19 @@ impl Converter<'_> {
             rewritten: false,
             closed: false,
             null_check: true,
+            owned: false,
         });
         self.variables.write(var, Some(variable.span));
         var
     }
 
-    /// True when `var` is the binding of a null check that is still open (P2R-104).
+    /// True when `var` is the binding of a null check that is still open (P2R-104) and
+    /// not owned (P2R-290).
     fn checked(&self, var: Var) -> bool {
         self.variables.entries[var]
             .binding
             .as_ref()
-            .is_some_and(|b| b.null_check && !b.closed)
+            .is_some_and(|b| b.null_check && !b.closed && !b.owned)
     }
 
     /// The variable a PHP name refers to, or `None` before its first write. A foreach key

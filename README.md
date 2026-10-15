@@ -83,7 +83,10 @@ converts:
   `unwrap_or` (or `unwrap_or_else` when `$b` could have an effect). Inside
   `if ($v !== null)`, after an `if ($v === null)` whose body always leaves, and in the
   matching arm of `$v !== null ? .. : ..`, `$v` is a plain value (`if let` and
-  `let ... else`). A nullable object or shape (`?Point`) becomes `Option<Point>`, and
+  `let ... else`). After such an `if ($v === null)` at the top level of a function or
+  method body, whose body ends with `return` or `throw`, later statements may assign `$v`
+  again: a copy line (`let mut v = v.to_string();`) makes the plain value the body's own.
+  A nullable object or shape (`?Point`) becomes `Option<Point>`, and
   `Option<&Point>` as a parameter.
 - one `namespace Acme\Shop;` right after the `declare`, and `use` imports of classes,
   functions and constants, with or without `as`, grouped or not. They give no Rust: names
@@ -156,13 +159,15 @@ converts:
 - the built-in functions `count()`, `strlen()`, `intdiv()`, `fdiv()`, `ctype_digit()`,
   `str_starts_with()`, `str_ends_with()`, `str_contains()`, `substr()`,
   `in_array($v, [...], true)` on a list literal, `trim()`, `ltrim()` and `rtrim()` with
-  one argument, `ucfirst()`, `lcfirst()`, `strtolower()`, `strtoupper()`,
+  one argument or with a character list (`'a..z'` ranges as PHP reads them),
+  `ucfirst()`, `lcfirst()`, `strtolower()`, `strtoupper()`,
   `str_repeat()`, `str_replace()` on three strings, `implode()` of a list of strings,
-  `explode()` without a limit, and `sprintf()` with a literal format of text, `%s`, `%d`
-  and `%%`. Where PHP's rules differ from Rust's standard library, the output holds a
-  small private helper function that copies them (`php_int`, `php_offset`,
+  `explode()` without a limit, `checkdate()`, and `sprintf()` with a literal format of
+  text, `%s`, `%d` and `%%`. Where PHP's rules differ from Rust's standard library, the
+  output holds a small private helper function that copies them (`php_int`, `php_offset`,
   `php_substr`, `php_trim`, `php_ltrim`, `php_rtrim`, `php_ucfirst`, `php_lcfirst`,
-  `php_replace`, `php_explode`, `ctype_digit`), only when it calls one.
+  `php_replace`, `php_explode`, `php_charmask`, `php_trim_chars`, `php_ltrim_chars`,
+  `php_rtrim_chars`, `php_checkdate`, `ctype_digit`), only when it calls one.
 - integer literals in every PHP form, float literals, and single-quoted and
   double-quoted strings.
 - exceptions of PHP's built-in classes (`Exception`, `RuntimeException`,
@@ -236,7 +241,8 @@ the others are findings of the Mago analyser. In short:
 - A function, variable or parameter named like a helper (`php_int`, `php_substr` and the
   others above), which would hide it. A shift by a count that is not a literal from 0 to
   63, and a write to a string offset.
-- For the string functions: `trim()` with a second argument, a `str_repeat()` count that
+- For the string functions: a `trim()` character list, written as a literal or a class
+  constant, with a `..` that starts no range or a byte above `7F`, a `str_repeat()` count that
   may be negative, an array argument of `str_replace()`, `implode()` with one argument or
   with a glue other than a literal, constant, variable, parameter or property read on
   one of them, `explode()` with a limit or an empty separator, and any
@@ -400,6 +406,10 @@ php2rust refuses some valid PHP that version 1 converts in other forms:
   `$xs = [1, 2]; $xs[] = null;` stops.
 - A `for` step that reads a variable that a let-else in the loop body checks stops, also
   where Rust would accept the code.
+- A write to a variable after an `if ($v === null)` that returns stops when the check is
+  not at the top level of the function body, when the body leaves in another way than
+  by ending with `return` or `throw` (an `if` and `else` that both return), and when a
+  `foreach` after it takes the name `$v`.
 - `Nothing::from($v)` on an enum without cases stops: the call never returns, and rustc
   rejects the code after it.
 - Visibility is not copied: private methods and constants become `pub` in Rust.
@@ -452,7 +462,10 @@ php2rust refuses some valid PHP that version 1 converts in other forms:
 - `substr()` or a string offset that cuts a character of more than one byte: PHP gives
   the raw bytes, Rust gives U+FFFD (three bytes) in their place, so later lengths,
   comparisons and joins of that value differ too. The same holds for a
-  `preg_replace()` that removes part of such a character.
+  `preg_replace()` that removes part of such a character, and for `trim()` with a
+  character list that is not a literal or a constant and holds a byte above `7F`.
+- `trim()` with such a character list that holds a `..` that starts no range: PHP
+  warns and Rust does not; both remove the same bytes.
 - A pattern that runs past PCRE's backtrack, recursion or JIT stack limit: PHP's
   `preg_replace()` gives `null`, so `??` gives the default, and `preg_match()` gives
   `false`. Rust's `regex` has no such limit and gives the full result.

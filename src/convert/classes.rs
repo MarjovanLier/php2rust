@@ -1648,11 +1648,14 @@ impl Converter<'_> {
         }
         parameters.extend(signature.parameters.iter().cloned());
         // A method has its own variables, as a function does.
-        let copied = self.copied_parameters(block.statements.iter(), &signature.parameters);
+        let statements: Vec<&Statement<'_>> = block.statements.iter().collect();
+        let checks = functions::owned_checks(&statements);
+        let copied = self.copied_parameters(&statements, &signature.parameters, &checks);
         let outer = std::mem::replace(
             &mut self.variables,
             Variables::with_parameters(&parameters, &copied),
         );
+        self.variables.owned_checks = checks.iter().map(|check| check.span).collect();
         // `self` is the first variable of a method that is not static.
         let first = parameters.len() - signature.parameters.len();
         let templated: Vec<usize> = self.classes[class].methods[at]

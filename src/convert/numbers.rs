@@ -119,6 +119,32 @@ impl Converter<'_> {
         Some((division(left, right), RustType::F64))
     }
 
+    /// `checkdate($month, $day, $year)` on three ints, as the helper `php_checkdate`
+    /// (P2R-292).
+    pub(super) fn checkdate(
+        &mut self,
+        call: &FunctionCall<'_>,
+        node: &Expression<'_>,
+    ) -> Option<(RExpr, RustType)> {
+        let arguments = self.built_in_arguments(
+            call,
+            node,
+            (3, 3),
+            "checkdate() takes three positional arguments (P2R-292)",
+        )?;
+        let message = "checkdate() is supported only on ints (P2R-292)";
+        // All three convert first, so problems in each are reported.
+        let converted: Vec<Option<RExpr>> = arguments
+            .iter()
+            .map(|&argument| self.typed_argument(argument, &RustType::I64, message))
+            .collect();
+        let converted = converted.into_iter().collect::<Option<_>>()?;
+        Some((
+            self.helper_call(Helper::PhpCheckdate, converted),
+            RustType::Bool,
+        ))
+    }
+
     /// `(int)` of a string, which reads the number at its start as PHP does, and
     /// `(string)` of an int or a string. Every other cast stops (P2R-07, P2R-166).
     pub(super) fn cast(&mut self, unary: &UnaryPrefix<'_>) -> Option<(RExpr, RustType)> {

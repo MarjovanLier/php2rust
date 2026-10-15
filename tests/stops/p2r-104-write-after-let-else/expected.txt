@@ -1,1 +1,1 @@
-input.php:10:5: a variable that a check against null or a type test binds cannot be assigned until the check's block ends (P2R-104, P2R-252)
+input.php:11:9: a variable that a check against null or a type test binds cannot be assigned until the check's block ends (P2R-104, P2R-252)

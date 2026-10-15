@@ -4,11 +4,11 @@ use std::collections::HashSet;
 
 use heck::ToSnakeCase;
 use mago_codex::ttype::union::TUnion;
-use mago_span::HasSpan;
+use mago_span::{HasSpan, Span};
 use mago_syntax::cst::*;
 use mago_syntax::walker::Walker;
 
-use super::control::emit;
+use super::control::{self, emit};
 use super::{
     Context, Converter, Mode, ParameterSignature, Signature, Variables, classes, helpers, lists,
     nulls, recursion, unions,
@@ -379,11 +379,14 @@ impl Converter<'_> {
         let key = self.function_key(function);
         let signature = self.functions.get(&key)?.clone();
         // A function has its own variables; those of `fn main()` wait until it ends.
-        let copied = self.copied_parameters(function.body.statements.iter(), &signature.parameters);
+        let statements: Vec<&Statement<'_>> = function.body.statements.iter().collect();
+        let checks = owned_checks(&statements);
+        let copied = self.copied_parameters(&statements, &signature.parameters, &checks);
         let outer = std::mem::replace(
             &mut self.variables,
             Variables::with_parameters(&signature.parameters, &copied),
         );
+        self.variables.owned_checks = checks.iter().map(|check| check.span).collect();
         let outer_function = self.current_function.replace(key);
         let outer_calls = std::mem::take(&mut self.self_calls);
         let sites = self.site_types(function.body.statements.iter(), signature.returns.as_ref());
@@ -407,7 +410,6 @@ impl Converter<'_> {
                 "a function with a return type must return on every path (P2R-50)",
             );
         }
-        let statements: Vec<&Statement<'_>> = function.body.statements.iter().collect();
         let target = recursion::Target {
             self_calls: &self.self_calls,
             dropped: &self.dropped_defaults,
@@ -443,15 +445,24 @@ impl Converter<'_> {
 impl Converter<'_> {
     /// The PHP names of the string and list parameters that `statements` change by an
     /// assignment, `.=` or an append, which work on a copy (P2R-181). A list of a type that
-    /// changes its objects is left out: its change still stops (P2R-143).
-    pub(super) fn copied_parameters<'ast, 'arena: 'ast>(
+    /// changes its objects is left out: its change still stops (P2R-143). A write after one
+    /// of `checks` assigns its owned binding, not the parameter (P2R-290).
+    pub(super) fn copied_parameters(
         &self,
-        statements: impl IntoIterator<Item = &'ast Statement<'arena>>,
+        statements: &[&Statement<'_>],
         parameters: &[ParameterSignature],
+        checks: &[OwnedCheck],
     ) -> HashSet<Vec<u8>> {
         let mut written = HashSet::new();
-        for statement in statements {
-            Written.walk_statement(statement, &mut written);
+        for (at, statement) in statements.iter().enumerate() {
+            let mut names = HashSet::new();
+            Written.walk_statement(statement, &mut names);
+            names.retain(|name| {
+                !checks
+                    .iter()
+                    .any(|check| check.name == *name && check.at < at)
+            });
+            written.extend(names);
         }
         parameters
             .iter()
@@ -463,6 +474,79 @@ impl Converter<'_> {
             })
             .map(|parameter| parameter.php_name.clone())
             .collect()
+    }
+}
+
+/// A top-level `if ($v === null)` whose binding is owned where the type of `$v` allows it
+/// (P2R-290).
+pub(super) struct OwnedCheck {
+    pub(super) span: Span,
+    /// The PHP name of `$v`, without `$`.
+    pub(super) name: Vec<u8>,
+    /// The position of the `if` among the top-level statements.
+    pub(super) at: usize,
+}
+
+/// The checks among a body's top-level `statements` that give an owned binding (P2R-290):
+/// `if ($v === null)` or `if (null === $v)` with no `elseif` or `else`, whose body ends
+/// with a `return` or a `throw`, and with a write of `$v` in a later statement. Whether
+/// P2R-104 makes the `if` a let-else, and whether the type allows an owned binding, is
+/// decided when it converts.
+pub(super) fn owned_checks(statements: &[&Statement<'_>]) -> Vec<OwnedCheck> {
+    let mut checks = Vec::new();
+    for (at, statement) in statements.iter().enumerate() {
+        let Statement::If(check) = statement else {
+            continue;
+        };
+        let branches = control::branches(check);
+        let [(Some(condition), body)] = branches.as_slice() else {
+            continue;
+        };
+        let leaves = match body.last() {
+            Some(Statement::Return(_)) => true,
+            Some(Statement::Expression(statement)) => {
+                matches!(statement.expression, Expression::Throw(_))
+            }
+            _ => false,
+        };
+        let Some(variable) = null_test(condition).filter(|_| leaves) else {
+            continue;
+        };
+        let name = variable.name[1..].to_vec();
+        let mut written = HashSet::new();
+        for later in &statements[at + 1..] {
+            Written.walk_statement(later, &mut written);
+        }
+        if written.contains(&name) {
+            checks.push(OwnedCheck {
+                span: check.span(),
+                name,
+                at,
+            });
+        }
+    }
+    checks
+}
+
+/// The variable of `$v === null` or `null === $v`.
+fn null_test<'a, 'arena>(condition: &'a Expression<'arena>) -> Option<&'a DirectVariable<'arena>> {
+    let Expression::Binary(binary) = lists::unparenthesized(condition) else {
+        return None;
+    };
+    if !matches!(binary.operator, BinaryOperator::Identical(_)) {
+        return None;
+    }
+    match (
+        lists::unparenthesized(binary.lhs),
+        lists::unparenthesized(binary.rhs),
+    ) {
+        (Expression::Variable(Variable::Direct(variable)), other)
+        | (other, Expression::Variable(Variable::Direct(variable)))
+            if nulls::is_null(other) =>
+        {
+            Some(variable)
+        }
+        _ => None,
     }
 }
 
@@ -488,8 +572,8 @@ pub(super) fn copy_lines(
         .collect()
 }
 
-/// Collects the PHP names, without `$`, of the variables that an assignment or an append
-/// writes, outside nested functions, closures and classes.
+/// Collects the PHP names, without `$`, of the variables that an assignment, an append,
+/// `++` or `--` writes, outside nested functions, closures and classes.
 struct Written;
 
 impl<'ast, 'arena> Walker<'ast, 'arena, HashSet<Vec<u8>>> for Written {
@@ -511,6 +595,25 @@ impl<'ast, 'arena> Walker<'ast, 'arena, HashSet<Vec<u8>>> for Written {
             _ => return,
         };
         names.insert(variable.name[1..].to_vec());
+    }
+
+    fn walk_in_unary_prefix(&self, unary: &'ast UnaryPrefix<'arena>, names: &mut HashSet<Vec<u8>>) {
+        if let UnaryPrefixOperator::PreIncrement(_) | UnaryPrefixOperator::PreDecrement(_) =
+            unary.operator
+            && let Expression::Variable(Variable::Direct(variable)) = unary.operand
+        {
+            names.insert(variable.name[1..].to_vec());
+        }
+    }
+
+    fn walk_in_unary_postfix(
+        &self,
+        unary: &'ast UnaryPostfix<'arena>,
+        names: &mut HashSet<Vec<u8>>,
+    ) {
+        if let Expression::Variable(Variable::Direct(variable)) = unary.operand {
+            names.insert(variable.name[1..].to_vec());
+        }
     }
 
     // So does a removal (P2R-242).

@@ -1,0 +1,8 @@
+input.php:14:19: a trim() character list with a .. that starts no range is not supported, because PHP warns (P2R-291)
+input.php:15:20: a trim() character list with a .. that starts no range is not supported, because PHP warns (P2R-291)
+input.php:16:20: a trim() character list with a .. that starts no range is not supported, because PHP warns (P2R-291)
+input.php:17:19: a trim() character list with a .. that starts no range is not supported, because PHP warns (P2R-291)
+input.php:18:19: a trim() character list with a byte above 7F is not supported, because it can cut a character (P2R-291)
+input.php:20:10: a named or spread argument of a built-in function is not supported (P2R-169)
+input.php:21:19: a trim() character list with a .. that starts no range is not supported, because PHP warns (P2R-291)
+input.php:22:20: a trim() character list with a byte above 7F is not supported, because it can cut a character (P2R-291)

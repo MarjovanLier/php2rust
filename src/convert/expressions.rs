@@ -121,6 +121,9 @@ impl Converter<'_> {
             Expression::Call(Call::Function(call)) if self.calls_built_in(call, b"strtr") => {
                 self.strtr(call, expression)
             }
+            Expression::Call(Call::Function(call)) if self.calls_built_in(call, b"checkdate") => {
+                self.checkdate(call, expression)
+            }
             Expression::Call(Call::Function(call)) if self.calls_built_in(call, b"in_array") => {
                 self.in_array(call, expression)
             }

@@ -11,6 +11,7 @@ use mago_syntax::cst::*;
 use super::variables::changes_variable;
 use super::{Context, Converter};
 use crate::printer::{self, RExpr};
+use crate::types::RustType;
 
 /// The known value of every variable, by variable (P2R-50).
 type Values = Vec<Option<i64>>;
@@ -185,12 +186,33 @@ impl Converter<'_> {
         // The statements after a let-else in its block read the binding (P2R-104,
         // P2R-252).
         if let (Some((variable, _, inner, _)), Some(at), true) = (guarded, guard, body_leaves) {
+            let owned = self.variables.owned_checks.contains(&statement.span());
+            let copy = owned.then(|| self.copy_method(&inner)).flatten();
             let binding = self.bind_null(variable, inner);
             self.variables.guard(binding);
             self.variables.set_guard(at, binding);
+            if let Some(copy) = copy {
+                let name = self.variables.name_of(binding);
+                let line = format!("let mut {name} = {name}{copy}");
+                self.variables.own_binding(at, binding, line);
+            }
             for frame in &mut self.variables.loops {
                 frame.guarded.push(variable.name[1..].to_vec());
             }
+        }
+    }
+
+    /// The call that copies the binding of type `inner` on the copy line after its
+    /// let-else, empty for a Copy value, or `None` for a type whose binding cannot be owned
+    /// (P2R-290).
+    fn copy_method(&self, inner: &RustType) -> Option<&'static str> {
+        match inner {
+            RustType::String => Some(".to_string()"),
+            RustType::Vec(element) if !self.is_changing(element) => Some(".to_vec()"),
+            // P2R-181 copies a map parameter the same way.
+            RustType::Map(..) => Some(".clone()"),
+            ty if ty.is_copy() => Some(""),
+            _ => None,
         }
     }
 

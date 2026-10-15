@@ -115,8 +115,8 @@ check, `trim` with a character list and `checkdate`) was written on 15
 Oct 2026; it changes P2R-48, P2R-60, P2R-104, P2R-181, P2R-182, P2R-188
 and the roadmap of section 10. Section 31 (closures as callbacks of
 `array_map` and `preg_replace_callback`, and `ucwords`) was written on 15
-Oct 2026; it changes P2R-07, P2R-48, P2R-75, P2R-188 and the roadmap of
-section 10.
+Oct 2026; it changes P2R-07, P2R-48, P2R-60, P2R-75, P2R-188 and the
+roadmap of section 10.
 
 php2rust converts typed PHP source into normal, readable Rust (`Vec`,
 `String`, `i64`), without AI. It reads PHP with the Mago crates, uses Mago's
@@ -422,7 +422,8 @@ requirement IDs.
     U+FFFD (three bytes) in their place, so later lengths, comparisons and
     joins of that value differ too. The README lists these; no case folder
     can show them, because PHP warns or prints bytes that are not UTF-8.
-  - A `preg_replace` or `preg_match` of section 27 past PCRE's backtrack,
+  - A `preg_replace` or `preg_match` of section 27, or a
+    `preg_replace_callback` of P2R-302, past PCRE's backtrack,
     recursion or JIT stack limit (`/(?:a|b)*\z/` on 400000 bytes): PHP
     gives null or `false`, so the default of `??` applies and `!== 0` is
     true where a condition and `=== 1` are false; the `regex` crate has no
@@ -2757,28 +2758,46 @@ prefixes with `preg_replace_callback(P, static fn(array $matches): string
 => strtolower($matches[1]), $name) ?? ''`. Closures are common in
 application code (the Laravel `app/` holds about 70), and these two
 built-ins run their callback at once, before the enclosing body goes on,
-so a Rust closure that borrows what it reads behaves as PHP's copy does.
+so a Rust closure that borrows what it reads sees what PHP's copy holds.
 This section converts a closure only as such a callback.
 
 - **P2R-300** An arrow function (`fn(T $x): R => expr`, with or without
   `static` and the return type) MUST convert to a Rust closure
   `|x: T| expr` where it is the callback argument of P2R-301 or P2R-302,
-  and nowhere else. Its parameters are new variables of the parameter
-  types of P2R-24 (`&str` for a string), which only its body reads, and
-  which hide a variable of the same name of the enclosing body there, as
-  in PHP. The body may read a variable or parameter of the enclosing body
-  whose Rust type is an int, float, bool or enum, which Rust copies into
-  the closure. These stop the conversion: an arrow function anywhere
-  else (stored, returned, or passed to a function of the input or to
-  another built-in); a parameter without a declared type, by reference,
-  variadic or with a default; a read of a variable of the enclosing body
-  of any other type (a later slice); a write in the body (an assignment,
-  `++` or `--`), which in PHP changes only the closure's copy; `$this` in
-  the body; a nested arrow function; and a closure of the long form
-  (`function () use (..) { .. }`), also with `static` (a later slice).
+  and nowhere else. It takes exactly one parameter, a new variable of the
+  parameter type of P2R-24 (`&str` for a string), which only its body
+  reads, and which hides a variable of the same PHP name of the enclosing
+  body there, as in PHP; for P2R-30 and P2R-31 it is a variable of the
+  enclosing function, so a parameter whose Rust name another variable or
+  a function has stops. A parameter the body does not read gets a
+  leading `_`, as a foreach binding does, and is no P2R-35 problem. The
+  body converts as the value of `return` in a function whose return type
+  is the declared one, or the type Mago gives the body when none is
+  declared (P2R-25, P2R-26, P2R-49, P2R-102), so an int body widens to a
+  declared `float` and a string becomes owned. The body may read a
+  variable or parameter of the enclosing body whose Rust type is Copy (an
+  int, float or bool, an enum of P2R-110, or an `Option` of one of these),
+  which the closure borrows; such a read counts as a read at the place of
+  the arrow function for P2R-34 and P2R-35. PHP copies these values when
+  it creates the closure, before it evaluates the list of P2R-301, where
+  the Rust chain evaluates the list first; both read the same value,
+  because no form that could change a captured variable inside the list
+  argument converts (P2R-07 for references and `global`, P2R-43, P2R-44).
+  These stop the conversion: an arrow function anywhere else (stored,
+  returned, or passed to a function of the input or to another built-in);
+  a parameter without a declared type, by reference, variadic or with a
+  default; `fn&`, which returns by reference; a read of a variable of the
+  enclosing body of any other type, a union enum of P2R-230 included (a
+  later slice); a write in the body (an assignment, `++` or `--`), which
+  in PHP changes only the closure's copy; a call that throws (P2R-211) or
+  `?? throw` in the body, whose `?` would leave the closure instead of
+  the function; `$this` in the body; a nested arrow function; and a
+  closure of the long form (`function () use (..) { .. }`), also with
+  `static` (a later slice).
 - **P2R-301** `array_map(CB, $list)` with two positional arguments, where
-  `$list` is a list (`Vec<T>`, not a map) of ints, floats, bools, enums or
-  strings, MUST convert to
+  `$list` is any expression whose value is a list (`Vec<T>`, not a map)
+  of ints, floats, bools, enums or strings, a temporary such as
+  `explode(..)` included, MUST convert to
   `list.iter().copied().map(CB).collect::<Vec<_>>()` for a Copy element,
   and `list.iter().map(String::as_str).map(CB).collect::<Vec<_>>()` for a
   string element, a `Vec` of the callback's return type in the list's
@@ -2788,35 +2807,45 @@ This section converts a closure only as such a callback.
   function of the input with one parameter of the element type, that
   returns a value and does not throw (P2R-211), or one of the built-ins
   `strtolower`, `strtoupper`, `ucfirst`, `lcfirst`, `ucwords`, `trim`,
-  `ltrim` and `rtrim` on a string element. These stop the conversion: a
-  map, more than one list, a `null` callback, a callback of any other
-  form (a string such as `'trim'`, a variable, a static method callable),
-  a callback whose parameter type is not the element type, and a list of
-  any other element type (a later slice).
+  `ltrim` and `rtrim` on a string element. The closure's parameter gets a
+  name that is not the Rust name of `f`. A first-class callable converts
+  as this callback and nowhere else. These stop the conversion: a map,
+  more than one list, a `null` callback, a callback of any other form (a
+  string such as `'trim'`, a variable, a static method callable), a
+  callback whose parameter type is not the element type (PHP passes
+  `array_map` elements in weak mode, so `fn(string $x)` on ints would
+  convert them), a list of any other element type (a later slice), and a
+  named or spread argument (P2R-169).
 - **P2R-302** `preg_replace_callback(P, CB, S) ?? 'literal'`, where `P` is
   a pattern of P2R-260 that cannot match the empty string, `S` is a
   string, and `CB` is an arrow function of P2R-300 with one parameter
   declared `array` and a declared `string` return type, MUST convert to
   `php_preg_replace_callback(r"..", |matches: &IndexMap<String, String>|
   body, s)`, with the `??` default dropped as P2R-261 drops it. The
-  parameter is a map of P2R-240 with text keys, which is what Mago types
-  it (`array<array-key, string>`), so `$matches[1]` reads `matches["1"]`
-  (P2R-242). The helper walks the matches from left to right; for each it
-  calls the closure with the keys `"0"` (the whole match) to `"n"`, where
-  `n` is the last group that took part in the match, and `""` for a group
-  before it that did not, as PHP does, and it joins the text between the
-  matches with the closure's results. The text is matched as bytes, as in
-  P2R-261, and the result goes through `String::from_utf8_lossy`. These
-  stop the conversion: a pattern that can match the empty string (P2R-261
-  gives the reason), a fourth or fifth argument, a callback of any other
-  form, a parameter declared with another type, a missing or other return
-  type, `preg_replace_callback` without `??`, and a default that is not a
-  string literal.
+  parameter has the type `&IndexMap<String, String>` whatever P2R-22 and
+  P2R-23 give a bare `array`: a map of P2R-240 with text keys, which is
+  what Mago types its reads (`array<array-key, string>`), so
+  `$matches[1]` reads `matches["1"]` (P2R-242). The helper walks the
+  matches from left to right; for each it calls the closure with the keys
+  `"0"` (the whole match) to `"n"`, where `n` is the last group that took
+  part in the match, and `""` for a group before it that did not, as PHP
+  does, and it joins the text between the matches with the closure's
+  results. The text is matched as bytes, as in P2R-261, and each group
+  and the result go through `String::from_utf8_lossy`. These stop the
+  conversion: a pattern that can match the empty string (P2R-261 gives the
+  reason); a pattern that can match a byte above `7F` (`.`, `\D`, `\W`,
+  `\S`, a negated class), because a group could then hold part of a
+  character, which PHP passes as raw bytes and a Rust `String` cannot
+  hold; a fourth or fifth argument; a callback of any other form; a
+  parameter declared with another type; a missing or other return type;
+  `preg_replace_callback` without `??`; a default that is not a string
+  literal; and a named or spread argument (P2R-169).
 - **P2R-303** `ucwords($s)` with one string argument MUST convert to
   `php_ucwords(s)`, of type `String`, a helper that makes the first byte,
   and each byte after a space, `\t`, `\r`, `\n`, `\f` or `\v`, an ASCII
   capital, as PHP does; it changes ASCII letters only. A second argument
-  (the delimiters) stops the conversion (a later slice). P2R-188 places
+  (the delimiters, a later slice) and a named or spread argument
+  (P2R-169) stop the conversion. P2R-188 places
   `php_ucwords` and `php_preg_replace_callback` after `php_checkdate`, in
   this order, and P2R-31 covers their names.
 

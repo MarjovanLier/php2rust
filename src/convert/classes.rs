@@ -474,7 +474,8 @@ impl Converter<'_> {
     }
 
     /// True when the class extends Spatie's `Data`, which the struct leaves out (P2R-350).
-    /// Mago's parser accepts a list of parents, which PHP rejects.
+    /// Mago's parser accepts a list of parents, which PHP rejects. A `Data` the input
+    /// declares itself is a class of the input, which converts with a Rust type.
     pub(super) fn extends_data(&self, declaration: &Class<'_>) -> bool {
         declaration.extends.as_ref().is_some_and(|extends| {
             extends.types.len() == 1
@@ -482,7 +483,15 @@ impl Converter<'_> {
                     .types
                     .iter()
                     .all(|parent| self.identifier_key(parent) == b"spatie\\laraveldata\\data")
-        })
+        }) && self
+            .codebase
+            .get_class_like(b"spatie\\laraveldata\\data")
+            .is_some_and(|data| {
+                !self
+                    .files
+                    .iter()
+                    .any(|analysed| analysed.file == data.span.file_id)
+            })
     }
 
     /// True when the attribute is one of laravel-data's, which only the methods of `Data`
@@ -542,6 +551,19 @@ impl Converter<'_> {
             self.refuse(
                 extends,
                 "Spatie\\LaravelData\\Data names a trait or interface that no included file declares, so its methods are not all known; include the whole package (P2R-350)",
+            );
+        }
+        // PHP calls these by itself, so a Data that has one is not the 4.18 shape.
+        if data
+            && let Some(extends) = &declaration.extends
+            && let Some(magic) = IMPLICIT_METHODS.iter().find(|name| {
+                self.codebase
+                    .method_exists(b"Spatie\\LaravelData\\Data", name.as_bytes())
+            })
+        {
+            self.refuse(
+                extends,
+                format!("Spatie\\LaravelData\\Data has the method {magic}, which PHP calls by itself (P2R-350)"),
             );
         }
         if let Some(implements) = &declaration.implements {
@@ -765,8 +787,8 @@ impl Converter<'_> {
     }
 
     /// A constructor converts only when every parameter promotes to a typed property and
-    /// its body is empty (P2R-130). In a class that extends `data`, laravel-data's
-    /// attributes are left out (P2R-351).
+    /// its body is empty (P2R-130). With `data` (the class extends Spatie's `Data`),
+    /// laravel-data's attributes are left out (P2R-351).
     fn constructor_shape(&mut self, method: &Method<'_>, data: bool) {
         match &method.body {
             MethodBody::Concrete(block) if block.statements.is_empty() => {}
@@ -2058,6 +2080,18 @@ const NEEDS_DEFAULT: &str = "a declared property needs a type and a default valu
 
 /// The properties laravel-data 4.18 declares on `Data` (P2R-350).
 const DATA_PROPERTIES: [&[u8]; 2] = [b"_additional", b"_dataContext"];
+
+/// The methods PHP calls by itself that laravel-data 4.18's `Data` lacks (P2R-350).
+const IMPLICIT_METHODS: [&str; 8] = [
+    "__construct",
+    "__destruct",
+    "__get",
+    "__set",
+    "__isset",
+    "__unset",
+    "__call",
+    "__toString",
+];
 
 /// The problem of a property that `Data` already declares (P2R-350).
 const DATA_PROPERTY: &str =

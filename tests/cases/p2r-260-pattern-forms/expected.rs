@@ -45,8 +45,38 @@ impl Forms {
         if php_preg_match(r"(?-u)[[:space:]\t-]{3}", text) {
             found += "gap ";
         }
+        if php_preg_match(r"(?-u)[:]", text) {
+            found += "colon ";
+        }
+        if php_preg_match(r"(?-u)\w\W\S\B\w|\r|\f", text) {
+            found += "escapes ";
+        }
+        if php_preg_match(r"(?-u)(?i)(?s)^a*?b??c{1,3}?\z", text) {
+            found += "lazy2 ";
+        }
+        if php_preg_match(
+            r"(?-u)^[[:alnum:][:blank:][:punct:]]+[[:cntrl:][:digit:]]\z",
+            text,
+        ) {
+            found += "posix ";
+        }
+        if php_preg_match(
+            r"(?-u)^[[:ascii:]][[:graph:]][[:lower:]][[:print:]][[:upper:]][[:word:]]",
+            text,
+        ) {
+            found += "posix2 ";
+        }
         return found;
     }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Mark {
+    Dot,
+}
+
+impl Mark {
+    pub const COLON: &str = "/[:]/";
 }
 
 fn php_preg_match(pattern: &str, subject: &str) -> bool {
@@ -71,6 +101,14 @@ fn main() {
         String::from("a word."),
         String::from("a \t-b"),
         String::from("٣"),
+        String::from("x:y"),
+        String::from("ab-cd"),
+        String::from("x\ry"),
+        String::from("AAC"),
+        String::from("bc"),
+        String::from("a b!1"),
+        String::from("x\u{1}"),
+        String::from(" !aPQ_"),
     ] {
         print!("{}", Forms::check(&text));
         print!("\n");

@@ -113,4 +113,99 @@ final class Stops
     {
         return preg_match('/[z-a]/', $text) === 1;
     }
+
+    public static function interpolated(string $text, string $word): bool
+    {
+        return preg_match("/a{$word}/", $text) === 1;
+    }
+
+    public static function letterDelimiter(string $text): bool
+    {
+        return preg_match('xax', $text) === 1;
+    }
+
+    public static function leadingSpace(string $text): bool
+    {
+        return preg_match(' /a/', $text) === 1;
+    }
+
+    public static function backslashDelimiter(string $text): bool
+    {
+        return preg_match('\\a\\', $text) === 1;
+    }
+
+    public static function setDifference(string $text): bool
+    {
+        return preg_match('/[a--b]/', $text) === 1;
+    }
+
+    public static function symmetric(string $text): bool
+    {
+        return preg_match('/[a~~b]/', $text) === 1;
+    }
+
+    public static function collating(string $text): bool
+    {
+        return preg_match('/[.a.]/', $text) === 1;
+    }
+
+    public static function equivalence(string $text): bool
+    {
+        return preg_match('/[=a=]/', $text) === 1;
+    }
+
+    public static function groupCount(string $text): bool
+    {
+        return preg_match('/(?:a){2}/', $text) === 1;
+    }
+
+    public static function anchorG(string $text): bool
+    {
+        return preg_match('/\Ga/', $text) === 1;
+    }
+
+    public static function keep(string $text): bool
+    {
+        return preg_match('/a\Kb/', $text) === 1;
+    }
+
+    public static function quoted(string $text): bool
+    {
+        return preg_match('/\Qa.\E/', $text) === 1;
+    }
+
+    public static function property(string $text): bool
+    {
+        return preg_match('/\pL/', $text) === 1;
+    }
+
+    public static function named(string $text): bool
+    {
+        return preg_match('/(?<x>a)\k<x>/', $text) === 1;
+    }
+
+    public static function atomic(string $text): bool
+    {
+        return preg_match('/(?>a)/', $text) === 1;
+    }
+
+    public static function possessive(string $text): bool
+    {
+        return preg_match('/a++/', $text) === 1;
+    }
+
+    public static function conditional(string $text): bool
+    {
+        return preg_match('/(a)?(?(1)b)/', $text) === 1;
+    }
+
+    public static function recursion(string $text): bool
+    {
+        return preg_match('/a(?R)?/', $text) === 1;
+    }
+
+    public static function octal(string $text): bool
+    {
+        return preg_match('/\012/', $text) === 1;
+    }
 }

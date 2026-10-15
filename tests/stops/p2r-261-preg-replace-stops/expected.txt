@@ -6,4 +6,5 @@ input.php:31:38: a replacement with $ or \ is not supported, because PHP reads t
 input.php:36:36: a replacement with $ or \ is not supported, because PHP reads them as group references (P2R-261)
 input.php:41:36: a replacement converts only as a string literal or a constant of the file whose value is one (P2R-261)
 input.php:46:51: the default of ?? after preg_replace() must be a string literal, which the conversion drops (P2R-261)
-input.php:51:29: a pattern converts only as a string literal or a constant of the file whose value is one (P2R-260)
+input.php:51:36: a replacement converts only as a string literal or a constant of the file whose value is one (P2R-261)
+input.php:56:29: a pattern converts only as a string literal or a constant of the file whose value is one (P2R-260)

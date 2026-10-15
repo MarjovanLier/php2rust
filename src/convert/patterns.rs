@@ -195,8 +195,10 @@ pub(super) struct Pattern {
 enum Last {
     /// The start of the body or of a group, or an alternation.
     Open,
-    /// A literal, `.`, an escape class, a class or a group.
+    /// A literal, `.`, an escape class or a class.
     Atom,
+    /// A group, which takes `*`, `+` and `?` but no count.
+    Group,
     /// `^`, `$`, `\b`, `\B`, `\A` or `\z`.
     Assertion,
     /// A quantifier, which a `?` may make lazy.
@@ -211,20 +213,16 @@ pub(super) fn rust_pattern(php: &[u8]) -> Result<Pattern, String> {
         return Err(problem("only printable ASCII bytes"));
     }
     let (body, flags) = split(php)?;
+    if !flags.iter().all(|flag| b"ims".contains(flag)) {
+        return Err(problem("the flags i, m and s only"));
+    }
     let mut prefix = String::from("(?-u)");
-    let mut multiline = false;
-    for &flag in flags {
-        match flag {
-            b'i' => prefix.push_str("(?i)"),
-            b'm' => {
-                multiline = true;
-                prefix.push_str("(?m)");
-            }
-            b's' => prefix.push_str("(?s)"),
-            _ => return Err(problem("the flags i, m and s only")),
+    for (flag, text) in [(b'i', "(?i)"), (b'm', "(?m)"), (b's', "(?s)")] {
+        if flags.contains(&flag) {
+            prefix.push_str(text);
         }
     }
-    let text = format!("{prefix}{}", translate(body, multiline)?);
+    let text = format!("{prefix}{}", translate(body, flags.contains(&b'm'))?);
     if regex::bytes::Regex::new(&text).is_err() {
         return Err("this pattern does not compile in Rust's regex crate (P2R-260)".to_owned());
     }
@@ -320,11 +318,11 @@ fn translate(body: &[u8], multiline: bool) -> Result<String, String> {
                 last = Last::Open;
                 continue;
             }
-            b')' => last = Last::Atom,
+            b')' => last = Last::Group,
             b'|' => last = Last::Open,
             b'*' | b'+' | b'?' => {
                 last = match (last, byte) {
-                    (Last::Atom, _) => Last::Quantifier,
+                    (Last::Atom | Last::Group, _) => Last::Quantifier,
                     (Last::Quantifier, b'?') => Last::Lazy,
                     (Last::Quantifier, b'+') => {
                         return Err(problem("no possessive quantifier"));
@@ -338,6 +336,13 @@ fn translate(body: &[u8], multiline: bool) -> Result<String, String> {
             }
             b'{' => {
                 let used = braces(&body[at..])?;
+                // PCRE copies the group once per count and rejects the pattern past its
+                // size limit, which depends on the group's compiled size.
+                if last == Last::Group {
+                    return Err(problem(
+                        "a count {n}, {n,} or {n,m} after a literal, ., an escape class or a class only, not after a group",
+                    ));
+                }
                 if last != Last::Atom {
                     return Err(problem(
                         "a quantifier only after a literal, ., a class or a group",
@@ -422,12 +427,16 @@ fn escape(rest: &[u8], in_class: bool) -> Result<(String, Last, usize), String> 
 /// Copies the class at the start of `rest` into `out`, checked against the allow-list.
 /// Gives how many bytes it takes.
 fn class(rest: &[u8], out: &mut String) -> Result<usize, String> {
+    if posix_syntax(rest) {
+        return Err(problem(
+            "no [:name:], [.x.] or [=x=] outside a class, which PCRE rejects",
+        ));
+    }
     let mut at = 1;
     if rest.get(at) == Some(&b'^') {
         at += 1;
     }
     let start = at;
-    let posix_only = rest.get(at) == Some(&b':');
     let mut text = String::from("[");
     text.push_str(std::str::from_utf8(&rest[1..at]).unwrap_or_default());
     // A `]` first in the class is a literal.
@@ -440,9 +449,6 @@ fn class(rest: &[u8], out: &mut String) -> Result<usize, String> {
         match byte {
             b']' => {
                 text.push(']');
-                if posix_only && rest[start..at].ends_with(b":") {
-                    return Err(problem("POSIX classes inside a class only"));
-                }
                 out.push_str(&text);
                 return Ok(at + 1);
             }
@@ -474,6 +480,30 @@ fn class(rest: &[u8], out: &mut String) -> Result<usize, String> {
         at += 1;
     }
     Err(problem("a closed class"))
+}
+
+/// PCRE's `check_posix_syntax` for the `[` at the start of `rest`: true when a `:`, `.` or
+/// `=` follows it and comes back before `]` with no `]` or `[` of the same kind before
+/// that. PCRE rejects such a form outside a class.
+fn posix_syntax(rest: &[u8]) -> bool {
+    let Some(&terminator) = rest
+        .get(1)
+        .filter(|&&byte| matches!(byte, b':' | b'.' | b'='))
+    else {
+        return false;
+    };
+    let mut at = 2;
+    while at + 1 < rest.len() {
+        match (rest[at], rest[at + 1]) {
+            (b'\\', b']' | b'\\') => at += 1,
+            (b'[', next) if next == terminator => return false,
+            (b']', _) => return false,
+            (byte, b']') if byte == terminator => return true,
+            _ => {}
+        }
+        at += 1;
+    }
+    false
 }
 
 /// The length of the POSIX class `[:name:]` or `[:^name:]` at the start of `rest`, when its
@@ -540,6 +570,12 @@ mod tests {
         assert_eq!(text("# {2,}#").as_deref(), Ok("(?-u) {2,}"));
         assert_eq!(text(r"<a\>b>i").as_deref(), Ok("(?-u)(?i)a>b"));
         assert_eq!(text("{a{2}}").as_deref(), Ok("(?-u)a{2}"));
+        // Flags come once each, in one order; PCRE reads `[:]` and `[^:ab:]` as plain
+        // classes; a group takes `+`.
+        assert_eq!(text("/a/sii").as_deref(), Ok("(?-u)(?i)(?s)a"));
+        assert_eq!(text("/[:]/").as_deref(), Ok("(?-u)[:]"));
+        assert_eq!(text("/[^:ab:]/").as_deref(), Ok("(?-u)[^:ab:]"));
+        assert_eq!(text("/(?:ab)+/").as_deref(), Ok("(?-u)(?:ab)+"));
     }
 
     #[test]
@@ -564,6 +600,10 @@ mod tests {
             r"/\1/",
             "/a{70000}/",
             "/[[:alpha:]-z]/",
+            "/[.a.]/",
+            "/[=a=]/",
+            "/(?:a){65535}/",
+            "/(a){2,}/",
         ] {
             assert!(text(php).is_err(), "{php} converted");
         }

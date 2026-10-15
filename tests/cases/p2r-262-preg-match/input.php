@@ -27,6 +27,21 @@ function to_last_line(string $text): int
     return $steps;
 }
 
+function first_digit(string $text): int
+{
+    $at = 0;
+    for (; $at < strlen($text) && !preg_match('/\d/', substr($text, $at, 1)); $at++) {
+        $text .= '';
+    }
+    return $at;
+}
+
+function flags(string $text): string
+{
+    $none = !preg_match('/a/', $text);
+    return (preg_match('/b/', $text) ? 'b' : '-') . ($none ? 'no-a' : 'a');
+}
+
 function compared(string $text): string
 {
     $parts = [
@@ -48,5 +63,7 @@ function compared(string $text): string
 
 echo kind('123'), ' ', kind('abc'), ' ', kind('a b'), ' ', kind('A1!'), "\n";
 echo to_last_line("a\nb\nc"), "\n";
+echo first_digit('ab3c'), ' ', first_digit('abc'), "\n";
+echo flags('ab'), ' ', flags('c'), "\n";
 echo compared('cat'), "\n";
 echo compared('dog'), "\n";

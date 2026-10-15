@@ -4,6 +4,8 @@
 pub struct Matcher {}
 
 impl Matcher {
+    pub const NON_DIGIT: &str = "#\\D#";
+
     pub fn new() -> Matcher {
         Matcher {}
     }

@@ -28,6 +28,29 @@ pub fn to_last_line(text: &str) -> i64 {
     return steps;
 }
 
+pub fn first_digit(text: &str) -> i64 {
+    let mut text = text.to_string();
+    let mut at: i64 = 0;
+    while at < text.len() as i64 && !php_preg_match(r"(?-u)\d", &php_substr(&text, at, Some(1))) {
+        text += "";
+        at += 1;
+    }
+    return at;
+}
+
+pub fn flags(text: &str) -> String {
+    let none = !php_preg_match(r"(?-u)a", text);
+    return format!(
+        "{}{}",
+        if php_preg_match(r"(?-u)b", text) {
+            "b"
+        } else {
+            "-"
+        },
+        if none { "no-a" } else { "a" }
+    );
+}
+
 pub fn compared(text: &str) -> String {
     let parts = vec![
         php_preg_match(r"(?-u)a", text),
@@ -82,6 +105,14 @@ fn main() {
     print!("{}", kind("A1!"));
     print!("\n");
     print!("{}", to_last_line("a\nb\nc"));
+    print!("\n");
+    print!("{}", first_digit("ab3c"));
+    print!(" ");
+    print!("{}", first_digit("abc"));
+    print!("\n");
+    print!("{}", flags("ab"));
+    print!(" ");
+    print!("{}", flags("c"));
     print!("\n");
     print!("{}", compared("cat"));
     print!("\n");

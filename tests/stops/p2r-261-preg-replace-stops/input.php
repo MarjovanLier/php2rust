@@ -46,6 +46,11 @@ final class Stops
         return preg_replace('/a/', 'b', $text) ?? $default;
     }
 
+    public static function replacements(string $text): string
+    {
+        return preg_replace('/a/', ['b'], $text) ?? '';
+    }
+
     public static function patterns(string $text): string
     {
         return preg_replace(['/a/', '/b/'], 'c', $text) ?? '';

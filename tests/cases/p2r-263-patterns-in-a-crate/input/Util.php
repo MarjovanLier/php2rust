@@ -10,7 +10,8 @@ final readonly class Util
 {
     public static function number(string $text): string
     {
-        $digits = preg_replace('#\D#', '', $text) ?? '';
+        // A pattern constant of another file of the crate (P2R-171).
+        $digits = preg_replace(Matcher::NON_DIGIT, '', $text) ?? '';
         return Matcher::digits($digits) ? $digits : '0';
     }
 }

@@ -24,6 +24,10 @@ impl Clean {
     pub fn dashes(text: &str) -> String {
         return php_preg_replace(r"(?-u)[[:space:]_]+", "-", &text.to_ascii_lowercase());
     }
+
+    pub fn digits_only(text: &str) -> bool {
+        return !php_preg_match(r"(?-u)\D", text);
+    }
 }
 
 fn php_trim(text: &str) -> String {
@@ -37,6 +41,12 @@ fn php_preg_replace(pattern: &str, replacement: &str, subject: &str) -> String {
     String::from_utf8_lossy(&regex.replace_all(subject.as_bytes(), replacement)).into_owned()
 }
 
+fn php_preg_match(pattern: &str, subject: &str) -> bool {
+    ::regex::bytes::Regex::new(pattern)
+        .expect("php2rust checked this pattern")
+        .is_match(subject.as_bytes())
+}
+
 fn main() {
     print!("{}", Clean::digits("80-01-01 5009 087"));
     print!("\n");
@@ -45,5 +55,14 @@ fn main() {
     print!("{}", Clean::squeeze("  a   b  c d  "));
     print!("\n");
     print!("{}", Clean::dashes("Hello  World_Again\tNow"));
+    print!("\n");
+    print!(
+        "{}",
+        if Clean::digits_only(&Clean::digits("80-01")) {
+            "digits"
+        } else {
+            "mixed"
+        }
+    );
     print!("\n");
 }

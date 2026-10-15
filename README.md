@@ -45,8 +45,8 @@ Output that holds a map uses the `indexmap` crate (`use indexmap::IndexMap;`). T
 no `Cargo.toml`. With plain `rustc`, pass the built crate:
 `--extern indexmap=<path to libindexmap.rlib> -L dependency=<its deps directory>`.
 Output that calls `preg_replace()` or `preg_match()` uses the `regex` crate through
-`::regex::` paths, and needs `regex = "1"` in the same way (`--extern regex=<path to
-libregex.rlib>` with plain `rustc`).
+`::regex::` paths, and needs `regex = "1.13"` in the same way (`--extern regex=<path to
+libregex.rlib>` with plain `rustc`); its patterns keep escapes that older versions reject.
 
 | Exit code | Meaning |
 |---|---|
@@ -198,13 +198,15 @@ converts:
   A declared map may hold a union (`array<int|string, scalar>`).
 - `preg_replace(P, R, S) ?? 'literal'` and `preg_match(P, S)` read as a bool (a
   condition, `!`, `&&`, `||`, or `=== 1`, `!== 0`, `=== 0` and `!== 1`), where `P` is a
-  string literal or class constant without the `u` flag, such as `'#\D#'` or
-  `'# {2,}#'`. The pattern becomes a `regex::bytes` pattern in `(?-u)` mode, which
-  matches bytes with ASCII classes as PCRE does without `u`, and the output holds the
-  helper `php_preg_replace` or `php_preg_match`. The pattern may use literals, `.`,
-  `\d \w \s \b` and their capitals, `\t \n \r \f \xhh`, classes with ranges and POSIX
-  names, `( )`, `(?: )`, `|`, the quantifiers and their lazy forms, `^`, `\A`, `\z`,
-  and `$` with the `m` flag; the flags `i`, `m` and `s`.
+  string literal, or a class or enum constant of the input with a literal value,
+  without the `u` flag, such as `'#\D#'` or `'# {2,}#'`. The pattern becomes a
+  `regex::bytes` pattern in `(?-u)` mode, which matches bytes with ASCII classes as
+  PCRE does without `u`, and the output holds the helper `php_preg_replace` or
+  `php_preg_match`. The pattern may use literals and escaped punctuation, `.`,
+  `\d \w \s \b` and their capitals, `\t \n \r \f \xhh`, `\x{..}` up to `7F`, classes
+  with ranges and POSIX names, `( )`, `(?: )`, `|`, the quantifiers and their lazy
+  forms (a count `{n}` not after a group), `^`, `\A`, `\z`, and `$` with the `m` flag;
+  the flags `i`, `m` and `s`.
 
 ## What stops the conversion
 
@@ -229,12 +231,16 @@ the others are findings of the Mago analyser. In short:
   one of them, `explode()` with a limit or an empty separator, and any
   `sprintf()` format other than text, `%s`, `%d` and `%%`, or with an argument count
   that does not match.
-- For patterns: a pattern that is not a literal or a class constant, the `u` flag and
-  every flag other than `i`, `m` and `s`, `$` without `m`, `^` with `m`, look-around,
-  backreferences, `\v`, `\Z` and every form not listed above. `preg_replace()` without
-  `??`, with a default that is not a string literal, with a limit, with a pattern that
-  can match the empty string, or with `$` or `\` in the replacement. `preg_match()` with
-  matches, or with its result used any other way (`=== false`, `== 1`, stored).
+- For patterns: a pattern that is not a literal or a constant of the input, the `u`
+  flag and every flag other than `i`, `m` and `s`, a byte that is not printable ASCII (a
+  real tab), `$` without `m`, `^` with `m`, look-around, backreferences, `\v`, `\Z`, a
+  quantifier after a quantifier or an assertion, a count after a group, a repeat of a
+  part that can match the empty string, and every form not listed above.
+  `preg_replace()` without `??`, with a default that is not a string literal, with a
+  limit, with a pattern that can match the empty string, with a replacement that is not
+  a literal or a constant or that holds `$` or `\`, or with a subject that is not a
+  string. `preg_match()` with matches, or with its result used any other way
+  (`=== false`, `== 1`, stored).
 - A `?:` without its middle part (`$a ?: $b`), inside another `?:`, of lists, of a
   nullable string or list, or with a string arm that is a call, a joined string, or a
   property read or list element on a call or `new`.

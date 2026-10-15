@@ -40,6 +40,12 @@ final class Stops
         return preg_match('/a/', $text) !== 2;
     }
 
+    /** @param list<string> $arguments */
+    public static function spread(array $arguments): bool
+    {
+        return preg_match(...$arguments) === 1;
+    }
+
     public static function notString(int $number): bool
     {
         return preg_match('/1/', $number) === 1;

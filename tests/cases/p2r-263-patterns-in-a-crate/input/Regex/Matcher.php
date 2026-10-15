@@ -7,6 +7,8 @@ namespace App\Regex;
 // This module is named regex, and the helper's ::regex:: paths still name the crate.
 final readonly class Matcher
 {
+    public const NON_DIGIT = '#\D#';
+
     public static function digits(string $text): bool
     {
         return preg_match('/^\d+\z/', $text) === 1;

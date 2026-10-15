@@ -287,6 +287,8 @@ pub fn rust_type(union: &TUnion, enums: &TypeNames) -> Result<RustType, String> 
     match found {
         // `?T` where `T` is itself nullable cannot be written; the union holds one null.
         Some(RustType::Option(_)) if nullable => Err(unknown()),
+        // `Option<PhpDateTime>` is `DateTime|false`, whose `None` is `false` (P2R-330).
+        Some(RustType::DateTime) if nullable => Err(unknown()),
         Some(ty) if nullable => Ok(RustType::Option(Box::new(ty))),
         Some(ty) => Ok(ty),
         None => Err(unknown()),

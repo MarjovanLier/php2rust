@@ -3055,7 +3055,9 @@ read takes the current date or time.
   Only these forms and those of this section take a `DateTime`. These
   stop the conversion: `new DateTime(..)`, every other method or
   property of `DateTime`, `DateTimeImmutable`, `DateTimeInterface`, a
-  union of `DateTime` with a type other than `false`, every comparison
+  union of `DateTime` with a type other than `false`, `?DateTime` and
+  `DateTime|null` (whose `null` the `None` of `DateTime|false` would
+  confuse with `false`), every comparison
   of two values of type `DateTime` or `DateTime|false` (PHP compares
   objects by identity or by their fields), `=== null`, `!== null`, `??`
   and `?->` on a `DateTime|false` value, whose `None` is PHP's `false`,

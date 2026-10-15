@@ -60,24 +60,19 @@ function known(string $text): bool
     return parse($text) !== null;
 }
 
-function order(string $a, string $b): bool
+function less(DateTime $a, DateTime $b): bool
 {
-    $first = parse($a);
-    $second = parse($b);
-    if ($first === false || $second === false) {
-        return false;
-    }
-    return $first < $second;
+    return $a < $b;
 }
 
-function loose(string $a, string $b): bool
+function loose(DateTime $a, DateTime $b): bool
 {
-    $first = parse($a);
-    $second = parse($b);
-    if ($first === false || $second === false) {
-        return false;
-    }
-    return $first == $second;
+    return $a == $b;
+}
+
+function nullable(?DateTime $date): string
+{
+    return $date === null ? 'none' : $date->format('Y');
 }
 
 function interfaced(DateTimeInterface $other): string

@@ -124,6 +124,19 @@ impl Converter<'_> {
             Expression::Call(Call::Function(call)) if self.calls_built_in(call, b"checkdate") => {
                 self.checkdate(call, expression)
             }
+            Expression::Call(Call::Function(call)) if self.calls_built_in(call, b"array_map") => {
+                self.array_map(call, expression)
+            }
+            Expression::Call(Call::Function(call))
+                if self.calls_built_in(call, b"preg_replace_callback") =>
+            {
+                self.record_refused(expression);
+                self.refuse(
+                    expression,
+                    "preg_replace_callback() converts only as preg_replace_callback(P, fn, S) ?? 'default' (P2R-302)",
+                );
+                None
+            }
             Expression::Call(Call::Function(call)) if self.calls_built_in(call, b"in_array") => {
                 self.in_array(call, expression)
             }

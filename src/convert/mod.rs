@@ -32,6 +32,7 @@ use variables::Variables;
 mod booleans;
 mod changes;
 mod classes;
+mod closures;
 mod control;
 mod crates;
 mod enums;
@@ -199,6 +200,7 @@ fn analyse(inputs: Vec<Input>, library: bool) -> Result<Vec<(String, String)>, F
         );
         analysed.push(Analysed {
             file: file.id,
+            source: file,
             resolved: names,
             artifacts,
         });
@@ -439,6 +441,8 @@ enum Context<'t> {
 /// takes the file of its node (P2R-171).
 struct Analysed<'c> {
     file: FileId,
+    /// The file itself, which names the metadata of its closures (P2R-300).
+    source: &'c File,
     /// The fully qualified name of each name in the file, as PHP resolves it (P2R-151).
     resolved: &'c ResolvedNames<'c>,
     /// The type Mago found for each expression, keyed by its span (P2R-21).
@@ -615,6 +619,12 @@ impl<'c> Converter<'c> {
         let Expression::Identifier(identifier) = call.function else {
             return false;
         };
+        self.names_built_in(identifier, name)
+    }
+
+    /// True when `identifier` names the built-in function `name`, as for a call
+    /// (P2R-32, P2R-151).
+    fn names_built_in(&self, identifier: &Identifier<'_>, name: &[u8]) -> bool {
         let key = self.identifier_key(identifier);
         !self.functions.contains_key(&key)
             && (key == name || (self.falls_back(identifier) && short_name(&key) == name))

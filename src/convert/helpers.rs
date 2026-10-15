@@ -26,10 +26,12 @@ pub(super) enum Helper {
     PhpLtrimChars,
     PhpRtrimChars,
     PhpCheckdate,
+    PhpUcwords,
+    PhpPregReplaceCallback,
 }
 
 impl Helper {
-    const ALL: [Helper; 19] = [
+    const ALL: [Helper; 21] = [
         Helper::CtypeDigit,
         Helper::PhpInt,
         Helper::PhpOffset,
@@ -49,6 +51,8 @@ impl Helper {
         Helper::PhpLtrimChars,
         Helper::PhpRtrimChars,
         Helper::PhpCheckdate,
+        Helper::PhpUcwords,
+        Helper::PhpPregReplaceCallback,
     ];
 
     fn name(self) -> &'static str {
@@ -72,6 +76,8 @@ impl Helper {
             Helper::PhpLtrimChars => "php_ltrim_chars",
             Helper::PhpRtrimChars => "php_rtrim_chars",
             Helper::PhpCheckdate => "php_checkdate",
+            Helper::PhpUcwords => "php_ucwords",
+            Helper::PhpPregReplaceCallback => "php_preg_replace_callback",
         }
     }
 
@@ -97,6 +103,8 @@ impl Helper {
             Helper::PhpLtrimChars => PHP_LTRIM_CHARS,
             Helper::PhpRtrimChars => PHP_RTRIM_CHARS,
             Helper::PhpCheckdate => PHP_CHECKDATE,
+            Helper::PhpUcwords => PHP_UCWORDS,
+            Helper::PhpPregReplaceCallback => PHP_PREG_REPLACE_CALLBACK,
         }
     }
 
@@ -369,3 +377,50 @@ const PHP_CHECKDATE: &str = r"fn php_checkdate(month: i64, day: i64, year: i64) 
     };
     (1..=32767).contains(&year) && (1..=days).contains(&day)
 }";
+
+/// `ucwords()` with PHP's default delimiters: the first byte and each byte after a space,
+/// tab, carriage return, line feed, form feed or vertical tab become ASCII capitals
+/// (P2R-303).
+const PHP_UCWORDS: &str = r#"fn php_ucwords(text: &str) -> String {
+    let mut bytes = text.as_bytes().to_vec();
+    let mut start = true;
+    for byte in &mut bytes {
+        if start {
+            byte.make_ascii_uppercase();
+        }
+        start = matches!(*byte, b' ' | b'\t' | b'\r' | b'\n' | b'\x0C' | b'\x0B');
+    }
+    String::from_utf8(bytes).expect("only ASCII letters changed")
+}"#;
+
+/// `preg_replace_callback()` of a pattern without `u`: the callback gets the keys "0" to
+/// the last group that took part in the match, with "" for a group before it that did not,
+/// as PHP passes them (P2R-302).
+const PHP_PREG_REPLACE_CALLBACK: &str = r#"fn php_preg_replace_callback(
+    pattern: &str,
+    callback: impl Fn(&IndexMap<String, String>) -> String,
+    subject: &str,
+) -> String {
+    let regex = ::regex::bytes::Regex::new(pattern).expect("php2rust checked this pattern");
+    let bytes = subject.as_bytes();
+    let mut out = Vec::with_capacity(bytes.len());
+    let mut last = 0;
+    for groups in regex.captures_iter(bytes) {
+        let whole = groups.get(0).expect("a match has group 0");
+        out.extend_from_slice(&bytes[last..whole.start()]);
+        let taken = (0..groups.len())
+            .rev()
+            .find(|&at| groups.get(at).is_some())
+            .unwrap_or(0);
+        let matches: IndexMap<String, String> = (0..=taken)
+            .map(|at| {
+                let text = groups.get(at).map_or(&b""[..], |group| group.as_bytes());
+                (at.to_string(), String::from_utf8_lossy(text).into_owned())
+            })
+            .collect();
+        out.extend_from_slice(callback(&matches).as_bytes());
+        last = whole.end();
+    }
+    out.extend_from_slice(&bytes[last..]);
+    String::from_utf8_lossy(&out).into_owned()
+}"#;

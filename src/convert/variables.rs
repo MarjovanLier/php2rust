@@ -249,6 +249,9 @@ pub(super) struct Variables {
     /// The spans of the top-level `if ($v === null)` statements whose binding is owned
     /// where the type allows it (P2R-290); see `functions::owned_checks`.
     pub(super) owned_checks: HashSet<Span>,
+    /// While the body of an arrow function converts: its first parameter. A variable
+    /// before it belongs to the enclosing body (P2R-300).
+    pub(super) closure_start: Option<Var>,
 }
 
 impl Default for Variables {
@@ -274,6 +277,7 @@ impl Default for Variables {
             guards: Vec::new(),
             step_guards: Vec::new(),
             owned_checks: HashSet::new(),
+            closure_start: None,
         }
     }
 }
@@ -516,6 +520,11 @@ impl Variables {
         self.entries[var].ty.as_ref()
     }
 
+    /// The variable the next declaration adds.
+    pub(super) fn next_var(&self) -> Var {
+        self.entries.len()
+    }
+
     /// The Rust name of `var`.
     pub(super) fn name_of(&self, var: Var) -> &str {
         &self.entries[var].rust_name
@@ -688,6 +697,29 @@ impl Converter<'_> {
             return None;
         };
         self.variables.read(var, variable.span);
+        // The closure borrows a Copy value, which nothing writes while it runs; anything
+        // else it would borrow or move, where PHP copies it (P2R-300).
+        if self
+            .variables
+            .closure_start
+            .is_some_and(|start| var < start)
+        {
+            let message = if &variable.name[1..] == THIS {
+                "$this in an arrow function is not supported (P2R-300)"
+            } else if self.variables.entries[var]
+                .ty
+                .as_ref()
+                .is_some_and(RustType::is_copy)
+            {
+                ""
+            } else {
+                "an arrow function may read only int, float, bool and enum variables of the enclosing body (P2R-300)"
+            };
+            if !message.is_empty() {
+                self.refuse(variable, message);
+                return None;
+            }
+        }
         if self
             .variables
             .step_guards
@@ -1720,6 +1752,27 @@ impl Converter<'_> {
             owned: false,
         });
         self.variables.write(var, Some(variable.span));
+        var
+    }
+
+    /// Declares a parameter of an arrow function, of type `ty`, which only the body reads
+    /// until [`Variables::close_bindings`] ends it. It borrows as a function parameter
+    /// does (P2R-24, P2R-300).
+    pub(super) fn bind_parameter(&mut self, variable: &DirectVariable<'_>, ty: RustType) -> Var {
+        let (var, named) = self.declare(variable);
+        let entry = &mut self.variables.entries[var];
+        entry.borrowed = true;
+        entry.ty = named.then_some(ty);
+        entry.binding = Some(Binding {
+            snake: String::from_utf8_lossy(&entry.php_name).to_snake_case(),
+            rewritten: false,
+            closed: false,
+            null_check: false,
+            owned: false,
+        });
+        // A write at no span, as a function parameter has, so an unread parameter is no
+        // P2R-35 problem.
+        self.variables.write(var, None);
         var
     }
 

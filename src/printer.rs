@@ -145,6 +145,8 @@ pub enum RExpr {
     /// `match` over the variants of a union value, as text; `true` when it gives a `&str`
     /// that borrows only from literals and the matched variable (P2R-233).
     Variants(String, bool),
+    /// `|x: T| body`: an arrow function as a callback, with its typed parameters (P2R-300).
+    Closure(Vec<String>, Box<RExpr>),
 }
 
 /// Where the error of a call that throws goes (P2R-213).
@@ -440,6 +442,15 @@ fn render(expr: &RExpr, anchor: bool, min_precedence: u8) -> String {
         RExpr::Raw(text) => text.clone(),
         RExpr::Variants(text, _) if min_precedence > 0 => format!("({text})"),
         RExpr::Variants(text, _) => text.clone(),
+        RExpr::Closure(parameters, body) => {
+            // The body's literals need their type, as a return value's do (P2R-49).
+            let text = format!("|{}| {}", parameters.join(", "), render(body, true, 0));
+            if min_precedence > 0 {
+                format!("({text})")
+            } else {
+                text
+            }
+        }
     }
 }
 
@@ -503,7 +514,7 @@ pub fn anchored(expr: &RExpr) -> bool {
         RExpr::Contains(..) => true,
         RExpr::If(_, then, otherwise) => anchored(then) || anchored(otherwise),
         RExpr::Let(_) | RExpr::Struct(..) | RExpr::Raised(..) | RExpr::Raw(_) => true,
-        RExpr::Variants(..) => true,
+        RExpr::Variants(..) | RExpr::Closure(..) => true,
     }
 }
 
@@ -545,7 +556,7 @@ pub fn literal_value(expr: &RExpr) -> Option<i64> {
         RExpr::None | RExpr::Some(_) | RExpr::MapOwned(_) | RExpr::Unwrap { .. } => None,
         RExpr::Path(_) | RExpr::Field(..) | RExpr::MethodCall(..) => None,
         RExpr::Contains(..) | RExpr::If(..) | RExpr::Let(_) | RExpr::Struct(..) => None,
-        RExpr::Raised(..) | RExpr::Raw(_) | RExpr::Variants(..) => None,
+        RExpr::Raised(..) | RExpr::Raw(_) | RExpr::Variants(..) | RExpr::Closure(..) => None,
     }
 }
 

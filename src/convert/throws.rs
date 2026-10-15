@@ -475,10 +475,12 @@ impl Converter<'_> {
                 Some(RExpr::Raised(Box::new(call), raise))
             }
             None => {
-                self.refuse(
-                    node,
-                    "a call that throws cannot stand in the default of ?? or the message of ?? throw, which Rust runs in a closure (P2R-213)",
-                );
+                let message = if self.variables.closure_start.is_some() {
+                    "a call that throws cannot stand in an arrow function, whose ? would leave the closure (P2R-300)"
+                } else {
+                    "a call that throws cannot stand in the default of ?? or the message of ?? throw, which Rust runs in a closure (P2R-213)"
+                };
+                self.refuse(node, message);
                 None
             }
         }

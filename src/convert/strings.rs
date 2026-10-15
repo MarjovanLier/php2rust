@@ -196,12 +196,13 @@ impl Converter<'_> {
 
     /// The name of the section 19 built-in function a call runs, when it runs one.
     pub(super) fn string_function_name(&self, call: &FunctionCall<'_>) -> Option<&'static str> {
-        const NAMES: [&str; 12] = [
+        const NAMES: [&str; 13] = [
             "trim",
             "ltrim",
             "rtrim",
             "ucfirst",
             "lcfirst",
+            "ucwords",
             "strtolower",
             "strtoupper",
             "str_repeat",
@@ -235,8 +236,9 @@ impl Converter<'_> {
                 "rtrim",
                 (Helper::PhpRtrim, Helper::PhpRtrimChars),
             ),
-            "ucfirst" => self.string_helper(call, node, "ucfirst", Helper::PhpUcfirst),
-            "lcfirst" => self.string_helper(call, node, "lcfirst", Helper::PhpLcfirst),
+            "ucfirst" => self.string_helper(call, node, ("ucfirst", "P2R-183"), Helper::PhpUcfirst),
+            "lcfirst" => self.string_helper(call, node, ("lcfirst", "P2R-183"), Helper::PhpLcfirst),
+            "ucwords" => self.string_helper(call, node, ("ucwords", "P2R-303"), Helper::PhpUcwords),
             "strtolower" => self.ascii_case(call, node, "strtolower", "to_ascii_lowercase"),
             "strtoupper" => self.ascii_case(call, node, "strtoupper", "to_ascii_uppercase"),
             "str_repeat" => self.str_repeat(call, node),
@@ -248,21 +250,22 @@ impl Converter<'_> {
     }
 
     /// A built-in function of one `string` argument that converts to a helper call, of
-    /// type `String`: `ucfirst` and `lcfirst` (P2R-183).
+    /// type `String`: `ucfirst` and `lcfirst` (P2R-183), and `ucwords` (P2R-303), with
+    /// `id` the requirement.
     pub(super) fn string_helper(
         &mut self,
         call: &FunctionCall<'_>,
         node: &Expression<'_>,
-        name: &str,
+        (name, id): (&str, &str),
         helper: Helper,
     ) -> Option<(RExpr, RustType)> {
         let arguments = self.built_in_arguments(
             call,
             node,
             (1, 1),
-            &format!("{name}() converts with one string argument only (P2R-183)"),
+            &format!("{name}() converts with one string argument only ({id})"),
         )?;
-        let message = format!("{name}() is supported only on a string (P2R-183)");
+        let message = format!("{name}() is supported only on a string ({id})");
         let text = self.typed_argument(arguments[0], &RustType::String, &message)?;
         let text = self.borrowed(text, &RustType::String);
         Some((self.helper_call(helper, vec![text]), RustType::String))

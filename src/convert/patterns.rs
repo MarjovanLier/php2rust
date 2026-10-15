@@ -2,7 +2,7 @@
 //! allow-list of the syntax both engines read alike (P2R-260).
 
 use mago_syntax::cst::*;
-use regex_syntax::hir::{Hir, HirKind};
+use regex_syntax::hir::{Class, Hir, HirKind};
 
 use super::Converter;
 use super::helpers::Helper;
@@ -73,16 +73,7 @@ impl Converter<'_> {
             &RustType::String,
             "preg_replace() converts on a string subject only (P2R-261)",
         );
-        // A default that is not a literal could hold the only read of a variable.
-        if !matches!(
-            unparenthesized(default),
-            Expression::Literal(Literal::String(_))
-        ) {
-            self.record_refused(default);
-            self.refuse(
-                default,
-                "the default of ?? after preg_replace() must be a string literal, which the conversion drops (P2R-261)",
-            );
+        if !self.dropped_default(default, ("preg_replace", "P2R-261")) {
             return None;
         }
         let (pattern, replacement, subject) = (pattern?, replacement?, subject?);
@@ -97,6 +88,94 @@ impl Converter<'_> {
         let arguments = vec![raw(&pattern.text), RExpr::Str(replacement), subject];
         Some((
             self.helper_call(Helper::PhpPregReplace, arguments),
+            RustType::String,
+        ))
+    }
+
+    /// True when the default of `??` after the call of `name` is a string literal, which the
+    /// conversion drops; otherwise false with the problem recorded (`id`). A default that
+    /// is not a literal could hold the only read of a variable.
+    fn dropped_default(&mut self, default: &Expression<'_>, (name, id): (&str, &str)) -> bool {
+        if matches!(
+            unparenthesized(default),
+            Expression::Literal(Literal::String(_))
+        ) {
+            return true;
+        }
+        self.record_refused(default);
+        self.refuse(
+            default,
+            format!(
+                "the default of ?? after {name}() must be a string literal, which the conversion drops ({id})"
+            ),
+        );
+        false
+    }
+
+    /// `preg_replace_callback(P, fn, S) ?? 'd'` as
+    /// `php_preg_replace_callback(r"..", |matches: &IndexMap<String, String>| .., s)`, with
+    /// the default dropped as for `preg_replace` (P2R-302).
+    pub(super) fn preg_replace_callback(
+        &mut self,
+        call: &FunctionCall<'_>,
+        node: &Expression<'_>,
+        default: &Expression<'_>,
+    ) -> Option<(RExpr, RustType)> {
+        let arguments = self.built_in_arguments(
+            call,
+            node,
+            (3, 3),
+            "preg_replace_callback() converts with three arguments only (P2R-302)",
+        )?;
+        let pattern = self.pattern_argument(arguments[0]);
+        let matches = RustType::Map(Box::new(RustType::String), Box::new(RustType::String));
+        let callback = match unparenthesized(arguments[1]) {
+            Expression::ArrowFunction(arrow)
+                if matches!(
+                    arrow.return_type_hint.as_ref().map(|r| &r.hint),
+                    Some(Hint::String(_))
+                ) =>
+            {
+                self.arrow_closure(arrow, &matches, true)
+            }
+            other => {
+                self.record_refused(other);
+                self.refuse(
+                    other,
+                    "the callback of preg_replace_callback() converts only as an arrow function that declares the return type string (P2R-302)",
+                );
+                None
+            }
+        };
+        let subject = self.typed_argument(
+            arguments[2],
+            &RustType::String,
+            "preg_replace_callback() converts on a string subject only (P2R-302)",
+        );
+        if !self.dropped_default(default, ("preg_replace_callback", "P2R-302")) {
+            return None;
+        }
+        let (pattern, (callback, _), subject) = (pattern?, callback?, subject?);
+        if pattern.empty {
+            self.refuse(
+                arguments[0],
+                "a pattern that can match the empty string is not supported in preg_replace_callback(), because PCRE also matches empty right after a match where regex does not (P2R-302)",
+            );
+            return None;
+        }
+        if pattern.wide {
+            self.refuse(
+                arguments[0],
+                "a pattern that can match a byte above 7F is not supported in preg_replace_callback(), because a group could hold part of a character, which a Rust String cannot (P2R-302)",
+            );
+            return None;
+        }
+        let subject = self.borrowed(subject, &RustType::String);
+        Some((
+            self.helper_call(
+                Helper::PhpPregReplaceCallback,
+                vec![raw(&pattern.text), callback, subject],
+            ),
             RustType::String,
         ))
     }
@@ -184,10 +263,12 @@ const POSIX: [&str; 14] = [
     "space", "upper", "word", "xdigit",
 ];
 
-/// A converted pattern: the Rust pattern text, and whether it can match the empty string.
+/// A converted pattern: the Rust pattern text, whether it can match the empty string, and
+/// whether it can match a byte above `7F`.
 pub(super) struct Pattern {
     pub(super) text: String,
     pub(super) empty: bool,
+    pub(super) wide: bool,
 }
 
 /// What the last part of the body was, for the quantifier rules (P2R-260).
@@ -245,7 +326,22 @@ pub(super) fn rust_pattern(php: &[u8]) -> Result<Pattern, String> {
         );
     }
     let empty = hir.properties().minimum_len() == Some(0);
-    Ok(Pattern { text, empty })
+    Ok(Pattern {
+        text,
+        empty,
+        wide: wide(&hir),
+    })
+}
+
+/// True when the pattern can match a byte above `7F`, which may be one byte of a character
+/// of more than one (P2R-302).
+fn wide(hir: &Hir) -> bool {
+    match hir.kind() {
+        HirKind::Class(Class::Bytes(class)) => class.ranges().iter().any(|r| r.end() > 0x7F),
+        HirKind::Class(Class::Unicode(class)) => class.ranges().iter().any(|r| r.end() > '\x7F'),
+        HirKind::Literal(literal) => literal.0.iter().any(|&byte| byte > 0x7F),
+        kind => kind.subs().iter().any(wide),
+    }
 }
 
 /// The problem of a pattern outside the allow-list, naming what it may hold.

@@ -161,14 +161,26 @@ converts:
   `str_starts_with()`, `str_ends_with()`, `str_contains()`, `substr()`,
   `in_array($v, [...], true)` on a list literal, `trim()`, `ltrim()` and `rtrim()` with
   one argument or with a character list (`'a..z'` ranges as PHP reads them),
-  `ucfirst()`, `lcfirst()`, `strtolower()`, `strtoupper()`,
-  `str_repeat()`, `str_replace()` on three strings, `implode()` of a list of strings,
-  `explode()` without a limit, `checkdate()`, and `sprintf()` with a literal format of
-  text, `%s`, `%d` and `%%`. Where PHP's rules differ from Rust's standard library, the
-  output holds a small private helper function that copies them (`php_int`, `php_offset`,
-  `php_substr`, `php_trim`, `php_ltrim`, `php_rtrim`, `php_ucfirst`, `php_lcfirst`,
-  `php_replace`, `php_explode`, `php_charmask`, `php_trim_chars`, `php_ltrim_chars`,
-  `php_rtrim_chars`, `php_checkdate`, `ctype_digit`), only when it calls one.
+  `ucfirst()`, `lcfirst()`, `ucwords()` with one argument, `strtolower()`,
+  `strtoupper()`, `str_repeat()`, `str_replace()` on three strings, `implode()` of a
+  list of strings, `explode()` without a limit, `checkdate()`, and `sprintf()` with a
+  literal format of text, `%s`, `%d` and `%%`. Where PHP's rules differ from Rust's
+  standard library, the output holds a small private helper function that copies them
+  (`php_int`, `php_offset`, `php_substr`, `php_trim`, `php_ltrim`, `php_rtrim`,
+  `php_ucfirst`, `php_lcfirst`, `php_replace`, `php_explode`, `php_charmask`,
+  `php_trim_chars`, `php_ltrim_chars`, `php_rtrim_chars`, `php_checkdate`,
+  `php_ucwords`, `php_preg_replace_callback`, `ctype_digit`), only when it calls one.
+- arrow functions as the callback of `array_map` or `preg_replace_callback`, which run
+  it at once: `array_map(fn(int $x): int => $x * $by, $xs)` becomes
+  `xs.iter().copied().map(|x: i64| x * by).collect::<Vec<_>>()`, and a string list goes
+  through `.map(String::as_str)` first. The callback takes one typed parameter and may
+  read int, float, bool and enum variables of the enclosing body. `array_map` also
+  takes a first-class callable of a function of the input or of `trim`, `ltrim`,
+  `rtrim`, `strtolower`, `strtoupper`, `ucfirst`, `lcfirst` or `ucwords`, as
+  `array_map(ucwords(...), $words)`. `preg_replace_callback(P, fn(array $m): string =>
+  .., S) ?? 'literal'` gives the callback the matches as an `IndexMap` with the keys
+  `"0"`, `"1"` and on, as PHP passes them, for a pattern of the kind above that cannot
+  match the empty string or a byte above `7F`.
 - integer literals in every PHP form, float literals, and single-quoted and
   double-quoted strings.
 - exceptions of PHP's built-in classes (`Exception`, `RuntimeException`,
@@ -231,7 +243,8 @@ Anything not listed above stops the conversion. php2rust then prints every probl
 its line and column, and writes nothing. Its own messages end with the requirement ID;
 the others are findings of the Mago analyser. In short:
 
-- PHP that version 1 does not convert, for example closures, interfaces, casts other
+- PHP that version 1 does not convert, for example closures other than the callbacks
+  above, interfaces, casts other
   than the two above, `print`, `printf`, `exit`, heredoc, global constants other than
   `true` and `false`, and built-in functions other than those above. `in_array()`
   without `true` as its third argument, because PHP then compares loosely.
@@ -469,8 +482,9 @@ php2rust refuses some valid PHP that version 1 converts in other forms:
 - `trim()` with such a character list that holds a `..` that starts no range: PHP
   warns and Rust does not; both remove the same bytes.
 - A pattern that runs past PCRE's backtrack, recursion or JIT stack limit: PHP's
-  `preg_replace()` gives `null`, so `??` gives the default, and `preg_match()` gives
-  `false`. Rust's `regex` has no such limit and gives the full result.
+  `preg_replace()` and `preg_replace_callback()` give `null`, so `??` gives the
+  default, and `preg_match()` gives `false`. Rust's `regex` has no such limit and gives
+  the full result.
 - An array shape that becomes a map, where a PHP caller outside the converted code
   built the array in another key order: the Rust map has the order of the converted
   code's literals, because a struct has no order.
@@ -494,7 +508,7 @@ php2rust refuses some valid PHP that version 1 converts in other forms:
 The tests need PHP 8.5 on `PATH` and the Rust toolchain pinned in
 `rust-toolchain.toml` (`rustup toolchain install` installs it). Each folder under
 `tests/cases`, `tests/stops` and `tests/errors` is one test, and `cargo test` also checks
-that each requirement from P2R-07 to P2R-49 and from P2R-100 to P2R-199 starts the name of
+that each requirement from P2R-07 to P2R-49 and from P2R-100 to P2R-399 starts the name of
 a case or stop folder.
 To rewrite every
 `expected.rs` and `expected.txt` from the current output:

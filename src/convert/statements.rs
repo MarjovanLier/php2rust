@@ -124,24 +124,9 @@ impl Converter<'_> {
             (Context::Function(None), None) if self.throwing => "return Ok(());".to_owned(),
             (Context::Function(None), None) => "return;".to_owned(),
             (Context::Function(Some(returns)), Some(value)) => {
-                // Mago reports a value that does not match the declared return type (P2R-11).
-                let Some((expr, ty)) = self.value(value, Some(returns)) else {
+                let Some(expr) = self.returned_value(value, returns) else {
                     return;
                 };
-                if nulls::null_for_plain(&ty, returns) {
-                    self.refuse(
-                        value,
-                        "a value that may be null cannot be returned where the return type is not nullable (P2R-106)",
-                    );
-                    return;
-                }
-                let Some(expr) = self.declared_value(value, expr, &ty, returns) else {
-                    return;
-                };
-                let Some(expr) = self.kept(value, expr, &ty) else {
-                    return;
-                };
-                let expr = nulls::wrapped(expr, &ty, returns);
                 if self.throwing {
                     format!("return Ok({});", printer::expr(&expr, false))
                 } else {
@@ -157,6 +142,28 @@ impl Converter<'_> {
             }
         };
         body.push(emit(depth, text));
+    }
+
+    /// `value` as the return value of a function declared to return `returns`: widened,
+    /// wrapped and owned as that type needs, or `None` with a problem recorded. Also the
+    /// body of an arrow function with a declared return type (P2R-300).
+    pub(super) fn returned_value(
+        &mut self,
+        value: &Expression<'_>,
+        returns: &RustType,
+    ) -> Option<RExpr> {
+        // Mago reports a value that does not match the declared return type (P2R-11).
+        let (expr, ty) = self.value(value, Some(returns))?;
+        if nulls::null_for_plain(&ty, returns) {
+            self.refuse(
+                value,
+                "a value that may be null cannot be returned where the return type is not nullable (P2R-106)",
+            );
+            return None;
+        }
+        let expr = self.declared_value(value, expr, &ty, returns)?;
+        let expr = self.kept(value, expr, &ty)?;
+        Some(nulls::wrapped(expr, &ty, returns))
     }
 
     /// A function or method call as a statement, or as a `for` initialisation or step

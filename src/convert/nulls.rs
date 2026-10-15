@@ -329,6 +329,11 @@ impl Converter<'_> {
         {
             return self.preg_replace(call, left_node, binary.rhs);
         }
+        if let Expression::Call(Call::Function(call)) = left_node
+            && self.calls_built_in(call, b"preg_replace_callback")
+        {
+            return self.preg_replace_callback(call, left_node, binary.rhs);
+        }
         // A map variable keeps its type where Mago gives it a shape (P2R-240).
         let holder = match left_node {
             Expression::ArrayAccess(access) => match self.chain_type(access.array) {
@@ -430,6 +435,15 @@ impl Converter<'_> {
         left_node: &Expression<'_>,
         throw: &Throw<'_>,
     ) -> Option<(RExpr, RustType)> {
+        if self.variables.closure_start.is_some() {
+            self.record_refused(binary.lhs);
+            self.record_refused(binary.rhs);
+            self.refuse(
+                throw,
+                "a throw cannot stand in an arrow function, whose ? would leave the closure (P2R-300)",
+            );
+            return None;
+        }
         let left = self.coalesce_left(binary.lhs);
         let exception = self.thrown_lazily(throw);
         let ((left, left_type), exception) = (left?, exception?);

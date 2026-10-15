@@ -85,7 +85,8 @@ converts:
   matching arm of `$v !== null ? .. : ..`, `$v` is a plain value (`if let` and
   `let ... else`). After such an `if ($v === null)` at the top level of a function or
   method body, whose body ends with `return` or `throw`, later statements may assign `$v`
-  again: a copy line (`let mut v = v.to_string();`) makes the plain value the body's own.
+  again when it holds a string, list, map, int, float, bool or enum: a copy line
+  (`let mut v = v.to_string();`) makes the plain value the body's own.
   A nullable object or shape (`?Point`) becomes `Option<Point>`, and
   `Option<&Point>` as a parameter.
 - one `namespace Acme\Shop;` right after the `declare`, and `use` imports of classes,
@@ -241,9 +242,10 @@ the others are findings of the Mago analyser. In short:
 - A function, variable or parameter named like a helper (`php_int`, `php_substr` and the
   others above), which would hide it. A shift by a count that is not a literal from 0 to
   63, and a write to a string offset.
-- For the string functions: a `trim()` character list, written as a literal or a class
-  constant, with a `..` that starts no range or a byte above `7F`, a `str_repeat()` count that
-  may be negative, an array argument of `str_replace()`, `implode()` with one argument or
+- For the string functions: a `trim()`, `ltrim()` or `rtrim()` character list, written
+  as a literal or a class constant, with a `..` that starts no range or a byte above
+  `7F`, a `str_repeat()` count that may be negative, an array argument of
+  `str_replace()`, `implode()` with one argument or
   with a glue other than a literal, constant, variable, parameter or property read on
   one of them, `explode()` with a limit or an empty separator, and any
   `sprintf()` format other than text, `%s`, `%d` and `%%`, or with an argument count

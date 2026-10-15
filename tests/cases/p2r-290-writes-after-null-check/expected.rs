@@ -63,6 +63,58 @@ pub fn put(m: Option<&IndexMap<String, i64>>) -> i64 {
     return m.len() as i64 * 10 + m["k"];
 }
 
+pub fn drop(m: Option<&IndexMap<String, i64>>) -> i64 {
+    let Some(m) = m else {
+        return -1;
+    };
+    let mut m = m.clone();
+    m.shift_remove("a");
+    return m.len() as i64;
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Suit {
+    Hearts,
+    Spades,
+}
+
+impl Suit {
+    pub fn value(self) -> &'static str {
+        match self {
+            Suit::Hearts => "h",
+            Suit::Spades => "s",
+        }
+    }
+}
+
+pub fn scalars(f: Option<f64>, b: Option<bool>, s: Option<Suit>) -> String {
+    let Some(f) = f else {
+        return String::from("no float");
+    };
+    let mut f = f;
+    let Some(b) = b else {
+        return String::from("no bool");
+    };
+    let mut b = b;
+    let Some(s) = s else {
+        return String::from("no suit");
+    };
+    let mut s = s;
+    f *= 2.5;
+    b = !b;
+    s = if s == Suit::Hearts {
+        Suit::Spades
+    } else {
+        Suit::Hearts
+    };
+    return format!(
+        "{} {} {}",
+        if f > 4.0 { "big" } else { "small" },
+        if b { "yes" } else { "no" },
+        s.value()
+    );
+}
+
 pub fn maybe(s: &str) -> Option<String> {
     if s == "" {
         return None;
@@ -208,6 +260,24 @@ fn main() {
     print!("{}", put(None));
     print!(" ");
     print!("{}", put(Some(&IndexMap::from([(String::from("k"), 2)]))));
+    print!("\n");
+    print!(
+        "{}",
+        drop(Some(&IndexMap::from([
+            (String::from("a"), 1),
+            (String::from("b"), 2)
+        ])))
+    );
+    print!(" ");
+    print!("{}", drop(None));
+    print!("\n");
+    print!("{}", scalars(Some(1.5), Some(false), Some(Suit::Hearts)));
+    print!(" ");
+    print!("{}", scalars(None, Some(true), None));
+    print!(" ");
+    print!("{}", scalars(Some(2.0), None, None));
+    print!(" ");
+    print!("{}", scalars(Some(2.0), Some(true), None));
     print!("\n");
     print!("{}", local("ab"));
     print!(" ");

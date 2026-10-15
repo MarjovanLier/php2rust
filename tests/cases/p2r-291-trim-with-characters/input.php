@@ -2,6 +2,16 @@
 
 declare(strict_types=1);
 
+final class Masks
+{
+    public const string LETTERS = 'a..c.';
+
+    public static function clean(string $text): string
+    {
+        return trim($text, self::LETTERS);
+    }
+}
+
 function show(string $text, string $characters): string
 {
     return '[' . trim($text, $characters) . '|' . ltrim($text, $characters) . '|'
@@ -17,3 +27,4 @@ foreach ($texts as $text) {
 }
 echo trim('--name--', '-'), ' ', ltrim('0012', '0'), ' ', rtrim("line\r\n", "\r\n"), "\n";
 echo trim('abcHELLOcba', 'a..c'), ' ', rtrim('1.500', '0..9'), "\n";
+echo Masks::clean('.abXYba.'), ' ', ltrim('c.x', Masks::LETTERS), "\n";

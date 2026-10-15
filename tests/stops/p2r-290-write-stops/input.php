@@ -80,6 +80,22 @@ function shaped(?array $p): int
     return $p['a'];
 }
 
+final readonly class Point
+{
+    public function __construct(public int $x)
+    {
+    }
+}
+
+function obj(?Point $p): int
+{
+    if ($p === null) {
+        return 0;
+    }
+    $p = new Point(3);
+    return $p->x;
+}
+
 function unread(?string $v): string
 {
     if ($v === null) {
@@ -105,4 +121,4 @@ function looped(?string $v, array $xs): string
 }
 
 echo inBody('a'), notLast('a', true), mayBeNull('a'), toNull('a'), counted(1), tested('a'),
-    shaped(['a' => 1]), unread('a'), looped('a', ['b']), "\n";
+    shaped(['a' => 1]), obj(new Point(1)), unread('a'), looped('a', ['b']), "\n";

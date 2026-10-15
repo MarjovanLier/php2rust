@@ -65,6 +65,39 @@ function put(?array $m): int
     return count($m) * 10 + $m['k'];
 }
 
+/** @param ?array<string, int> $m */
+function drop(?array $m): int
+{
+    if ($m === null) {
+        return -1;
+    }
+    unset($m['a']);
+    return count($m);
+}
+
+enum Suit: string
+{
+    case Hearts = 'h';
+    case Spades = 's';
+}
+
+function scalars(?float $f, ?bool $b, ?Suit $s): string
+{
+    if ($f === null) {
+        return 'no float';
+    }
+    if ($b === null) {
+        return 'no bool';
+    }
+    if ($s === null) {
+        return 'no suit';
+    }
+    $f *= 2.5;
+    $b = !$b;
+    $s = $s === Suit::Hearts ? Suit::Spades : Suit::Hearts;
+    return ($f > 4.0 ? 'big' : 'small') . ' ' . ($b ? 'yes' : 'no') . ' ' . $s->value;
+}
+
 function maybe(string $s): ?string
 {
     if ($s === '') {
@@ -104,5 +137,8 @@ echo before('ab', false), ' ', before('ab', true), "\n";
 echo bump(4), ' ', bump(null), "\n";
 echo grow([1, 2]), ' ', grow(null), "\n";
 echo put(['a' => 1]), ' ', put(null), ' ', put(['k' => 2]), "\n";
+echo drop(['a' => 1, 'b' => 2]), ' ', drop(null), "\n";
+echo scalars(1.5, false, Suit::Hearts), ' ', scalars(null, true, null), ' ',
+    scalars(2.0, null, null), ' ', scalars(2.0, true, null), "\n";
 echo local('ab'), ' ', local(''), "\n";
 echo Names::shout('anna'), ' ', Names::shout('al'), "\n";

@@ -290,8 +290,8 @@ impl Converter<'_> {
             .iter()
             .map(|&argument| self.typed_argument(argument, &RustType::String, &message))
             .collect();
-        let converted: Vec<RExpr> = converted.into_iter().collect::<Option<_>>()?;
-        // A list whose value the tool knows: a literal, or a class constant (P2R-260).
+        // A list whose value the tool knows: a literal, or a class constant (P2R-260). Its
+        // problem is reported also when an argument fails (P2R-03).
         let known = match arguments.get(1).map(|&value| lists::unparenthesized(value)) {
             Some(Expression::Literal(Literal::String(literal))) => {
                 literal.value.map(<[u8]>::to_vec)
@@ -305,6 +305,7 @@ impl Converter<'_> {
             self.refuse(arguments[1], problem);
             return None;
         }
+        let converted: Vec<RExpr> = converted.into_iter().collect::<Option<_>>()?;
         let converted = converted
             .into_iter()
             .map(|text| self.borrowed(text, &RustType::String))

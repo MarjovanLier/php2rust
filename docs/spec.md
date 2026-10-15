@@ -107,7 +107,10 @@ section 10. Its final review stopped `[.a.]`, `[=a=]` and a count after
 a group, which PCRE rejects, and let `[:]` convert as the plain class it
 is in both engines. Section 28 (maps as union members, and shapes as
 maps) was written on 15 Oct 2026; it changes P2R-07, P2R-60, P2R-233,
-P2R-240, P2R-250 and the roadmap of section 10.
+P2R-240, P2R-250 and the roadmap of section 10. Section 29 (traits with
+constants, string map constants and `strtr`) was written on 15 Oct 2026;
+it changes P2R-07, P2R-140, P2R-156, P2R-175, P2R-188 and the roadmap of
+section 10.
 
 php2rust converts typed PHP source into normal, readable Rust (`Vec`,
 `String`, `i64`), without AI. It reads PHP with the Mago crates, uses Mago's
@@ -151,7 +154,7 @@ requirement IDs.
   the same stdout bytes, the same output file bytes and the same stderr
   bytes.
 - **P2R-07** Only the constructs that sections 3 to 5, 11 to 19 and 21 to
-  28 list as converting may convert. Any other construct MUST stop the conversion,
+  29 list as converting may convert. Any other construct MUST stop the conversion,
   which means it is reported as a problem under P2R-03. Examples that stop
   in version 1 (section 16 converts `namespace`, `use` and class
   constants, and section 17 two casts):
@@ -532,11 +535,12 @@ Each milestone gets its own requirements in this file when its work starts.
   `indexmap` (section 25); unions as map values, narrowing a union value
   with `is_string()` and its kin (section 26); `preg_replace` and
   `preg_match` without the `u` flag (section 27); maps as union members
-  and shapes as maps (section 28); then the rest of the
+  and shapes as maps (section 28); traits with constants, string map
+  constants and `strtr` (section 29); then the rest of the
   `StringManipulation` library, which `SouthAfricanIDValidator` calls,
   ordered by how widely each fix applies (writes to a variable a check
-  binds, traits with array constants, `strtr`, `trim` with a second
-  argument), with `DateTime` and patterns with `u` and look-around last;
+  binds, `trim` with a second argument, `checkdate`), with `DateTime` and
+  patterns with `u` and look-around last;
   unions as list values; interfaces and inheritance; closures.
   `SouthAfricanIDValidator` calls `StringManipulation::isValidDate`, which
   lives in another package, and P2R-153 resolves calls inside the input
@@ -820,7 +824,7 @@ Sections 3 to 9 apply to nullable values unless this section says otherwise.
   statement runs, so it may come after the statements outside functions.
   These stop the conversion:
   - `extends`, `implements` (other than the `ArrayAccess` of P2R-220),
-    `abstract`, a trait, a property that is not
+    `abstract`, a trait other than one of constants (P2R-280), a property that is not
     promoted, a static property, a constructor parameter that is not
     promoted, a constructor with a body, and a parameter default value
     other than those of P2R-168 (section 16 converts constants and static
@@ -1230,7 +1234,8 @@ file. Converting several files together is a later slice.
   P2R-50 a read of an int constant has the constant's value, as a literal
   does: arithmetic on it that overflows, and `%` or `intdiv()` by a
   constant 0, stop the conversion. These stop the conversion: a value of
-  any other form (an expression, another constant, a list, heredoc, and a
+  any other form (an expression, another constant, a list or an array
+  other than the string map of P2R-281, heredoc, and a
   case written `static::Small`, which PHP rejects in a constant's value and
   Mago does not report); a
   declared type other than `int`, `float`, `bool`, `string` or an enum of
@@ -1490,7 +1495,7 @@ Rust module. One input file still converts as sections 1 to 17 say.
   `use crate::<Name>;` for it. rustfmt sorts the `use` lines (P2R-190).
 - **P2R-175** A directory input converts to a library: a statement outside
   functions other than the P2R-12 `declare`, the P2R-150 `namespace` and
-  `use` statements, and enum and class declarations stops the conversion,
+  `use` statements, and enum, class and trait (P2R-280) declarations stops the conversion,
   because a library has no `fn main()` (this replaces the `fn main()` rule
   and the output order of P2R-33 for a directory input). The decisions that
   P2R-115, P2R-141, P2R-143, P2R-146 and P2R-211 make for the whole file,
@@ -1620,8 +1625,8 @@ converts those forms.
   rejects or ignores; and an argument of another type.
 - **P2R-188** The helpers of P2R-160 MUST include, after `php_substr` and in
   this order, `php_trim`, `php_ltrim`, `php_rtrim`, `php_ucfirst`,
-  `php_lcfirst`, `php_replace`, `php_explode`, `php_preg_replace` and
-  `php_preg_match` (P2R-261, P2R-262), each written only when the
+  `php_lcfirst`, `php_replace`, `php_explode`, `php_preg_replace`,
+  `php_preg_match` (P2R-261, P2R-262) and `php_strtr` (P2R-282), each written only when the
   output calls it, and P2R-31 covers their names. A case folder runs each of
   them on many values against PHP (P2R-72).
 
@@ -2561,6 +2566,61 @@ the literal that built it.
   is `String`, a field where `V` is a union enum); a map with int keys
   (`IndexMap<i64, V>`), because a shape key is text; and a shape where a
   list is needed (P2R-240).
+
+## 29. Traits with constants, string map constants and strtr (milestone 2, slice 19)
+
+`StringManipulation` keeps its mapping tables in two traits,
+`AccentNormalization` and `UnicodeMappings`, whose only members are
+`private const array` constants of string keys and string values, and
+its class pulls them in with `use AccentNormalization;`. Four of its
+functions run `\strtr($text, self::TABLE)`. PHP's `strtr` with an array
+replaces, at each position, the longest key that matches there, whatever
+the order of the array, does not look again at text it put in, and
+ignores an empty key with a warning; it works on bytes. These three
+forms unblock `searchWords`, `utf8Ansi` and `removeAccents`.
+
+- **P2R-280** A trait declared at the top level MUST convert when its
+  members are constants only, and a class or enum of the input that uses
+  it (`use T;` or `use T1, T2;` at the top of its body, the trait named
+  as P2R-150 names a class) MUST hold each constant of the trait as if
+  its body declared it there, by P2R-156 and P2R-281, in the order of the
+  `use` statements and then the trait's own order, before the constants
+  the body declares. The trait itself writes nothing, and a trait that no
+  class or enum uses writes nothing either. For P2R-175 and P2R-172 a
+  trait declaration counts as a declaration, not a statement, and a
+  namespace that declares only traits gets no module. These stop the
+  conversion: a trait with a method, a property, an abstract member or a
+  `use` of another trait (a later slice); a `use` with a block of
+  conflict rules (`use T { a as b; }`); a `use` of a trait that the input
+  does not declare; a trait constant whose name the class or enum, or
+  another trait it uses, declares too, which PHP rejects unless the two
+  constants match; and a trait declared inside a function or block.
+- **P2R-281** A class, enum or trait constant whose value is an array
+  literal with a string literal key and a string literal value on every
+  element, and whose declared type is `array` or none, MUST convert to
+  `pub const NAME: &[(&str, &str)] = &[("key", "value"), ..];` with the
+  pairs in the literal's order, each key and value the PHP string value
+  of the literal, escapes decoded (P2R-49). Its uses MUST be the second
+  argument of `strtr` (P2R-282) only; every other use stops (a read by
+  key, a value passed, returned or stored, `foreach`, `count`,
+  `isset`). These stop the conversion: an element without a key, with an
+  int, float or constant key, or with a value that is not a string
+  literal; an empty key, which `strtr` ignores with a warning; a key that
+  appears twice, which Mago reports (P2R-11); and an empty array.
+- **P2R-282** `strtr($s, C)`, where `$s` is a string and `C` reads a
+  constant of P2R-281 (`self::C`, `static::C` or `Name::C`), MUST convert
+  to `php_strtr(s, Name::C)`, a call of the helper below with the
+  constant's Rust path, giving an owned `String`. The output then holds
+  `fn php_strtr(text: &str, pairs: &[(&str, &str)]) -> String`, which
+  walks the text from the start: where one or more keys match, it appends
+  the value of the longest of them and moves past that key; where none
+  matches, it appends the next character and moves past it. Because every
+  key is valid UTF-8 and `text` is a `&str`, stepping by characters gives
+  PHP's byte result. These stop the conversion: `strtr` with three
+  arguments, with an array literal or any array other than such a
+  constant (a later slice), and with a named or spread argument (P2R-169).
+  A function, variable or parameter named `php_strtr` stops by P2R-31,
+  and P2R-188 places `php_strtr` after `php_preg_match`.
 
 ## Spec checklist
 

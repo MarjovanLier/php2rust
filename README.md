@@ -522,6 +522,10 @@ php2rust refuses some valid PHP that version 1 converts in other forms:
   `$a->log .= "{$a->hits}"` stops, and so does a call that changes a list element
   when its arguments read the same object, even another property of it
   (`$this->items[0]->add($this->qty)`). Read the value into a variable first.
+- A docblock type that uses a cycle of `@psalm-type` or `@phpstan-type` aliases
+  (`X = Y` and `Y = X`), in the input or in an included class whose method the input
+  calls, makes Mago 1.55 recurse without end: php2rust aborts with a stack overflow
+  (exit 134) and prints no reason.
 
 ## Known differences from PHP
 
@@ -583,6 +587,11 @@ php2rust refuses some valid PHP that version 1 converts in other forms:
   a `ValueError`, Rust panics (exit code 101).
 - `date_parse()` of a date whose year is above 9999, which the carries can give: PHP
   misreads the text (the year less 8000, hour 10), Rust gives the date's fields.
+- An unqualified function call inside a namespace, where that namespace has a function
+  of the same short name in code php2rust does not read (code given neither as input
+  nor by `--include`, a symbolic link below an include path, or an included file that
+  is skipped): PHP calls that function, Rust calls the built-in or the input's global
+  function of that name. Give a link's target as its own `--include`.
 - The errors above that Rust turns into panics are not exceptions, so a
   `catch (Throwable $e)` does not catch them.
 - An uncaught exception writes a shorter message than PHP's (no file, line or stack

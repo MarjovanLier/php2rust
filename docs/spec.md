@@ -131,15 +131,19 @@ its Rust spec reviewer found the missing `use` line of a module whose
 helper alone names `PhpDateTime`; the build found that Mago types
 `date_parse()` as `mixed` and that `DateTime|false` must not take the
 forms of `null`. Section 35 (code that the input uses but does not
-convert) was written on 15 Oct 2026; it changes P2R-07, P2R-73, P2R-82
-and the roadmap of section 10. Its tool spec reviewer found that a namespaced
-included function must block the built-in of its short name, that an
-included file needs a name no input can have, and that Mago's findings
-in an included file must not be printed; its Mago spec reviewer found
-that the same holds for a global function of the input, and that an
-attribute on a function or a parameter converted, against P2R-07. The
-side-by-side measure then found that `StringManipulation` stopped on
-its `#[\SensitiveParameter]`, which P2R-341 now leaves out.
+convert) was written on 15 Oct 2026; it changes P2R-04, P2R-07, P2R-60,
+P2R-73, P2R-82 and the roadmap of section 10. Its tool spec reviewer
+found that a namespaced included function must block the built-in of
+its short name, that an included file needs a name no input can have,
+and that Mago's findings in an included file must not be printed; its
+Mago spec reviewer found that the same holds for a global function of
+the input, and that an attribute on a function or a parameter
+converted, against P2R-07. The side-by-side measure then found that
+`StringManipulation` stopped on its `#[\SensitiveParameter]`, which
+P2R-341 now leaves out. The break reviewer found that a skipped
+included file hides such a function, now a P2R-60 difference, and that
+a cycle of docblock type aliases crashes Mago, now an exception in
+P2R-04.
 
 php2rust converts typed PHP source into normal, readable Rust (`Vec`,
 `String`, `i64`), without AI. It reads PHP with the Mago crates, uses Mago's
@@ -175,7 +179,12 @@ requirement IDs.
   be written, or rustfmt cannot lay out the output (P2R-190). When any of
   these holds, the tool MUST exit 2 and MUST NOT
   print P2R-03 problems. Mago's parser recovers from broken input without
-  failing, so the parse check is explicit.
+  failing, so the parse check is explicit. One known exception: Mago 1.55
+  recurses without end when a docblock type uses a cycle of
+  `@psalm-type` or `@phpstan-type` aliases (`X = Y` and `Y = X`), in the
+  input or in an included class whose method the input calls (P2R-340);
+  the tool then overflows its stack and aborts with no reason (exit 134).
+  A larger stack would not help, because the recursion has no end.
 - **P2R-05** On exit 1 or 2 the tool MUST write nothing to stdout and MUST
   NOT create, change or truncate the output file. A failed write MUST NOT
   leave a partial output file (review concern, not checked mechanically).
@@ -504,6 +513,12 @@ requirement IDs.
     warns and Rust does not, and both remove the same bytes; where its mask
     holds a byte above `7F`, a cut character gives U+FFFD in Rust, as for
     `substr()`.
+  - An unqualified function call inside a namespace, where that namespace
+    has a function of the same short name in code the tool does not read
+    (code given neither as input nor by `--include`, a symbolic link below
+    an include path, or an included file that P2R-340 skips): PHP calls
+    that function, Rust calls the built-in or the input's global function
+    of that name. A link's target can be given as its own `--include`.
   - The errors above that Rust turns into panics are not exceptions of
     P2R-210, so a `catch (Throwable $e)` (P2R-214) does not catch them.
   - Comments and docblocks are not copied (version 1).
@@ -3221,11 +3236,14 @@ later sections.
   names an included symbol converts by the rules of the earlier sections,
   so it stops (a class type by P2R-22, a call by P2R-48 or P2R-153) until
   a later section maps it. An unqualified call in a namespace whose
-  function of that short name an included file declares calls that
-  function in PHP, not the built-in or a global function of the input,
-  so it stops by P2R-48. An attribute stops by P2R-07 whether or not an
-  included file declares its class, on a function, a parameter or an
-  arrow function as on a class or a member, other than the one of
+  function of that short name an included file that is read declares
+  calls that function in PHP, not the built-in or a global function of
+  the input, so it stops by P2R-48. A file that is not read (a symbolic
+  link below the path, or a file skipped above) declares nothing, so
+  such a call converts as the built-in or the global function, which
+  P2R-60 lists as a difference. An attribute stops by P2R-07 whether or
+  not an included file declares its class, on a function, a parameter or
+  an arrow function as on a class or a member, other than the one of
   P2R-341. The option works for a file input and for a directory input.
   An include path that does not exist, that is neither a file nor a
   directory (a named pipe), or below which a directory cannot be listed

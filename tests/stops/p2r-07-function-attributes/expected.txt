@@ -1,0 +1,5 @@
+input.php:5:1: attributes are not supported (P2R-07)
+input.php:11:17: attributes are not supported (P2R-07)
+input.php:22:25: attributes are not supported (P2R-07)
+input.php:31:22: attributes are not supported (P2R-07)
+input.php:34:14: calls to tagged are not supported (P2R-48)

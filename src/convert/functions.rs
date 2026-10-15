@@ -59,6 +59,9 @@ impl Converter<'_> {
                 );
                 continue;
             }
+            if let Some(attributes) = function.attribute_lists.first() {
+                self.refuse(attributes, "attributes are not supported (P2R-07)");
+            }
             named.push((function, rust_name));
         }
         for (function, rust_name) in named {
@@ -143,6 +146,10 @@ impl Converter<'_> {
                 parameter,
                 "by-reference and variadic parameters are not supported (P2R-07)",
             );
+            return None;
+        }
+        if let Some(attributes) = parameter.attribute_lists.first() {
+            self.refuse(attributes, "attributes are not supported (P2R-07)");
             return None;
         }
         if parameter.hint.is_none() {

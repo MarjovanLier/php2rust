@@ -48,6 +48,15 @@ impl Converter<'_> {
             );
             return None;
         }
+        if let Some(attributes) = arrow
+            .attribute_lists
+            .first()
+            .or(parameter.attribute_lists.first())
+        {
+            self.record_refused(arrow.expression);
+            self.refuse(attributes, "attributes are not supported (P2R-07)");
+            return None;
+        }
         let ty = self.closure_parameter(arrow, parameter, wanted, matches);
         let returns = match &arrow.return_type_hint {
             Some(hint) => {

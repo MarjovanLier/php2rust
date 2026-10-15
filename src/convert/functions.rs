@@ -488,7 +488,8 @@ pub(super) struct OwnedCheck {
 }
 
 /// The checks among a body's top-level `statements` that give an owned binding (P2R-290):
-/// `if ($v === null)` or `if (null === $v)` with no `elseif` or `else`, whose body ends
+/// `if ($v === null)` or `if (null === $v)`, also opening an `||` chain (P2R-334), with
+/// no `elseif` or `else`, whose body ends
 /// with a `return` or a `throw`, and with a write of `$v` in a later statement. Whether
 /// P2R-104 makes the `if` a let-else, and whether the type allows an owned binding, is
 /// decided when it converts.
@@ -528,11 +529,15 @@ pub(super) fn owned_checks(statements: &[&Statement<'_>]) -> Vec<OwnedCheck> {
     checks
 }
 
-/// The variable of `$v === null` or `null === $v`.
+/// The variable of `$v === null` or `null === $v`, also as the first operand of a
+/// top-level `||` chain, which P2R-334 turns into a let-else too.
 fn null_test<'a, 'arena>(condition: &'a Expression<'arena>) -> Option<&'a DirectVariable<'arena>> {
     let Expression::Binary(binary) = lists::unparenthesized(condition) else {
         return None;
     };
+    if matches!(binary.operator, BinaryOperator::Or(_)) {
+        return null_test(binary.lhs);
+    }
     if !matches!(binary.operator, BinaryOperator::Identical(_)) {
         return None;
     }

@@ -77,6 +77,18 @@ pub fn with_else(text: &str) -> String {
     }
 }
 
+pub fn marked(text: Option<&str>, n: i64) -> String {
+    let Some(text) = text else {
+        return String::from("x");
+    };
+    let mut text = text.to_string();
+    if n < 0 {
+        return String::from("x");
+    }
+    text += "!";
+    return text;
+}
+
 pub fn half(value: Option<i64>) -> i64 {
     let Some(value) = value else {
         return -1;
@@ -339,6 +351,10 @@ fn main() {
     print!("{}", half(Some(7)));
     print!(" ");
     print!("{}", half(None));
+    print!("\n");
+    print!("{}", marked(Some("a"), 1));
+    print!("{}", marked(None, 1));
+    print!("{}", marked(Some("b"), -1));
     print!("\n");
     print!("{}", counted("x", true));
     print!("{}", counted("x", false));

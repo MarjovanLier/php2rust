@@ -39,6 +39,17 @@ pub(super) const NULL_JOINED: &str =
 /// `Some(..)` where an `Option<T>` is needed (P2R-102), and a value of a member of a union
 /// enum `U` becomes `U::V(..)`, or `.map(U::V)` for an `Option` (P2R-231).
 pub(super) fn wrapped(expr: RExpr, ty: &RustType, target: &RustType) -> RExpr {
+    // `false` where `DateTime|false` is needed is its `None`; Mago lets no other bool in,
+    // and a call that gives `false` still runs (P2R-330).
+    if date_or_false(target) && *ty == RustType::Bool {
+        return match expr {
+            RExpr::Bool(false) | RExpr::Var(_) | RExpr::Known(..) => RExpr::None,
+            other => RExpr::Raw(format!(
+                "{{ let _ = {}; None }}",
+                printer::expr(&other, false)
+            )),
+        };
+    }
     let expr = match member_path(ty, target) {
         Some(path) if matches!(ty, RustType::Option(_)) => {
             return RExpr::MethodCall(Box::new(expr), "map".into(), vec![RExpr::Path(path)]);

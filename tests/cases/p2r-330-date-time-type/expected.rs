@@ -27,6 +27,27 @@ pub fn describe(text: &str) -> String {
     return format!("{} {}", show(copy), show(date));
 }
 
+pub fn maybe(text: &str) -> Option<PhpDateTime> {
+    if text == "" {
+        return None;
+    }
+    return parse(text);
+}
+
+pub fn chosen(kind: i64, text: &str) -> Option<PhpDateTime> {
+    return match kind {
+        1 => parse(text),
+        _ => None,
+    };
+}
+
+pub fn given(date: Option<PhpDateTime>) -> String {
+    let Some(date) = date else {
+        return String::from("false");
+    };
+    return php_date_format(date, "Y");
+}
+
 pub fn either(text: &str) -> String {
     let date = parse(text);
     return format!(
@@ -229,5 +250,15 @@ fn main() {
     print!("{}", either("2000-01-01"));
     print!(" ");
     print!("{}", either("x"));
+    print!("\n");
+    print!("{}", given(maybe("")));
+    print!(" ");
+    print!("{}", given(maybe("1999-12-31")));
+    print!(" ");
+    print!("{}", given(chosen(1, "2001-02-03")));
+    print!(" ");
+    print!("{}", given(chosen(2, "2001-02-03")));
+    print!(" ");
+    print!("{}", given(None));
     print!("\n");
 }

@@ -72,6 +72,35 @@ impl Dates {
             parts.year, parts.month, parts.day, parts.hour, parts.minute, parts.second
         );
     }
+
+    pub fn twice(a: &str, b: &str) -> i64 {
+        let first = php_date_create_from_format("!Y-m-d", a);
+        let second = php_date_create_from_format("!Y-m-d", b);
+        let Some(first) = first else {
+            return 0;
+        };
+        let Some(second) = second else {
+            return 0;
+        };
+        let mut parts = DayHourMinuteMonthSecondYearShape {
+            day: first.day,
+            hour: first.hour,
+            minute: first.minute,
+            month: first.month,
+            second: first.second,
+            year: first.year,
+        };
+        let year = parts.year;
+        parts = DayHourMinuteMonthSecondYearShape {
+            day: second.day,
+            hour: second.hour,
+            minute: second.minute,
+            month: second.month,
+            second: second.second,
+            year: second.year,
+        };
+        return year + parts.year;
+    }
 }
 
 fn php_checkdate(month: i64, day: i64, year: i64) -> bool {
@@ -307,5 +336,9 @@ fn main() {
     print!("{}", Dates::parts("1980-02-29 23:59:59"));
     print!(" ");
     print!("{}", Dates::parts("0000-00-00 00:00:00"));
+    print!("\n");
+    print!("{}", Dates::twice("1980-01-01", "2000-12-31"));
+    print!(" ");
+    print!("{}", Dates::twice("x", "2000-12-31"));
     print!("\n");
 }

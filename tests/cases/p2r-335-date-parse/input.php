@@ -42,6 +42,24 @@ final class Dates
         return $parts['year'] . '/' . $parts['month'] . '/' . $parts['day'] . ' ' . $parts['hour'] . ':'
             . $parts['minute'] . ':' . $parts['second'];
     }
+
+    public static function twice(string $a, string $b): int
+    {
+        $first = DateTime::createFromFormat('!Y-m-d', $a);
+        $second = DateTime::createFromFormat('!Y-m-d', $b);
+        if ($first === false) {
+            return 0;
+        }
+        if ($second === false) {
+            return 0;
+        }
+        /** @var array{year: int, month: int, day: int, hour: int, minute: int, second: int} $parts */
+        $parts = date_parse($first->format('Y-m-d H:i:s'));
+        $year = $parts['year'];
+        /** @var array{year: int, month: int, day: int, hour: int, minute: int, second: int} $parts */
+        $parts = date_parse($second->format('Y-m-d H:i:s'));
+        return $year + $parts['year'];
+    }
 }
 
 foreach (['19800229', '19810229', '19800230', '1980021', '00000101', '99991231', 'x'] as $date) {
@@ -53,3 +71,4 @@ foreach (['2023-09-06 12:30:00', '2012-02-30 12:12:12', '2023-12-25 25:00:00', '
 }
 echo "\n";
 echo Dates::parts('1980-02-29 23:59:59'), ' ', Dates::parts('0000-00-00 00:00:00'), "\n";
+echo Dates::twice('1980-01-01', '2000-12-31'), ' ', Dates::twice('x', '2000-12-31'), "\n";

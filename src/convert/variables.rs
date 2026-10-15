@@ -1419,9 +1419,13 @@ impl Converter<'_> {
                 }
                 let known = self.variables.entries[var].ty.clone()?;
                 match assigned {
-                    // A value of the variable's union type keeps it (P2R-232).
+                    // A value of the variable's union type keeps it (P2R-232), and so does a
+                    // date's parts, which Mago types as mixed (P2R-335).
                     Some(value)
-                        if *value == known && matches!(known.inner(), RustType::Union(_)) =>
+                        if *value == known
+                            && (matches!(known.inner(), RustType::Union(_))
+                                || matches!(&known, RustType::Shape(name)
+                                    if name == dates::DATE_PARTS)) =>
                     {
                         Ok(known)
                     }

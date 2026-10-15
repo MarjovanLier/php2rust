@@ -3050,8 +3050,10 @@ read takes the current date or time.
   names it; a module of a directory input reads it through `use
   crate::PhpDateTime;` (P2R-174). `$v === false`, `false === $v`, `$v
   !== false` and `false !== $v` on `Option<PhpDateTime>` convert as
-  P2R-103 converts the same forms with `null`, and `gettype()` of a
-  `DateTime` gives `"object"` (P2R-222).
+  P2R-103 converts the same forms with `null`, a `false` value where
+  `DateTime|false` is needed (a return, an argument, a `match` arm)
+  converts to `None`, and `gettype()` of a `DateTime` gives `"object"`
+  (P2R-222).
   Only these forms and those of this section take a `DateTime`. These
   stop the conversion: `new DateTime(..)`, every other method or
   property of `DateTime`, `DateTimeImmutable`, `DateTimeInterface`, a

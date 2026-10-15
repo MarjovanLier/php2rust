@@ -22,6 +22,30 @@ function describe(string $text): string
     return show($copy) . ' ' . show($date);
 }
 
+function maybe(string $text): DateTime|false
+{
+    if ($text === '') {
+        return false;
+    }
+    return parse($text);
+}
+
+function chosen(int $kind, string $text): DateTime|false
+{
+    return match ($kind) {
+        1 => parse($text),
+        default => false,
+    };
+}
+
+function given(DateTime|false $date): string
+{
+    if ($date === false) {
+        return 'false';
+    }
+    return $date->format('Y');
+}
+
 function either(string $text): string
 {
     $date = parse($text);
@@ -32,3 +56,5 @@ echo describe('1980-02-29'), "\n";
 echo describe('1980-2-30'), "\n";
 echo describe('1980/02/29'), "\n";
 echo either('2000-01-01'), ' ', either('x'), "\n";
+echo given(maybe('')), ' ', given(maybe('1999-12-31')), ' ', given(chosen(1, '2001-02-03')), ' ',
+    given(chosen(2, '2001-02-03')), ' ', given(false), "\n";

@@ -130,7 +130,9 @@ at a NUL in the text, and moves a local time in any gap of its zone;
 its Rust spec reviewer found the missing `use` line of a module whose
 helper alone names `PhpDateTime`; the build found that Mago types
 `date_parse()` as `mixed` and that `DateTime|false` must not take the
-forms of `null`.
+forms of `null`. Section 35 (code that the input uses but does not
+convert) was written on 15 Oct 2026; it changes P2R-73 and the roadmap
+of section 10.
 
 php2rust converts typed PHP source into normal, readable Rust (`Vec`,
 `String`, `i64`), without AI. It reads PHP with the Mago crates, uses Mago's
@@ -524,7 +526,10 @@ requirement IDs.
   and `expected.txt`. Run from inside the folder, once as
   `php2rust input.php` and once as `php2rust input.php -o out.rs`, the tool
   MUST exit 1 both times, its stderr MUST equal `expected.txt`, its stdout
-  MUST be empty, and `out.rs` MUST NOT exist afterwards.
+  MUST be empty, and `out.rs` MUST NOT exist afterwards. A case or stop
+  folder that holds a directory `include/` runs the tool with the added
+  option `--include` naming that directory (P2R-340); the PHP run of
+  P2R-72 does not load it.
 - **P2R-74** Each error folder `tests/errors/<slug>/` holds `args.txt` (the
   command-line arguments, one per line), an optional `input.php` and
   `expected.txt`. Run from inside the folder, the tool MUST exit 2, its
@@ -606,7 +611,10 @@ Each milestone gets its own requirements in this file when its work starts.
   rewritten for `regex` (section 33); `DateTime::createFromFormat()`
   with a format read at run time, `format()`, `instanceof`, and
   `date_parse` of its text, the last lines of `StringManipulation` that
-  `SouthAfricanIDValidator` calls (section 34);
+  `SouthAfricanIDValidator` calls (section 34); then, for a Laravel
+  application, the classes of Composer's `vendor/` folder read for their
+  types only (section 35), Spatie's `Data` classes, and the framework's
+  other forms;
   unions as list values; interfaces and inheritance; closures.
   `SouthAfricanIDValidator` calls `StringManipulation::isValidDate`, which
   lives in another package, and P2R-153 resolves calls inside the input
@@ -3163,6 +3171,41 @@ read takes the current date or time.
   checks it against Mago's type of the read (P2R-34), which a docblock
   `@var` of the variable gives: another type stops. Every other use of
   `date_parse` stops by P2R-48.
+
+## 35. Code that the input uses but does not convert (milestone 2, slice 25)
+
+A Laravel application calls its framework and packages, whose code sits
+in Composer's `vendor/` folder and is not part of the input. Mago then
+knows none of those classes, types their values as `mixed`, and reports
+an unknown class or a `mixed` access on about a third of the problem
+lines of the Laravel `app/` folder (1000 of 3295 lines on 15 Oct 2026),
+which stops every file whatever the converter supports. Mago has a file
+kind for such code, `FileType::Vendored`: its symbols enter the codebase
+so that the input's types resolve, and Mago keeps a built-in or an input
+symbol over a vendored one of the same name. This section reads such
+code for its types only; converting the framework's own forms waits for
+later sections.
+
+- **P2R-340** The option `--include <PATH>`, which may be given more than
+  once, MUST make every regular file whose name ends in `.php` under each
+  path, at any depth and without following symbolic links (a file path
+  names that one file), known to Mago as a file of kind
+  `FileType::Vendored` before the input is analysed: its classes,
+  interfaces, traits, enums, functions and constants enter Mago's
+  codebase, so a type or call of the input that names one resolves. An
+  included file is never analysed, reported or converted, and a file that
+  cannot be read, is not valid UTF-8 or does not parse is skipped without
+  a problem line. Mago keeps a symbol of PHP's built-ins or of the input
+  over an included symbol of the same name, so a polyfill in an included
+  file changes no built-in function, and an input file that also lies
+  under an include path is read as input only. The checks of a name
+  against PHP's built-ins (P2R-31, P2R-111, P2R-131, P2R-151) see PHP's
+  built-ins only. A type or call of the input that names an included
+  symbol converts by the rules of the earlier sections, so it stops (a
+  class type by P2R-22, a call by P2R-48 or P2R-153) until a later
+  section maps it. The option works for a file input and for a directory
+  input. An include path that does not exist exits 2 with its reason
+  (P2R-04).
 
 ## Spec checklist
 

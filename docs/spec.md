@@ -352,7 +352,7 @@ requirement IDs.
 - **P2R-48** These built-in functions MUST convert: `count()` on a list
   (length as `i64`), `strlen()` (byte length as `i64`), `intdiv()` (integer
   division towards zero) and `fdiv()` (IEEE float division), and the
-  functions of sections 17, 19, 23, 27, 29 and 30. A call to any other function not
+  functions of sections 17, 19, 23, 25, 26, 27, 29 and 30. A call to any other function not
   declared in the file stops the conversion.
 - **P2R-49** Literals MUST convert by their PHP value and type, never by
   copying their text:
@@ -2682,8 +2682,9 @@ run of both packages at the start of this slice.
   change its objects (P2R-143), a map (P2R-240), `int`, `float`, `bool`
   or an enum; and a
   later top-level statement of that body writes `$v` (`=`, a compound
-  assignment such as `.=` or `+=`, `++`, `--` or an append, at any
-  depth). The line after the `let ... else` is then
+  assignment such as `.=` or `+=`, `++`, `--`, an append, or an `unset`
+  of a map element (P2R-242), at any depth). The line after the
+  `let ... else` is then
   a copy line, as P2R-181 writes one for a parameter:
   `let mut v = v.to_string();`, `let mut v = v.to_vec();`,
   `let mut v = v.clone();` for a map, or `let mut v = v;` for an int,

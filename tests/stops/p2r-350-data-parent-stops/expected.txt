@@ -1,0 +1,1 @@
+input.php:10:19: Spatie\LaravelData\Data extends another class, which version 4.18.0 does not (P2R-350)

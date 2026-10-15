@@ -71,6 +71,39 @@ pub fn total(m: &IndexMap<String, i64>) -> i64 {
     return sum + m.len() as i64;
 }
 
+pub fn built(k: &str) -> IndexMap<String, Option<i64>> {
+    let mut m: IndexMap<String, Option<i64>> = IndexMap::new();
+    m.insert(String::from("z"), Some(2));
+    m.insert(k.to_string(), Some(1));
+    m.insert(String::from("n"), None);
+    print!("{}", m.get("z").copied().flatten().unwrap_or(-1));
+    print!(
+        "{}",
+        if m.get("n").is_some_and(Option::is_some) {
+            "y"
+        } else {
+            "n"
+        }
+    );
+    print!("{}", m.get("q").copied().flatten().unwrap_or(0));
+    print!("\n");
+    return m;
+}
+
+pub fn ints_built() -> IndexMap<i64, i64> {
+    let mut m: IndexMap<i64, i64> = IndexMap::new();
+    m.insert(3, 1);
+    m.insert(1, 2);
+    return m;
+}
+
+pub fn passed_on() -> i64 {
+    let mut x: IndexMap<String, i64> = IndexMap::new();
+    x.insert(String::from("a"), 5);
+    x.insert(String::from("b"), 6);
+    return total(&x);
+}
+
 fn main() {
     let r = check(&[String::from("abc"), String::from("x"), String::from("abcd")]);
     print!("{}", r.len() as i64);
@@ -144,5 +177,13 @@ fn main() {
             (String::from("b"), 2)
         ]))
     );
+    print!("\n");
+    print!("{}", built("k").len() as i64);
+    print!(" ");
+    print!("{}", ints_built().len() as i64);
+    print!(" ");
+    print!("{}", ints_built()[&3_i64]);
+    print!(" ");
+    print!("{}", passed_on());
     print!("\n");
 }

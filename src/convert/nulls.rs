@@ -278,8 +278,12 @@ impl Converter<'_> {
     /// against null (P2R-203).
     pub(super) fn coalesce(&mut self, binary: &Binary<'_>) -> Option<(RExpr, RustType)> {
         let left_node = lists::unparenthesized(binary.lhs);
+        // A map variable keeps its type where Mago gives it a shape (P2R-240).
         let holder = match left_node {
-            Expression::ArrayAccess(access) => self.site_type(access.array).ok(),
+            Expression::ArrayAccess(access) => match self.chain_type(access.array) {
+                Some(map @ RustType::Map(..)) => Some(map),
+                _ => self.site_type(access.array).ok(),
+            },
             _ => None,
         };
         let shape = matches!(holder, Some(RustType::Shape(_)));

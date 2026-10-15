@@ -84,12 +84,16 @@ other-union stop of P2R-231, the guarded `unreachable!()` of P2R-233
 P2R-234, the `use` line of P2R-174, and the `Result`, `Ok` and `Err`
 names of P2R-210. Section 25 (maps) was written on 15 Oct 2026; it
 changes P2R-07, P2R-22, P2R-50, P2R-60, P2R-82, P2R-111, P2R-172,
-P2R-174 and the roadmap of section 10, whose open point on output that
-needs a crate it decides. The two spec reviewers added the `m[&k]` rule
-(`IndexMap` also indexes by position), the borrowed and owned key forms,
-the `??` and `values()` forms, the decimal text of an int key, the
-stops for changing classes, union keys, lists or shapes where a map is
-needed and the `IndexMap` name, and the `use` line placement.
+P2R-174, P2R-200 and the roadmap of section 10, whose open point on
+output that needs a crate it decides. The two spec reviewers added the
+`m[&k]` rule (`IndexMap` also indexes by position), the borrowed and
+owned key forms, the `??` and `values()` forms, the decimal text of an
+int key, the stops for changing classes, union keys, lists or shapes
+where a map is needed and the `IndexMap` name, and the `use` line
+placement. The build added `$m = []` on a variable, Mago's shape types
+of a map variable after writes by literal keys, and the stop for map
+property writes; the two final reviewers added the stop for a map of
+other values and the stop for a module named `indexmap` at any depth.
 
 php2rust converts typed PHP source into normal, readable Rust (`Vec`,
 `String`, `i64`), without AI. It reads PHP with the Mago crates, uses Mago's
@@ -1416,8 +1420,8 @@ Rust module. One input file still converts as sections 1 to 17 say.
   about beside `lib.rs`; a module named like a Rust primitive type (`bool`,
   `char`, `str`, `f32`, `f64`, the `i` and `u` integer types, `isize` and
   `usize`), which would take over paths the output writes, such as
-  `usize::from`; a root module named `indexmap`, which would take over
-  the crate of P2R-240; two namespaces of different names whose module
+  `usize::from`; a module named `indexmap` at any depth, which would take
+  over the crate of P2R-240 in its parent module; two namespaces of different names whose module
   paths are equal (`Acme\FooBar` and `Acme\Foo_Bar`, also as a module
   between the root and another: `Acme\FooBar\Deep`); and two input files
   whose namespaces hold, under equal leading segments, a segment that is
@@ -1657,8 +1661,9 @@ string}`), and keeps an object that may be missing in a nullable property
   by `Shape`, so `array{year: string, month: string, day: string}` gives
   `pub struct DayMonthYearShape` with the fields `day`, `month` and `year`,
   each a `String`, and `#[derive(Clone, Debug)]`. The output holds one
-  struct for each shape a type of the input maps to, the shape of a field
-  included, in byte order of their names: after the P2R-52 line and before
+  struct for each shape a type of the input maps to that the output names,
+  the shape of a field included (Mago's shape type of a map variable of
+  P2R-240 names a shape no item uses), in byte order of their names: after the P2R-52 line and before
   the enums, classes and functions (P2R-33), or for a directory input in
   `lib.rs` after its `use` lines (P2R-172). The empty array `array{}` keeps
   P2R-21. These stop the conversion, with a problem at a place whose type
@@ -2166,7 +2171,10 @@ application's `array<string, mixed>` values keep P2R-22.
   the value type (P2R-20). The type Mago gives a map after a write by a
   literal key, which names that key beside the key and value types
   (`array{'z': int, ...<string, int>}`), maps the same way, with the
-  named keys and their values counted in. A map behaves as a value of a shape type for
+  named keys and their values counted in. A variable that holds a map
+  keeps its map type where Mago names only the keys that writes by
+  literal keys gave it (`array{'z': int}` after `$m = []; $m['z'] = 2;`),
+  when each key and value fits the map. A map behaves as a value of a shape type for
   copying and lending (P2R-201, P2R-204): a parameter becomes
   `&IndexMap<K, V>`, or `Option<&IndexMap<K, V>>` for a nullable map lent
   with `.as_ref()`, an owned map is returned, and P2R-26 copies a map with
@@ -2185,7 +2193,7 @@ application's `array<string, mixed>` values keep P2R-22.
   `array<string, ?int>` or `array<string, float>` is declared, at any
   depth), because PHP keeps each value as it is, while an array literal of
   P2R-241 takes the map type it goes to; an enum or class named `IndexMap`
-  (P2R-111, P2R-131); and a root module named `indexmap` (P2R-172).
+  (P2R-111, P2R-131); and a module named `indexmap` (P2R-172).
 - **P2R-241** An array literal whose elements all have a key where a map
   type is needed (the places of P2R-202: a return value, an argument for a
   parameter, of `new` too, an assignment to a property, a property or

@@ -7,4 +7,5 @@ input/h.php:5:11: a module named usize is not supported, because it would take o
 input/j.php:5:11: another namespace gives the same module path (P2R-172)
 input/k.php:5:11: the namespace segment _2 has no Rust module name (P2R-172)
 input/l.php:5:11: the namespace segment Self has no Rust module name (P2R-172)
-input/m.php:5:11: a root module named indexmap is not supported, because it would take over the indexmap crate (P2R-172)
+input/m.php:5:11: a module named indexmap is not supported, because it would take over the indexmap crate (P2R-172)
+input/n.php:5:11: a module named indexmap is not supported, because it would take over the indexmap crate (P2R-172)

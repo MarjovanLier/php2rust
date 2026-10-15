@@ -370,6 +370,48 @@ fn is_map(keyed: &TKeyedArray) -> bool {
     keyed.parameters.is_some()
 }
 
+/// True when `union`, Mago's type of a variable that holds the map `map`, has only keys and
+/// values the map takes. Mago types a map after a write by a literal key with that key, as
+/// a shape (`array{'z': int}` after `$m = []; $m['z'] = 2;`) or beside the key and value
+/// types, and gives `[]` the type `array{}` (P2R-240).
+pub fn fits_map(union: &TUnion, map: &RustType, enums: &TypeNames) -> bool {
+    let RustType::Map(key, value) = map else {
+        return false;
+    };
+    let value_fits = |union: &TUnion| {
+        if only_null(union) {
+            return matches!(**value, RustType::Option(_));
+        }
+        rust_type(union, enums).is_ok_and(|found| found == **value || found == *value.inner())
+    };
+    union.types.iter().all(|atomic| {
+        let TAtomic::Array(TArray::Keyed(keyed)) = atomic else {
+            return false;
+        };
+        // An int key is stored as its text in a map keyed by text.
+        let mut items = keyed.known_items.iter().flat_map(|items| items.iter());
+        let known = items.all(|(known, (_, item))| {
+            let key_fits = match known {
+                ArrayKey::Integer(_) => true,
+                ArrayKey::String(_) => **key == RustType::String,
+                _ => false,
+            };
+            key_fits && value_fits(item)
+        });
+        let rest = keyed.parameters.as_ref().is_none_or(|(_, rest)| {
+            let general = TKeyedArray {
+                known_items: None,
+                ..keyed.clone()
+            };
+            map_type(&general, enums).is_ok_and(|found| match found {
+                RustType::Map(found_key, _) => found_key == *key || *found_key == RustType::I64,
+                _ => false,
+            }) && value_fits(rest)
+        });
+        known && rest
+    })
+}
+
 /// The map of `array<K, V>`: `IndexMap<i64, V>` for an int key, and `IndexMap<String, V>`
 /// keyed by the text of the key for a string, `int|string` or `array-key` key, because PHP
 /// turns stored and lookup keys the same way. Known keys and their values count as keys

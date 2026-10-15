@@ -111,12 +111,13 @@ impl Converter<'_> {
                                 format!("a module named {module} is not supported, because it would take over the paths of Rust's type {module} (P2R-172)"),
                             )
                         }
-                        // `use indexmap::IndexMap;` in the crate root would name it (P2R-240).
-                        Some(module) if depth == 0 && module == "indexmap" => {
+                        // `use indexmap::IndexMap;` in its parent module would name it
+                        // (P2R-240).
+                        Some(module) if module == "indexmap" => {
                             named = false;
                             self.refuse_namespace(
                                 *name,
-                                "a root module named indexmap is not supported, because it would take over the indexmap crate (P2R-172)".to_owned(),
+                                "a module named indexmap is not supported, because it would take over the indexmap crate (P2R-172)".to_owned(),
                             )
                         }
                         Some(module)

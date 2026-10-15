@@ -309,7 +309,10 @@ impl Converter<'_> {
         let Expression::ArrayAccess(access) = unparenthesized(left) else {
             return self.expression(left);
         };
-        if !matches!(self.site_type(access.array), Ok(RustType::Map(..))) {
+        // A map variable keeps its type where Mago gives it a shape (P2R-240).
+        if !matches!(self.site_type(access.array), Ok(RustType::Map(..)))
+            && !matches!(self.chain_type(access.array), Some(RustType::Map(..)))
+        {
             return self.expression(left);
         }
         let (map, key, value) = self.map_lookup(

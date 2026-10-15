@@ -82,6 +82,40 @@ function total(array $m): int
     return $sum + count($m);
 }
 
+/**
+ * Mago types `$m` as a shape after a write by a literal key; it stays a map.
+ *
+ * @return array<string, ?int>
+ */
+function built(string $k): array
+{
+    $m = [];
+    $m['z'] = 2;
+    $m[$k] = 1;
+    $m['n'] = null;
+    echo $m['z'] ?? -1, isset($m['n']) ? 'y' : 'n', $m['q'] ?? 0, "\n";
+    return $m;
+}
+
+/**
+ * @return array<int, int>
+ */
+function intsBuilt(): array
+{
+    $m = [];
+    $m[3] = 1;
+    $m[1] = 2;
+    return $m;
+}
+
+function passedOn(): int
+{
+    $x = [];
+    $x['a'] = 5;
+    $x['b'] = 6;
+    return total($x);
+}
+
 $r = check(['abc', 'x', 'abcd']);
 echo count($r), ' ', isset($r['x']) ? 'set' : 'unset', ' ', array_key_exists('x', $r) ? 'has' : 'not', "\n";
 echo look(['a' => 1, 'b' => 2, '16' => 4], 'b', 16), "\n";
@@ -95,3 +129,4 @@ echo ints([3 => 'c', 1 => 'a'], 1), "\n";
 echo ints([5 => 'e'], 7), "\n";
 echo texts(['k' => 'K', 'j' => 'J']), "\n";
 echo total(['a' => 1, 'b' => 2]), "\n";
+echo count(built('k')), ' ', count(intsBuilt()), ' ', intsBuilt()[3], ' ', passedOn(), "\n";

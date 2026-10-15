@@ -1515,7 +1515,7 @@ impl Converter<'_> {
         if self.variables.iterated.contains(&var) {
             self.refuse(
                 variable,
-                "the body of a foreach cannot change the list it iterates (P2R-41)",
+                "the body of a foreach cannot change the list or map it iterates (P2R-41, P2R-242)",
             );
         }
         self.variables.write(var, Some(variable.span));
@@ -1713,6 +1713,15 @@ impl Converter<'_> {
     ) -> Result<RustType, String> {
         // `[]` has the variable's list or map type (P2R-21, P2R-241).
         if matches!(known, RustType::Vec(_) | RustType::Map(..)) && self.empty_list(node) {
+            return Ok(known.clone());
+        }
+        // A map keeps its type where Mago names the keys that writes by literal keys gave
+        // it (P2R-240).
+        if matches!(known, RustType::Map(..))
+            && self
+                .expression_type(node)
+                .is_some_and(|union| types::fits_map(union, known, &self.type_names))
+        {
             return Ok(known.clone());
         }
         // Mago records no type for a variable read again after a property read, as in
@@ -2242,7 +2251,6 @@ fn condition_line(
     format!("{indent}{keyword} {} {open}", operands.join(" && "))
 }
 
-/// The pattern of a foreach: its value, or its key and value (P2R-41).
 /// The Rust text of `[]` assigned to a variable before its type is known (P2R-21).
 const EMPTY_LIST: &str = "Vec::new()";
 
@@ -2255,6 +2263,7 @@ fn first_value<'v>(value: &'v str, ty: Option<&RustType>) -> &'v str {
     }
 }
 
+/// The pattern of a foreach: its value, or its key and value (P2R-41).
 fn for_pattern(
     entries: &[Entry],
     unused: &[bool],

@@ -796,6 +796,7 @@ impl<'c> Converter<'c> {
         let mut shapes = self.shape_items();
         // The union enums follow the shape structs, in the same place (P2R-230).
         shapes.extend(self.union_items());
+        let shapes = shapes::named(shapes, &items, &main);
         // The exception struct follows the shapes in the crate root, and the items of one
         // file (P2R-210).
         let exception = self.uses_exceptions.then(throws::exception_lines);

@@ -37,11 +37,13 @@ is known in the others, and writes one Rust module for each PHP namespace below 
 namespace the files share: `Acme\Shop\Model` in a package whose files all sit under
 `Acme\Shop` becomes `model.rs`, and the shared namespace becomes `lib.rs`. A module names
 the items of other modules with `use crate::...;` lines. The output directory must not
-exist yet; `rustc --edition 2024 --crate-type lib crate/lib.rs` builds the crate.
+exist yet; `rustc --edition 2024 --crate-type lib crate/lib.rs` builds the crate (with
+the `indexmap` crate for map output, see below).
 
 Output that holds a map uses the `indexmap` crate (`use indexmap::IndexMap;`). The
 `Cargo.toml` that builds it needs `indexmap = "2"` under `[dependencies]`; php2rust writes
-no `Cargo.toml`.
+no `Cargo.toml`. With plain `rustc`, pass the built crate:
+`--extern indexmap=<path to libindexmap.rlib> -L dependency=<its deps directory>`.
 
 | Exit code | Meaning |
 |---|---|
@@ -49,7 +51,8 @@ no `Cargo.toml`.
 | 1 | The file holds PHP that php2rust does not convert yet. Each problem is printed as `path:line:column: message`. Nothing is written. |
 | 2 | The arguments are wrong, the file cannot be read, is not UTF-8 or is not valid PHP, rustfmt cannot be run, fails on the output or changes its own layout when run again, or the output cannot be written. For a directory: no `-o`, an `-o` directory that exists or sits inside the input, or no `.php` file. Nothing is written. |
 
-The output compiles with no warnings under `rustc --edition 2024 -D warnings`, and
+The output compiles with no warnings under `rustc --edition 2024 -D warnings` (given the
+`indexmap` crate for map output), and
 `rustfmt --edition 2024 --check` with the default configuration leaves it unchanged. Its
 layout is that of the rustfmt on `PATH`, so another rustfmt version may lay out the same
 code differently; the tests use the rustfmt of the pinned toolchain. Its first line is a

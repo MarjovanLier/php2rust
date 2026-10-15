@@ -6,7 +6,10 @@ use mago_codex::ttype::atomic::scalar::TScalar;
 use mago_span::HasSpan;
 use mago_syntax::cst::*;
 
+use std::collections::BTreeMap;
+
 use super::control::emit;
+use super::crates::{ItemKind, used_items};
 use super::lists::unparenthesized;
 use super::{Converter, nulls};
 use crate::printer::RExpr;
@@ -33,6 +36,49 @@ pub(super) fn no_list_read(expression: &Expression<'_>) -> bool {
         Expression::Access(Access::Property(access)) => no_list_read(access.object),
         _ => true,
     }
+}
+
+/// The shape structs and union enums of `types` that the items of `modules` or `main` name,
+/// also through another kept type, in their order. Mago's type of a map variable after
+/// writes by literal keys is a shape, which the tool meets but no item uses (P2R-240).
+pub(super) fn named(
+    types: Vec<(String, Vec<String>)>,
+    modules: &[Vec<Vec<String>>],
+    main: &[String],
+) -> Vec<(String, Vec<String>)> {
+    let mut text = modules
+        .iter()
+        .flatten()
+        .flatten()
+        .chain(main)
+        .cloned()
+        .collect::<Vec<_>>()
+        .join("\n");
+    let mut kept = vec![false; types.len()];
+    loop {
+        let open: BTreeMap<String, ItemKind> = types
+            .iter()
+            .zip(&kept)
+            .filter(|(_, kept)| !**kept)
+            .map(|((name, _), _)| (name.clone(), ItemKind::Type))
+            .collect();
+        let used = used_items(&text, &open);
+        if used.is_empty() {
+            break;
+        }
+        for (at, (name, lines)) in types.iter().enumerate() {
+            if used.contains(name.as_str()) {
+                kept[at] = true;
+                text.push('\n');
+                text.push_str(&lines.join("\n"));
+            }
+        }
+    }
+    types
+        .into_iter()
+        .zip(kept)
+        .filter_map(|(item, kept)| kept.then_some(item))
+        .collect()
 }
 
 impl Converter<'_> {

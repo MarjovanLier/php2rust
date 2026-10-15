@@ -418,11 +418,12 @@ impl Converter<'_> {
         let element = match list_type {
             RustType::Vec(element) => Some(*element),
             RustType::String => None,
-            RustType::Option(_) => {
-                self.refuse(
-                    access,
-                    "a value that may be null cannot be read by index (P2R-106)",
-                );
+            RustType::Option(inner) => {
+                let message = match *inner {
+                    RustType::Map(..) => "a value that may be null cannot be read by key (P2R-106)",
+                    _ => "a value that may be null cannot be read by index (P2R-106)",
+                };
+                self.refuse(access, message);
                 return None;
             }
             RustType::Class(name)

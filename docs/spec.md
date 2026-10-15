@@ -3367,49 +3367,70 @@ out with the type `Spatie\LaravelData\Optional`: `string|Optional`, or
 fills one with `new Optional`, `Optional::create()` or a value, and
 reads it back with `$dto->name instanceof Optional`. In version 4.18.0,
 `Optional` is a class with one static method, `create()`, which returns
-`new self()`: no parent, interface, trait, property, constant,
-constructor or other magic method. This section gives such a union a
+an `Optional`: no parent, interface, trait, property, constant,
+constructor or other magic method, and no class of the package or the
+app extends it. This section gives such a union a
 Rust type and converts the forms above; reading the value inside, which
 needs the check to narrow the type, waits for a later section.
 
-- **P2R-360** A declared or analysed type that is a union of
-  `\Spatie\LaravelData\Optional` (any letter case) and exactly one other
-  type `T` with a Rust type, alone or with `null`, MUST become
-  `PhpOptional<T>` for `T|Optional` and `PhpOptional<Option<T>>` for
-  `T|Optional|null`, whatever the order of the members, where
-  `PhpOptional` is the generic enum
+- **P2R-360** A declared or analysed type whose members are a name that
+  PHP resolves, in any letter case, to `\Spatie\LaravelData\Optional`,
+  other members of one Rust type `T` after P2R-21, and possibly `null`,
+  MUST become `PhpOptional<T>` for `T|Optional` and
+  `PhpOptional<Option<T>>` for `T|Optional|null`, whatever the order of
+  the members, where `PhpOptional` is the generic enum
   `pub enum PhpOptional<T> { Absent, Present(T) }` with
   `#[derive(Clone, Debug, PartialEq, Eq)]`, written once at the crate
   root after the shapes and unions when an item names it, with the `use`
   line of every module that names it (P2R-174). A parameter of that type
   is borrowed as `&PhpOptional<T>` and its value cloned where it is
-  stored, as a union is (P2R-232). This holds only when an included file
-  declares `Optional` with the shape above; an `Optional` that the input
+  stored, as a union is (P2R-232). A read of a variable, parameter or
+  property of that type keeps that type also where Mago narrows it
+  (after `instanceof Optional`, a check against `null` or a write), as
+  P2R-104 and P2R-232 say for an `Option` and a union. This holds only
+  when an included file declares `Optional` with the shape of 4.18.0:
+  no parent, interface, trait, property or constant, and none of the
+  methods PHP calls by itself (P2R-350); an `Optional` that the input
   declares is a class of the input (P2R-230), and one of another shape,
   or no included `Optional`, gives the union no Rust type (P2R-22). These
-  stop too: `Optional` alone, with `T` itself nullable through `?T`
-  inside the union, with more than one other type, as a list or map
-  element, and with `T` a `PhpOptional` or `DateTime|false`. A class or
-  function named `PhpOptional` stops (P2R-31), because the helper takes
-  that name.
+  stop too: `Optional` alone, also with `null` (`Optional|null`,
+  `?Optional`); with members of more than one Rust type; with `true` or
+  `false` as `T`, which P2R-21 would widen to a `bool` PHP's type does
+  not take whole; with `T` a `DateTime`, which P2R-330 makes `None`
+  mean `false`, also with `false` or `null`; with `T` a class that
+  changes its objects or holds one (P2R-141), which is never cloned;
+  as a list or map element or a shape field; and a class that holds
+  itself through `PhpOptional`, as through `?C` (P2R-130). A class or
+  enum whose Rust name is `PhpOptional` stops (P2R-111, P2R-131),
+  because the helper takes that name.
 - **P2R-361** Where a value of type `PhpOptional<T>` is due (an argument,
-  a return value, a property or a variable of that type), `new Optional`,
-  `new Optional()` and `Optional::create()` MUST convert to
-  `PhpOptional::Absent`; a value of type `T` to `PhpOptional::Present(v)`;
-  for `PhpOptional<Option<T>>` a value of type `T` to
-  `PhpOptional::Present(Some(v))` and `null` to
-  `PhpOptional::Present(None)`; and a value of the same `PhpOptional`
-  type to itself. `new Optional`
-  or `Optional::create()` anywhere else stops, because its PHP type is
-  `Optional` alone.
-- **P2R-362** `$v instanceof Optional` on a value of type `PhpOptional<T>`
-  MUST convert to `matches!(v, PhpOptional::Absent)`, and
-  `!$v instanceof Optional`, which PHP reads as
-  `!($v instanceof Optional)`, to its negation. Every other use of such a
-  value stops: `===`, `!==`, `==` and `!=`, `??`, `?->`, `echo` and
-  concatenation, a cast, and the value where a `T` is due, because PHP's
-  type there depends on a check this section does not narrow (P2R-07,
-  P2R-22).
+  a return value, a property write, or a variable whose type Mago gives
+  as such a union), `new Optional`, `new Optional()` and
+  `Optional::create()`, with a name that PHP resolves, in any letter
+  case, to `\Spatie\LaravelData\Optional` and without arguments, MUST
+  convert to `PhpOptional::Absent`; a value that goes where `T` is
+  declared to `PhpOptional::Present(v)`, converted as for a place of type
+  `T` (P2R-25, P2R-26, P2R-102: an int is a float for `float|Optional`, a
+  `?T` value goes into `Present` of `T|Optional|null` as it is); `null`
+  for `PhpOptional<Option<T>>` to `PhpOptional::Present(None)`; and a
+  value of the same `PhpOptional` type to itself. An argument passed to a
+  `&PhpOptional<T>` parameter is lent: `&PhpOptional::Absent`,
+  `&PhpOptional::Present(v)` with `v` owned, `&v` for a variable, and a
+  parameter as it is. Each arm of a `match` in such a place converts as
+  such a value (P2R-121). These stop: `new Optional` or
+  `Optional::create()` anywhere else, because its PHP type is `Optional`
+  alone; `new Optional(...)` with an argument, which PHP runs; a value of
+  another `PhpOptional` type; and the arms of `?:` (P2R-180) and the
+  default of `??` in such a place.
+- **P2R-362** `$v instanceof Optional` on a value of type `PhpOptional<T>`,
+  with a name that PHP resolves, in any letter case, to
+  `\Spatie\LaravelData\Optional`, MUST convert to
+  `matches!(v, PhpOptional::Absent)`, and `!$v instanceof Optional`,
+  which PHP reads as `!($v instanceof Optional)`, to its negation. Every
+  other use of such a value stops: `===`, `!==`, `==` and `!=`, `??`,
+  `?->` that reads such a value, `echo` and concatenation, a cast, and the
+  value where a `T` or another type is due, because PHP's type there
+  depends on a check this section does not narrow (P2R-07, P2R-22).
 
 ## Spec checklist
 

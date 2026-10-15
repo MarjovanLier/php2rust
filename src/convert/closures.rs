@@ -48,10 +48,11 @@ impl Converter<'_> {
             );
             return None;
         }
+        let sensitive = self.only_sensitive(parameter);
         if let Some(attributes) = arrow
             .attribute_lists
             .first()
-            .or(parameter.attribute_lists.first())
+            .or(parameter.attribute_lists.first().filter(|_| !sensitive))
         {
             self.record_refused(arrow.expression);
             self.refuse(attributes, "attributes are not supported (P2R-07)");

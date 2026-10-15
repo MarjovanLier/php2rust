@@ -148,7 +148,9 @@ impl Converter<'_> {
             );
             return None;
         }
-        if let Some(attributes) = parameter.attribute_lists.first() {
+        if let Some(attributes) = parameter.attribute_lists.first()
+            && !self.only_sensitive(parameter)
+        {
             self.refuse(attributes, "attributes are not supported (P2R-07)");
             return None;
         }
@@ -204,6 +206,22 @@ impl Converter<'_> {
             mode: Mode::Shared,
             default,
         })
+    }
+
+    /// True when the attributes of `parameter` are one `#[SensitiveParameter]` with no
+    /// arguments, which PHP uses only to hide the value in a stack trace (P2R-341).
+    pub(super) fn only_sensitive(&self, parameter: &FunctionLikeParameter<'_>) -> bool {
+        let attributes: Vec<&Attribute<'_>> = parameter
+            .attribute_lists
+            .iter()
+            .flat_map(|list| list.attributes.iter())
+            .collect();
+        attributes.len() == 1
+            && attributes[0]
+                .argument_list
+                .as_ref()
+                .is_none_or(|list| list.arguments.is_empty())
+            && self.identifier_key(&attributes[0].name) == b"sensitiveparameter"
     }
 
     /// The default value of `parameter`, whose type is `ty`, converted at its

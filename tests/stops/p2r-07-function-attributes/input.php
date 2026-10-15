@@ -8,7 +8,7 @@ function old(int $x): int
     return $x;
 }
 
-function tagged(#[\SensitiveParameter] string $secret): int
+function tagged(#[\SensitiveParameter] #[\Example] string $secret): int
 {
     return strlen($secret);
 }
@@ -19,7 +19,7 @@ function tagged(#[\SensitiveParameter] string $secret): int
  */
 function doubled(array $values): array
 {
-    return array_map(fn(#[\SensitiveParameter] int $value): int => $value * 2, $values);
+    return array_map(fn(#[\Example] int $value): int => $value * 2, $values);
 }
 
 /**

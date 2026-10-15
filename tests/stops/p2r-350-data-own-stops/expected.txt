@@ -1,0 +1,1 @@
+input.php:18:19: a class that extends another is not supported (P2R-130)

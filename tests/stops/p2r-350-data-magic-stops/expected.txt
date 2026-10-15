@@ -1,0 +1,1 @@
+input.php:10:19: Spatie\LaravelData\Data has the method __destruct, which PHP calls by itself (P2R-350)

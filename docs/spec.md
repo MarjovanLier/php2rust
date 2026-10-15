@@ -123,7 +123,13 @@ P2R-188, P2R-232, P2R-282 and the roadmap of section 10. Section 33
 2026; it changes P2R-07, P2R-60, P2R-260, P2R-262 and the roadmap of
 section 10. Section 34 (`DateTime` from a format, and `date_parse` of
 its text) was written on 15 Oct 2026; it changes P2R-07, P2R-48,
-P2R-60, P2R-104, P2R-188 and the roadmap of section 10.
+P2R-60, P2R-104, P2R-174, P2R-188 and the roadmap of section 10. Its
+PHP spec reviewer found that PHP ends a format at a NUL byte, throws
+at a NUL in the text, and moves a local time in any gap of its zone;
+its Rust spec reviewer found the missing `use` line of a module whose
+helper alone names `PhpDateTime`; the build found that Mago types
+`date_parse()` as `mixed` and that `DateTime|false` must not take the
+forms of `null`.
 
 php2rust converts typed PHP source into normal, readable Rust (`Vec`,
 `String`, `i64`), without AI. It reads PHP with the Mago crates, uses Mago's
@@ -446,18 +452,24 @@ requirement IDs.
     condition, `=== 1` and `=== 0` are false, and `!== 0`, `!== 1` and
     `!` are true; the Rust subject holds U+FFFD there, a character that
     is not a letter, and matches as any other.
-  - `DateTime::createFromFormat()` of P2R-331 where the format does not
-    read a field: PHP fills it from the current date and time in its
+  - `DateTime::createFromFormat()` of P2R-331 where no letter, `!` or `|`
+    sets a field: PHP fills it from the current date and time in its
     default time zone (`date.timezone`, UTC when not set), Rust from the
-    current UTC date and time. Where that zone has daylight saving time,
-    PHP also moves a time that falls in the skipped hour, and Rust does
-    not.
-  - A format of P2R-331 or P2R-332 read at run time with an ASCII letter
-    that the helper does not read, or with `*` or `+`: PHP reads it,
-    Rust panics (exit code 101).
+    current UTC date and time.
+  - `DateTime::createFromFormat()` of P2R-331 under a `date.timezone`
+    other than UTC, whatever the format reads: PHP moves a local time
+    that falls in a gap of that zone forward (`2026-03-29 02:30:00` in
+    `Europe/Amsterdam` gives 03:30), Rust keeps it.
+  - `DateTime::createFromFormat()` of P2R-331 on a text that holds a NUL
+    byte: PHP throws a `ValueError`, Rust panics (exit code 101).
+  - A format of P2R-331 read at run time with an ASCII letter that the
+    helper does not read, or with `*` or `+`, and a format of P2R-332
+    read at run time with such a letter: PHP reads it, Rust panics (exit
+    code 101).
   - `date_parse()` of P2R-335 on a date whose year is above 9999, which
     the carries of P2R-331 can give (`9999-12-31 25:00:00`): PHP misreads
-    the text (year 2000, hour 10), Rust gives the date's own fields.
+    the text as the year less 8000 with the hour 10, the minute and the
+    second 0 (year 2000 there), Rust gives the date's own fields.
   - A shape that P2R-271 turns into a map, where a PHP caller outside the
     input built the array in another key order than the input's literals:
     the Rust map has the input's order, because a struct has none.
@@ -992,7 +1004,8 @@ Sections 3 to 9 apply to nullable values unless this section says otherwise.
   type (P2R-204), because Rust has no object identity and PHP compares
   properties loosely, other than `===` and `!==` with the literal `null`
   (P2R-103); `echo` and string
-  joining of an object; `instanceof`; `clone`, also with new property
+  joining of an object; `instanceof`, other than the form of P2R-333,
+  which names it; `clone`, also with new property
   values; a cast of an object; and an object as a condition.
 - **P2R-137** The struct MUST list one field per property
   (`pub x: i64`), and one blank line separates it from `impl C {`. `new`
@@ -1557,8 +1570,10 @@ Rust module. One input file still converts as sections 1 to 17 say.
   a use of it, and a name of the module's own items needs no line. A module
   other than the crate root whose Rust lines name the struct of an array
   shape (P2R-200), as a type or as a struct literal (`S { .. }`), a union
-  enum (P2R-230), or the exception struct of P2R-210, MUST hold
-  `use crate::<Name>;` for it. rustfmt sorts the `use` lines (P2R-190).
+  enum (P2R-230), the exception struct of P2R-210, or the `PhpDateTime`
+  struct of P2R-330, also where only a helper of the module names it,
+  MUST hold `use crate::<Name>;` for it. rustfmt sorts the `use` lines
+  (P2R-190).
 - **P2R-175** A directory input converts to a library: a statement outside
   functions other than the P2R-12 `declare`, the P2R-150 `namespace` and
   `use` statements, and enum, class and trait (P2R-280) declarations stops the conversion,
@@ -3023,27 +3038,35 @@ failing (`19800230` gives 1 March 1980), and a field the format does not
 read takes the current date or time.
 
 - **P2R-330** The class `DateTime` (`\DateTime`) as a type MUST map to
-  the helper struct `PhpDateTime`, with the `pub` fields `year`,
-  `month`, `day`, `hour`, `minute` and `second`, each an `i64`, and
-  `#[derive(Clone, Copy, Debug)]`, and Mago's type `DateTime|false` (the
-  return type of `DateTime::createFromFormat()`) MUST map to
-  `Option<PhpDateTime>`. The struct is `Copy`, so a value passes and
-  copies as an enum value does (P2R-112). The output holds the struct
-  once, where it holds shape structs (P2R-200), when the output names
-  it; a module of a directory input reads it through `use
-  crate::PhpDateTime;` (P2R-172). `$v === false`, `false === $v`, `$v
+  the helper struct `pub struct PhpDateTime`, with the `pub` fields
+  `year`, `month`, `day`, `hour`, `minute` and `second`, each an `i64`,
+  and `#[derive(Clone, Copy, Debug)]`, and Mago's type `DateTime|false`
+  (the return type of `DateTime::createFromFormat()`) MUST map to
+  `Option<PhpDateTime>`, which P2R-230 does not make a union enum. The
+  struct is `Copy`, so a value passes and copies as an enum value does
+  (P2R-112). The output holds the struct once, after the shape structs
+  and the union enums (P2R-200, P2R-230), when the output or a helper
+  names it; a module of a directory input reads it through `use
+  crate::PhpDateTime;` (P2R-174). `$v === false`, `false === $v`, `$v
   !== false` and `false !== $v` on `Option<PhpDateTime>` convert as
-  P2R-103 converts the same forms with `null`. Only the forms of this
-  section take a `DateTime`. These stop the conversion: `new
-  DateTime(..)`, every other method or property of `DateTime`,
-  `DateTimeImmutable`, `DateTimeInterface`, a comparison of two
-  `DateTime` values, a `DateTime` in `echo`, interpolation or joining,
-  and a class, enum or shape whose Rust name is `PhpDateTime` (P2R-173).
+  P2R-103 converts the same forms with `null`, and `gettype()` of a
+  `DateTime` gives `"object"` (P2R-222).
+  Only these forms and those of this section take a `DateTime`. These
+  stop the conversion: `new DateTime(..)`, every other method or
+  property of `DateTime`, `DateTimeImmutable`, `DateTimeInterface`, a
+  union of `DateTime` with a type other than `false`, every comparison
+  of two values of type `DateTime` or `DateTime|false` (PHP compares
+  objects by identity or by their fields), `=== null`, `!== null`, `??`
+  and `?->` on a `DateTime|false` value, whose `None` is PHP's `false`,
+  not `null`, a `DateTime` in `echo`,
+  interpolation or joining, and a class or enum whose Rust name is
+  `PhpDateTime`, a name the output uses (P2R-111).
 - **P2R-331** `DateTime::createFromFormat($format, $text)` with two
   `string` arguments MUST convert to
   `php_date_create_from_format(format, text)`, of type
-  `Option<PhpDateTime>`, a helper that walks the format and the text's
-  bytes with PHP's rules:
+  `Option<PhpDateTime>`, a helper that reads the format up to its first
+  NUL byte, as PHP does, and walks it and the text's bytes with PHP's
+  rules:
   - `d` and `j` read a day, `m` and `n` a month, `H` and `G` an hour,
     each of one or two digits; `Y` reads a year of one to four digits;
     `y` reads one or two digits and adds 2000 below 70 and 1900 from 70;
@@ -3060,26 +3083,34 @@ read takes the current date or time.
     same byte.
 
   The helper gives `None` where a number does not start at a digit, `i`
-  or `s` has one digit, a literal or `#` byte differs, text is left
-  after the format, or the format is left after the text other than
-  `!` and `|`, which still apply. Otherwise the fields the format did not
-  read take the current date in UTC for the year, month and day, `0` for
-  the hour, minute and second where the format read one of these, and
-  the current UTC time where it read none; then each field out of range
-  carries as PHP's does (second 60 is the next minute, hour 24 the next
-  day, day 0 the last day of the month before, month 13 January of the
-  next year), which can give a year below 0 or above 9999. The helper
-  panics at an ASCII letter of the format other than those above, `*`
-  and `+` (P2R-60); where the format is a string literal or a constant
-  as in P2R-260, such a byte stops the conversion instead.
+  or `s` has one digit, a literal, `#` or escaped byte differs, the
+  format ends with `\`, text is left after the format, or the format is
+  left after the text other than `!` and `|`, which still apply.
+  Otherwise the fields that no letter, `!` or `|` set take the current
+  date in UTC for the year, month and day (each on its own), `0` for the
+  hour, minute and second where a letter set one of these, and the
+  current UTC time where none did; a clock before 1970 reads as
+  1970-01-01 00:00:00. Then the fields carry as PHP's do: the second,
+  minute and hour into the day, the month into the year, and then the
+  day against the length of that month (second 60 is the next minute,
+  hour 24 the next day, day 0 the last day of the month before, month
+  13 January of the next year), which can give a year from -1 to 10007.
+  The helper panics, before it reads the text, where the format holds
+  an ASCII letter other than those above, `*` or `+` outside a `\`
+  escape, and it panics where the text holds a NUL byte, where PHP
+  throws a `ValueError` (P2R-60); where the format is a string literal
+  or a constant as in P2R-260, such a byte stops the conversion
+  instead.
 - **P2R-332** `$d->format($f)` on a value of type `PhpDateTime` with a
   `string` argument MUST convert to `php_date_format(d, f)`, of type
   `String`, a helper that writes `d`, `m`, `H`, `i` and `s` with two
   digits, `j`, `n` and `G` without a leading zero, `Y` with at least four
   digits after a `-` for a year below 0 (`-0001`), `y` as the remainder
   of the year by 100 in two digits (`-1` for the year -1, as PHP gives),
-  the byte after `\` as it is, and every other byte that is not an ASCII
-  letter as it is. It panics at another ASCII letter (P2R-60); where the
+  the byte after `\` as it is, a NUL byte for a `\` that ends the format,
+  as PHP writes the end of its format string, and every other byte that
+  is not an ASCII letter as it is (`*` and `+` too). It panics at another
+  ASCII letter (P2R-60); where the
   format is a string literal or a constant as in P2R-260, such a letter
   stops the conversion instead. `format()` on `Option<PhpDateTime>`
   stops by P2R-106.
@@ -3103,18 +3134,26 @@ read takes the current date or time.
   (`B || C` for three operands), reads the binding, and both blocks hold
   the body, converted once. PHP evaluates `X` first and reads `B` only
   where `X` is false, where Mago types `$v` as not null, which the
-  binding is. The rules of P2R-104 and P2R-290 for a write to `$v` and
-  for the step of a `for` apply as to a `let ... else`. `X` as a later
-  operand converts by P2R-103 or P2R-333 without a binding.
+  binding is. Where neither `B` nor a later statement reads the binding,
+  P2R-104 writes `if v.is_none() { .. }` for the let-else, still followed
+  by `if B { .. }`. The rules of P2R-104 and P2R-290 for a write to `$v`
+  and for the step of a `for` apply as to a `let ... else`. Where the
+  body reads `$v`, which is not the binding in Rust, the form does not
+  apply, and the condition converts as any other, so a read of `$v` in
+  `B` stops by P2R-106. `X` as a later operand converts by P2R-103 or
+  P2R-333 without a binding.
 - **P2R-335** `date_parse($d->format('Y-m-d H:i:s'))`, where `$d` has
-  type `PhpDateTime` and the format is that string literal, in a place
-  whose type is a shape of P2R-200 whose every key is one of `year`,
-  `month`, `day`, `hour`, `minute` and `second` with the type `int`, MUST
-  convert to the shape's struct literal with each field read from `d`
-  (`DayHourMinuteMonthSecondYearShape { day: d.day, hour: d.hour, .. }`):
-  PHP's `date_parse` reads that text back to the same numbers for every
-  year from -9999 to 9999, and for a year above 9999 it misreads the
-  text (P2R-60). Every other use of `date_parse` stops by P2R-48.
+  type `PhpDateTime` and the format is that string literal, MUST convert
+  to a struct literal of the shape `array{day: int, hour: int, minute:
+  int, month: int, second: int, year: int}` of P2R-200 with each field
+  read from `d` (`DayHourMinuteMonthSecondYearShape { day: d.day, hour:
+  d.hour, .. }`): PHP's `date_parse` reads that text back to the same
+  numbers for every year from -9999 to 9999, and for a year above 9999
+  it misreads the text (P2R-60). Mago types the call as `mixed`, so a
+  variable that the call writes takes that shape, and a later read
+  checks it against Mago's type of the read (P2R-34), which a docblock
+  `@var` of the variable gives: another type stops. Every other use of
+  `date_parse` stops by P2R-48.
 
 ## Spec checklist
 

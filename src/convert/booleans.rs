@@ -36,6 +36,12 @@ impl Converter<'_> {
 
     /// `!` (P2R-42).
     pub(super) fn not(&mut self, unary: &UnaryPrefix<'_>) -> Option<(RExpr, RustType)> {
+        // `!$v instanceof DateTime` is `!($v instanceof DateTime)` (P2R-333).
+        if let Expression::Binary(binary) = super::lists::unparenthesized(unary.operand)
+            && matches!(binary.operator, BinaryOperator::Instanceof(_))
+        {
+            return self.instance_of(binary, true);
+        }
         let operand = self.condition(unary.operand)?;
         Some((RExpr::Not(Box::new(operand)), RustType::Bool))
     }
@@ -60,6 +66,9 @@ impl Converter<'_> {
             BinaryOperator::Identical(_) | BinaryOperator::NotIdentical(_)
         );
         if let Some(converted) = self.null_comparison(binary, op, strict) {
+            return converted;
+        }
+        if strict && let Some(converted) = self.false_comparison(binary, op == BinOp::Eq) {
             return converted;
         }
         if strict && let Some(converted) = self.preg_match_comparison(binary, op) {
@@ -149,6 +158,7 @@ pub(super) fn refusal(
         RustType::Shape(_) => Some("an array shape cannot be compared (P2R-201)"),
         RustType::Union(_) => Some(UNION_COMPARED),
         RustType::Map(..) => Some("a comparison of maps is not supported (P2R-242)"),
+        RustType::DateTime => Some("a DateTime cannot be compared (P2R-330)"),
     }
 }
 

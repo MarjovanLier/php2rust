@@ -1,0 +1,4 @@
+input.php:8:14: date_parse() converts only of $d->format('Y-m-d H:i:s') (P2R-335)
+input.php:19:14: date_parse() converts only of $d->format('Y-m-d H:i:s') (P2R-335)
+input.php:31:12: the variable $parts changes type from DayHourMinuteMonthSecondYearShape to YearShape (P2R-34)
+input.php:38:25: Invalid argument type for argument #1 of `date_parse`: expected `string`, but found `mixed`. (mixed-argument)

@@ -487,7 +487,9 @@ fn php_type(member: &RustType) -> &'static str {
         RustType::Bool => "boolean",
         RustType::String => "string",
         RustType::Vec(_) | RustType::Shape(_) | RustType::Map(..) => "array",
-        RustType::Enum(_) | RustType::Class(_) | RustType::Union(_) => "object",
+        RustType::Enum(_) | RustType::Class(_) | RustType::Union(_) | RustType::DateTime => {
+            "object"
+        }
         RustType::Option(inner) => php_type(inner),
     }
 }

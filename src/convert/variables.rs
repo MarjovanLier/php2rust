@@ -51,7 +51,8 @@ use super::flow::{Flow, Var};
 use super::lists::unparenthesized;
 use super::maps::{MAP_APPEND, MAP_MAY_BE_NULL, MAP_PROPERTY_CHANGE, UNSET};
 use super::{
-    Converter, Mode, ParameterSignature, classes, helpers, lists, nulls, numbers, strings, unions,
+    Converter, Mode, ParameterSignature, classes, dates, helpers, lists, nulls, numbers, strings,
+    unions,
 };
 use crate::printer::{self, BinOp, RExpr};
 use crate::types::{self, RustType};
@@ -1371,6 +1372,11 @@ impl Converter<'_> {
                         .expression_type(node)
                         .is_some_and(|site| types::fits_type(site, value, &self.type_names)) =>
             {
+                Ok(value.clone())
+            }
+            // Mago types `date_parse()` as mixed, so the parts of a date give the variable
+            // their shape, which a later read checks against Mago's type (P2R-335).
+            (Err(_), Some(value @ RustType::Shape(name))) if name == dates::DATE_PARTS => {
                 Ok(value.clone())
             }
             (found, _) => found,

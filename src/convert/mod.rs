@@ -35,6 +35,7 @@ mod classes;
 mod closures;
 mod control;
 mod crates;
+mod dates;
 mod enums;
 mod expressions;
 mod flow;
@@ -839,7 +840,22 @@ impl<'c> Converter<'c> {
         let mut shapes = self.shape_items();
         // The union enums follow the shape structs, in the same place (P2R-230).
         shapes.extend(self.union_items());
-        let shapes = shapes::named(shapes, &items, &main);
+        // The struct of `DateTime` follows them, also where only a helper names it
+        // (P2R-330).
+        let date_time = (
+            crate::types::DATE_TIME.to_owned(),
+            helpers::date_time_lines(),
+        );
+        shapes.push(date_time.clone());
+        let mut shapes = shapes::named(shapes, &items, &main);
+        if self
+            .helpers
+            .iter()
+            .any(|(_, helper)| helper.names_date_time())
+            && !shapes.contains(&date_time)
+        {
+            shapes.push(date_time);
+        }
         // The exception struct follows the shapes in the crate root, and the items of one
         // file (P2R-210).
         let exception = self.uses_exceptions.then(throws::exception_lines);

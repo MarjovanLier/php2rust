@@ -29,10 +29,12 @@ pub(super) enum Helper {
     PhpUcwords,
     PhpPregReplaceCallback,
     PhpStrReplace,
+    PhpDateCreateFromFormat,
+    PhpDateFormat,
 }
 
 impl Helper {
-    const ALL: [Helper; 22] = [
+    const ALL: [Helper; 24] = [
         Helper::CtypeDigit,
         Helper::PhpInt,
         Helper::PhpOffset,
@@ -55,6 +57,8 @@ impl Helper {
         Helper::PhpUcwords,
         Helper::PhpPregReplaceCallback,
         Helper::PhpStrReplace,
+        Helper::PhpDateCreateFromFormat,
+        Helper::PhpDateFormat,
     ];
 
     fn name(self) -> &'static str {
@@ -81,7 +85,18 @@ impl Helper {
             Helper::PhpUcwords => "php_ucwords",
             Helper::PhpPregReplaceCallback => "php_preg_replace_callback",
             Helper::PhpStrReplace => "php_str_replace",
+            Helper::PhpDateCreateFromFormat => "php_date_create_from_format",
+            Helper::PhpDateFormat => "php_date_format",
         }
+    }
+
+    /// True for a helper that names the struct of `DateTime`, which the crate root holds
+    /// (P2R-330).
+    pub(super) fn names_date_time(self) -> bool {
+        matches!(
+            self,
+            Helper::PhpDateCreateFromFormat | Helper::PhpDateFormat
+        )
     }
 
     /// The function in rustfmt's layout.
@@ -109,6 +124,8 @@ impl Helper {
             Helper::PhpUcwords => PHP_UCWORDS,
             Helper::PhpPregReplaceCallback => PHP_PREG_REPLACE_CALLBACK,
             Helper::PhpStrReplace => PHP_STR_REPLACE,
+            Helper::PhpDateCreateFromFormat => PHP_DATE_CREATE_FROM_FORMAT,
+            Helper::PhpDateFormat => PHP_DATE_FORMAT,
         }
     }
 
@@ -457,4 +474,214 @@ const PHP_STR_REPLACE: &str = r#"fn php_str_replace(
         }
     }
     out
+}"#;
+
+/// The struct of PHP's `DateTime`, which the output holds once, where it holds shape structs
+/// (P2R-330).
+pub(super) fn date_time_lines() -> Vec<String> {
+    [
+        "#[derive(Clone, Copy, Debug)]",
+        "pub struct PhpDateTime {",
+        "    pub year: i64,",
+        "    pub month: i64,",
+        "    pub day: i64,",
+        "    pub hour: i64,",
+        "    pub minute: i64,",
+        "    pub second: i64,",
+        "}",
+    ]
+    .map(str::to_owned)
+    .to_vec()
+}
+
+/// `DateTime::createFromFormat()`: the format read at run time with PHP's widths, fills and
+/// carries, up to its first NUL as PHP reads it; a NUL in the text panics where PHP throws a
+/// `ValueError`, and a letter the helper does not read panics before the text is read, as
+/// PHP reads such a letter wherever it stands. The carry reads every field of the raw date,
+/// so rustc sees them read even where nothing else does (P2R-50, P2R-331).
+const PHP_DATE_CREATE_FROM_FORMAT: &str = r#"fn php_date_create_from_format(format: &str, text: &str) -> Option<PhpDateTime> {
+    fn civil(days: i64) -> (i64, i64, i64) {
+        let days = days + 719468;
+        let era = days.div_euclid(146097);
+        let day_of_era = days - era * 146097;
+        let year_of_era =
+            (day_of_era - day_of_era / 1460 + day_of_era / 36524 - day_of_era / 146096) / 365;
+        let day_of_year = day_of_era - (365 * year_of_era + year_of_era / 4 - year_of_era / 100);
+        let month = (5 * day_of_year + 2) / 153;
+        let day = day_of_year - (153 * month + 2) / 5 + 1;
+        let month = if month < 10 { month + 3 } else { month - 9 };
+        (year_of_era + era * 400 + i64::from(month <= 2), month, day)
+    }
+    fn first_day(year: i64, month: i64) -> i64 {
+        let year = year - i64::from(month <= 2);
+        let era = year.div_euclid(400);
+        let year_of_era = year - era * 400;
+        let day_of_year = (153 * ((month + 9) % 12) + 2) / 5;
+        era * 146097 + year_of_era * 365 + year_of_era / 4 - year_of_era / 100 + day_of_year
+            - 719468
+    }
+    assert!(
+        !text.contains('\0'),
+        "DateTime::createFromFormat(): Argument #2 ($datetime) must not contain any null bytes"
+    );
+    let format = format.split('\0').next().unwrap_or_default();
+    let mut scan = format.bytes();
+    while let Some(byte) = scan.next() {
+        match byte {
+            b'\\' => {
+                scan.next();
+            }
+            b'Y' | b'y' | b'm' | b'n' | b'd' | b'j' | b'H' | b'G' | b'i' | b's' => {}
+            b'*' | b'+' | b'A'..=b'Z' | b'a'..=b'z' => panic!(
+                "the date format character {} is not supported by php2rust",
+                char::from(byte)
+            ),
+            _ => {}
+        }
+    }
+    let (format, text) = (format.as_bytes(), text.as_bytes());
+    let epoch = [1970, 1, 1, 0, 0, 0];
+    let mut fields: [Option<i64>; 6] = [None; 6];
+    let (mut next, mut at) = (0, 0);
+    while next < format.len() && at < text.len() {
+        let byte = format[next];
+        next += 1;
+        match byte {
+            b'Y' | b'y' | b'm' | b'n' | b'd' | b'j' | b'H' | b'G' | b'i' | b's' => {
+                let (field, width) = match byte {
+                    b'Y' => (0, 4),
+                    b'y' => (0, 2),
+                    b'm' | b'n' => (1, 2),
+                    b'd' | b'j' => (2, 2),
+                    b'H' | b'G' => (3, 2),
+                    b'i' => (4, 2),
+                    _ => (5, 2),
+                };
+                let start = at;
+                while at < text.len() && at - start < width && text[at].is_ascii_digit() {
+                    at += 1;
+                }
+                if at == start || (matches!(byte, b'i' | b's') && at - start < 2) {
+                    return None;
+                }
+                let mut value = text[start..at]
+                    .iter()
+                    .fold(0, |value, digit| value * 10 + i64::from(digit - b'0'));
+                if byte == b'y' {
+                    value += if value < 70 { 2000 } else { 1900 };
+                }
+                fields[field] = Some(value);
+            }
+            b'!' => fields = epoch.map(Some),
+            b'|' => {
+                for (field, value) in fields.iter_mut().zip(epoch) {
+                    field.get_or_insert(value);
+                }
+            }
+            b' ' => loop {
+                match text[at..] {
+                    [b' ' | b'\t', ..] => at += 1,
+                    [0xC2, 0xA0, ..] => at += 2,
+                    [0xE2, 0x80, 0xAF, ..] => at += 3,
+                    _ => break,
+                }
+            },
+            b'#' if b";:/.,-()".contains(&text[at]) => at += 1,
+            b'?' => at += 1,
+            b'\\' if format.get(next) == Some(&text[at]) => {
+                next += 1;
+                at += 1;
+            }
+            b'#' | b'\\' => return None,
+            other if other == text[at] => at += 1,
+            _ => return None,
+        }
+    }
+    if at < text.len() {
+        return None;
+    }
+    for &byte in &format[next..] {
+        match byte {
+            b'!' => fields = epoch.map(Some),
+            b'|' => {
+                for (field, value) in fields.iter_mut().zip(epoch) {
+                    field.get_or_insert(value);
+                }
+            }
+            _ => return None,
+        }
+    }
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |since| since.as_secs() as i64);
+    let (year, month, day) = civil(now.div_euclid(86400));
+    let clock = now.rem_euclid(86400);
+    let filled = if fields[3..].iter().any(Option::is_some) {
+        [year, month, day, 0, 0, 0]
+    } else {
+        [year, month, day, clock / 3600, clock / 60 % 60, clock % 60]
+    };
+    let [year, month, day, hour, minute, second] =
+        std::array::from_fn(|field| fields[field].unwrap_or(filled[field]));
+    let raw = PhpDateTime {
+        year,
+        month,
+        day,
+        hour,
+        minute,
+        second,
+    };
+    let seconds = raw.hour * 3600 + raw.minute * 60 + raw.second;
+    let months = raw.year * 12 + raw.month - 1;
+    let (year, month, day) = civil(
+        first_day(months.div_euclid(12), months.rem_euclid(12) + 1)
+            + raw.day
+            - 1
+            + seconds.div_euclid(86400),
+    );
+    let clock = seconds.rem_euclid(86400);
+    Some(PhpDateTime {
+        year,
+        month,
+        day,
+        hour: clock / 3600,
+        minute: clock / 60 % 60,
+        second: clock % 60,
+    })
+}"#;
+
+/// `DateTime::format()`: each letter of the format replaced by a field; a last `\` writes
+/// the NUL that ends PHP's format string (P2R-332).
+const PHP_DATE_FORMAT: &str = r#"fn php_date_format(date: PhpDateTime, format: &str) -> String {
+    let mut out = Vec::new();
+    let mut bytes = format.bytes();
+    while let Some(byte) = bytes.next() {
+        let text = match byte {
+            b'd' => format!("{:02}", date.day),
+            b'j' => date.day.to_string(),
+            b'm' => format!("{:02}", date.month),
+            b'n' => date.month.to_string(),
+            b'Y' if date.year < 0 => format!("-{:04}", -date.year),
+            b'Y' => format!("{:04}", date.year),
+            b'y' => format!("{:02}", date.year % 100),
+            b'H' => format!("{:02}", date.hour),
+            b'G' => date.hour.to_string(),
+            b'i' => format!("{:02}", date.minute),
+            b's' => format!("{:02}", date.second),
+            b'\\' => {
+                out.push(bytes.next().unwrap_or(0));
+                continue;
+            }
+            letter if letter.is_ascii_alphabetic() => panic!(
+                "the date format character {} is not supported by php2rust",
+                char::from(letter)
+            ),
+            other => {
+                out.push(other);
+                continue;
+            }
+        };
+        out.extend(text.bytes());
+    }
+    String::from_utf8_lossy(&out).into_owned()
 }"#;

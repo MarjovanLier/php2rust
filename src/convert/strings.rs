@@ -805,10 +805,21 @@ impl Converter<'_> {
         &mut self,
         call: &FunctionCall<'arena>,
         node: &Expression<'_>,
+        counts: (usize, usize),
+        message: &str,
+    ) -> Option<Vec<&'arena Expression<'arena>>> {
+        self.list_arguments(&call.argument_list, node, counts, message)
+    }
+
+    /// The arguments of a built-in function or method, as `built_in_arguments` reads them.
+    pub(super) fn list_arguments<'arena>(
+        &mut self,
+        list: &ArgumentList<'arena>,
+        node: &Expression<'_>,
         (min, max): (usize, usize),
         message: &str,
     ) -> Option<Vec<&'arena Expression<'arena>>> {
-        let arguments = &call.argument_list.arguments;
+        let arguments = &list.arguments;
         let message = if arguments
             .iter()
             .any(|argument| matches!(argument, Argument::Named(_)) || argument.is_unpacked())

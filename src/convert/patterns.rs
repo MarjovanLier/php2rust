@@ -14,7 +14,7 @@ use crate::types::RustType;
 impl Converter<'_> {
     /// The value of a pattern or replacement argument: a string literal, or a constant of a
     /// class or enum of the file whose value is a string literal (P2R-260, P2R-261).
-    fn literal_text(&mut self, node: &Expression<'_>) -> Option<String> {
+    pub(super) fn literal_text(&mut self, node: &Expression<'_>) -> Option<String> {
         match unparenthesized(node) {
             Expression::Literal(Literal::String(string)) => self.string_literal(string),
             Expression::Access(Access::ClassConstant(access)) => self.constant_text(access),

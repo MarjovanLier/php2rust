@@ -1,0 +1,7 @@
+input.php:12:37: the date format character D is not supported (P2R-331)
+input.php:13:37: the date format character * is not supported (P2R-331)
+input.php:14:37: the date format character D is not supported (P2R-331)
+input.php:15:43: DateTime::createFromFormat() converts on string arguments only (P2R-331)
+input.php:16:10: DateTime::createFromFormat() converts with two arguments only (P2R-331)
+input.php:17:10: a named or spread argument of a built-in function is not supported (P2R-169)
+input.php:18:37: the date format character + is not supported (P2R-331)

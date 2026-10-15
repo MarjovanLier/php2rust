@@ -26,6 +26,8 @@ const TAKEN: &[&str] = &[
     "Err",
     // The map type (P2R-240).
     "IndexMap",
+    // The struct of `DateTime` (P2R-330).
+    "PhpDateTime",
 ];
 
 /// Names PHP reserves, its keywords and type names, which no enum may take; each one fails

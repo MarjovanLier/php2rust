@@ -43,6 +43,9 @@ impl Converter<'_> {
                 "?-> needs a value that may be null; write -> (P2R-234)",
             );
         };
+        if super::nulls::date_or_false(&ty) {
+            return refused(self, super::nulls::DATE_NOT_NULL);
+        }
         let binding = match self.nullsafe_binding(&receiver, inner, arguments) {
             Ok(binding) => binding,
             Err(problem) => return refused(self, problem),
@@ -217,7 +220,7 @@ fn reads_rust_name(list: &ArgumentList<'_>, rust: &str) -> bool {
 }
 
 /// Collects the name of every plain variable an expression holds.
-struct Variables;
+pub(super) struct Variables;
 
 impl<'ast, 'arena> Walker<'ast, 'arena, Vec<Vec<u8>>> for Variables {
     fn walk_in_direct_variable(

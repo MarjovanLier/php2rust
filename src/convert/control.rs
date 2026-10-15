@@ -7,11 +7,24 @@
 
 use mago_span::HasSpan;
 use mago_syntax::cst::*;
+use mago_syntax::walker::Walker;
 
 use super::variables::changes_variable;
 use super::{Context, Converter};
-use crate::printer::{self, RExpr};
+use crate::printer::{self, BinOp, RExpr};
 use crate::types::RustType;
+
+/// The operands of the top-level `||` chain of a condition, left to right (P2R-334).
+fn or_operands<'e, 'a>(condition: &'e Expression<'a>) -> Vec<&'e Expression<'a>> {
+    match super::lists::unparenthesized(condition) {
+        Expression::Binary(binary) if matches!(binary.operator, BinaryOperator::Or(_)) => {
+            let mut operands = or_operands(binary.lhs);
+            operands.extend(or_operands(binary.rhs));
+            operands
+        }
+        other => vec![other],
+    }
+}
 
 /// The known value of every variable, by variable (P2R-50).
 type Values = Vec<Option<i64>>;
@@ -101,10 +114,19 @@ impl Converter<'_> {
         // `if ($v === null)` alone, on a variable that may be null, becomes a let-else when
         // its body always leaves (P2R-104), and so does `if (!is_T($v))` on a union value
         // (P2R-252).
-        let guarded = match branches.as_slice() {
-            [(Some(condition), _)] if !alone => self.guard_check(condition),
+        // `if (X || B)`, where X is such a check of `$v` and the body does not read `$v`,
+        // becomes the let-else of X and `if B` after it, each with the body (P2R-334).
+        let split = match branches.as_slice() {
+            [(Some(condition), statements)] if !alone => self.split_guard(condition, statements),
             _ => None,
         };
+        let guarded = match branches.as_slice() {
+            [(Some(condition), _)] if !alone => {
+                self.guard_check(split.as_ref().map_or(*condition, |(first, _)| *first))
+            }
+            _ => None,
+        };
+        let mut copied: Vec<String> = Vec::new();
         let mut guard: Option<usize> = None;
         let mut body_leaves = false;
         let slot = self.slot(depth, body);
@@ -129,7 +151,8 @@ impl Converter<'_> {
                     let keyword = if index == 0 { "if" } else { "} else if" };
                     let open = if alone { "{}" } else { "{" };
                     if let Some((_, _, _, pattern)) = &guarded {
-                        let test = self.condition_text(condition);
+                        let head = split.as_ref().map_or(*condition, |(first, _)| *first);
+                        let test = self.condition_text(head);
                         let (line, at) = self.variables.guard_line(depth, pattern.clone(), test);
                         guard = Some(at);
                         line
@@ -149,6 +172,7 @@ impl Converter<'_> {
                 None => format!("{}}} else {{", indent(depth)),
             };
             body.push(opening);
+            let start = body.len();
             let block = self.variables.flow.block();
             self.variables.flow.edge(test, block);
             self.variables.flow.enter(block);
@@ -156,6 +180,9 @@ impl Converter<'_> {
             let outer = self.variables.open(slot, false);
             for inner in statements {
                 self.statement(inner, depth + 1, context, body);
+            }
+            if split.is_some() {
+                copied = body[start..].to_vec();
             }
             self.variables.close(outer);
             self.variables.close_bindings(&bindings);
@@ -200,6 +227,49 @@ impl Converter<'_> {
                 frame.guarded.push(variable.name[1..].to_vec());
             }
         }
+        // The rest of the chain reads the binding, so it converts after it (P2R-334).
+        if let Some((_, rest)) = split {
+            let parts: Vec<Option<RExpr>> = rest.iter().map(|o| self.condition(o)).collect();
+            if let Some(test) = parts
+                .into_iter()
+                .reduce(|left, right| {
+                    Some(RExpr::Binary(Box::new(left?), BinOp::Or, Box::new(right?)))
+                })
+                .flatten()
+            {
+                let text = printer::expr(&test, false);
+                body.push(emit(depth, format!("if {text} {{")));
+                body.extend(copied);
+                body.push(format!("{}}}", indent(depth)));
+            }
+        }
+    }
+
+    /// The first operand of the top-level `||` chain of `condition` and the rest, when the
+    /// first is a check of `$v` that a let-else binds (P2R-104, P2R-333) and `statements`
+    /// do not read `$v`, whose Rust name the binding of the copied body would change
+    /// (P2R-334).
+    fn split_guard<'e, 'a>(
+        &self,
+        condition: &'e Expression<'a>,
+        statements: &[&Statement<'a>],
+    ) -> Option<(&'e Expression<'a>, Vec<&'e Expression<'a>>)> {
+        let operands = or_operands(condition);
+        let [first, rest @ ..] = operands.as_slice() else {
+            return None;
+        };
+        if rest.is_empty() {
+            return None;
+        }
+        let (variable, ..) = self.null_checked(first, false)?;
+        let mut found = Vec::new();
+        for statement in statements {
+            super::nullsafe::Variables.walk_statement(statement, &mut found);
+        }
+        if found.iter().any(|name| name.as_slice() == variable.name) {
+            return None;
+        }
+        Some((*first, rest.to_vec()))
     }
 
     /// The call that copies the binding of type `inner` on the copy line after its

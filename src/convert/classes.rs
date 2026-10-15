@@ -1814,6 +1814,11 @@ impl Converter<'_> {
             self.record_refused_arguments(&call.argument_list);
             return None;
         };
+        if ty == RustType::DateTime {
+            return self
+                .date_method(call, node, object)
+                .map(|(call, ty)| (call, Some(ty)));
+        }
         // An enum value has the methods of its enum (P2R-155).
         let (RustType::Class(class) | RustType::Enum(class)) = &ty else {
             self.record_refused_arguments(&call.argument_list);
@@ -1894,6 +1899,11 @@ impl Converter<'_> {
             self.record_refused_arguments(&call.argument_list);
             self.refuse(node, problem);
             return None;
+        }
+        if self.names_date_time(call.class) {
+            return self
+                .date_create(call, node)
+                .map(|(call, ty)| (call, Some(ty)));
         }
         let index = self
             .class_key(call.class)

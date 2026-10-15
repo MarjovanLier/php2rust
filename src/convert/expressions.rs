@@ -124,6 +124,9 @@ impl Converter<'_> {
             Expression::Call(Call::Function(call)) if self.calls_built_in(call, b"checkdate") => {
                 self.checkdate(call, expression)
             }
+            Expression::Call(Call::Function(call)) if self.calls_built_in(call, b"date_parse") => {
+                self.date_parse(call, expression)
+            }
             Expression::Call(Call::Function(call)) if self.calls_built_in(call, b"array_map") => {
                 self.array_map(call, expression)
             }
@@ -273,6 +276,7 @@ impl Converter<'_> {
                 return None;
             }
             BinaryOperator::NullCoalesce(_) => return self.coalesce(binary),
+            BinaryOperator::Instanceof(_) => return self.instance_of(binary, false),
             BinaryOperator::Exponentiation(_) => {
                 self.record_refused(binary.lhs);
                 self.record_refused(binary.rhs);
@@ -381,7 +385,7 @@ impl Converter<'_> {
             RustType::Bool => "boolean",
             RustType::String => "string",
             RustType::Vec(_) | RustType::Shape(_) | RustType::Map(..) => "array",
-            RustType::Enum(_) | RustType::Class(_) => "object",
+            RustType::Enum(_) | RustType::Class(_) | RustType::DateTime => "object",
             RustType::Option(_) => {
                 self.refuse(arguments[0], nulls::NULL_BUILT_IN);
                 return None;

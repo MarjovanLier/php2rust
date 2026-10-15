@@ -250,6 +250,20 @@ converts:
   at each position wins, and replaced text is not read again. `strtr($s, [$k => $v])`
   with an array literal of string keys and values becomes
   `php_strtr(s, &[(k, v)])`.
+- `DateTime` as the `Copy` struct `PhpDateTime` (year, month, day, hour, minute,
+  second), and `DateTime|false` as `Option<PhpDateTime>`.
+  `DateTime::createFromFormat($format, $text)` becomes
+  `php_date_create_from_format(format, text)`, a helper that reads the format at run
+  time with PHP's rules for `d j m n Y y H G i s`, `!`, `|`, a space, `#`, `?` and `\`:
+  the widths of the numbers, a field out of range that carries into the next one
+  (`19800230` is 1 March 1980), and a field the format does not set that takes the
+  current UTC date or time. `$d->format($f)` becomes `php_date_format(d, f)` with the
+  same letters. `$v instanceof DateTime`, `$v === false` and their negations become
+  `is_some()` and `is_none()`, or bind the date as a null check does, also as the
+  first operand of `if (!$v instanceof DateTime || ..) { return ..; }`, which becomes a
+  let-else and an `if` with the rest of the condition. `date_parse($d->format('Y-m-d
+  H:i:s'))` becomes the struct of the shape `array{year: int, month: int, day: int,
+  hour: int, minute: int, second: int}`, read from the date's fields.
 
 ## What stops the conversion
 
@@ -294,6 +308,14 @@ the others are findings of the Mago analyser. In short:
   a literal or a constant or that holds `$` or `\`, or with a subject that is not a
   string. `preg_match()` with matches, or with its result used any other way
   (`=== false`, `== 1`, stored).
+- For `DateTime`: `new DateTime()`, every method but `createFromFormat()` and
+  `format()`, `DateTimeImmutable` and `DateTimeInterface`, a union of `DateTime` with a
+  type other than `false`, a comparison of two dates, `=== null`, `??` and `?->` on a
+  `DateTime|false` value (it holds `false`, not `null`), a literal format with a letter
+  the helpers do not read, or with `*` or `+` for `createFromFormat()`, `format()` on a
+  value that may be `false`, `instanceof` with another class, a `||` check whose body
+  reads the date, and `date_parse()` of any other text or into a variable whose
+  docblock gives another type.
 - For traits and `strtr`: a trait with a method, a property or a `use` of another
   trait, a `use` with a block of conflict rules, a trait the input does not declare, a
   trait constant whose name the class or another trait it uses declares too, a trait
@@ -539,6 +561,15 @@ php2rust refuses some valid PHP that version 1 converts in other forms:
   array (a union hides it from the tool): PHP throws a `TypeError`, Rust panics.
 - `strtr()` with an array literal whose key is empty at run time, on a text that is
   not empty: PHP warns and skips the key, Rust skips it without the warning.
+- `DateTime::createFromFormat()` where the format leaves a field unset: PHP fills it
+  from the current date and time of its default time zone (`date.timezone`, UTC when
+  not set), Rust from the current UTC date and time. Under a zone other than UTC, PHP
+  also moves a local time that falls in a gap of the zone forward, and Rust does not.
+- A date format read at run time with a letter the helpers do not read (or `*` or `+`
+  for `createFromFormat()`), and a text with a NUL byte: PHP reads the letter or throws
+  a `ValueError`, Rust panics (exit code 101).
+- `date_parse()` of a date whose year is above 9999, which the carries can give: PHP
+  misreads the text (the year less 8000, hour 10), Rust gives the date's fields.
 - The errors above that Rust turns into panics are not exceptions, so a
   `catch (Throwable $e)` does not catch them.
 - An uncaught exception writes a shorter message than PHP's (no file, line or stack

@@ -1,0 +1,5 @@
+input.php:8:21: a method call on a value that may be null is not supported (P2R-106)
+input.php:17:24: the date format character D is not supported (P2R-332)
+input.php:18:10: format() converts with one argument only (P2R-332)
+input.php:19:24: format() converts on a string argument only (P2R-332)
+input.php:20:24: the date format character U is not supported (P2R-332)

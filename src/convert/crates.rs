@@ -288,12 +288,21 @@ impl Converter<'_> {
                 .filter(|(_, (owner, _))| *owner != module)
                 .map(|(name, (_, kind))| (name.clone(), *kind))
                 .collect();
-            let text = items
+            let mut text = items
                 .iter()
                 .flatten()
                 .cloned()
                 .collect::<Vec<_>>()
                 .join("\n");
+            // A date helper of this module names the struct of the crate root (P2R-330).
+            if self
+                .helpers
+                .iter()
+                .any(|&(owner, helper)| owner == module && helper.names_date_time())
+            {
+                text.push('\n');
+                text.push_str(crate::types::DATE_TIME);
+            }
             let uses: Vec<Vec<String>> = used_items(&text, &others)
                 .into_iter()
                 .map(|name| {

@@ -63,6 +63,16 @@ pub(super) fn member_path(ty: &RustType, target: &RustType) -> Option<String> {
     }
 }
 
+/// True for `DateTime|false`, an `Option` in Rust whose `None` is PHP's `false`, not `null`
+/// (P2R-330).
+pub(super) fn date_or_false(ty: &RustType) -> bool {
+    matches!(ty, RustType::Option(inner) if **inner == RustType::DateTime)
+}
+
+/// The problem of a check for null on such a value (P2R-330).
+pub(super) const DATE_NOT_NULL: &str =
+    "a DateTime|false value holds false, not null, so ?? and ?-> do not apply to it (P2R-330)";
+
 /// True for the literal `null`.
 pub(super) fn is_null(expression: &Expression<'_>) -> bool {
     matches!(
@@ -137,7 +147,7 @@ impl Converter<'_> {
         let Some((expr, ty)) = self.expression(value) else {
             return Some(None);
         };
-        if !matches!(ty, RustType::Option(_)) {
+        if !matches!(ty, RustType::Option(_)) || date_or_false(&ty) {
             self.refuse(
                 binary,
                 "this value cannot be null, so the comparison with null always gives the same result (P2R-103)",
@@ -295,6 +305,10 @@ impl Converter<'_> {
         operand: &'e Expression<'a>,
         negated: bool,
     ) -> Option<(&'e DirectVariable<'a>, Var, RustType)> {
+        // A check of a `DateTime|false` value binds as a null check does (P2R-333).
+        if let Some(found) = self.date_checked(operand, negated) {
+            return Some(found);
+        }
         let Expression::Binary(binary) = lists::unparenthesized(operand) else {
             return None;
         };
@@ -312,9 +326,13 @@ impl Converter<'_> {
             return None;
         };
         let outer = self.lookup(variable)?;
-        let RustType::Option(inner) = self.variables.ty(outer)? else {
+        let ty = self.variables.ty(outer)?;
+        let RustType::Option(inner) = ty else {
             return None;
         };
+        if date_or_false(ty) {
+            return None;
+        }
         Some((variable, outer, (**inner).clone()))
     }
 
@@ -388,6 +406,10 @@ impl Converter<'_> {
             self.refuse(binary, "the left side of ?? cannot be null here (P2R-105)");
             return None;
         };
+        if date_or_false(&left_type) {
+            self.refuse(binary, DATE_NOT_NULL);
+            return None;
+        }
         if right_type != **inner {
             self.refuse(
                 binary,

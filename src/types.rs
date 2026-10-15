@@ -14,6 +14,7 @@ use mago_codex::ttype::atomic::array::keyed::TKeyedArray;
 use mago_codex::ttype::atomic::array::list::TList;
 use mago_codex::ttype::atomic::object::TObject;
 use mago_codex::ttype::atomic::scalar::TScalar;
+use mago_codex::ttype::atomic::scalar::bool::TBool;
 use mago_codex::ttype::union::TUnion;
 
 use crate::names;
@@ -42,6 +43,26 @@ impl TypeNames {
     /// The fields of the array shape whose struct is `name`, in struct order (P2R-200).
     pub fn shape(&self, name: &str) -> Option<Vec<ShapeField>> {
         self.shapes.borrow().get(name).cloned()
+    }
+
+    /// Gathers the shape `fields` under `name`; false when another shape, enum or class
+    /// has that name (P2R-200, P2R-335).
+    pub fn add_shape(&self, name: &str, fields: Vec<ShapeField>) -> bool {
+        if self
+            .names
+            .values()
+            .any(|ty| matches!(ty, RustType::Enum(n) | RustType::Class(n) if n == name))
+        {
+            return false;
+        }
+        let mut shapes = self.shapes.borrow_mut();
+        match shapes.get(name) {
+            Some(known) => *known == fields,
+            None => {
+                shapes.insert(name.to_owned(), fields);
+                true
+            }
+        }
     }
 
     /// Every array shape a type has mapped to, by struct name in byte order (P2R-200).
@@ -111,6 +132,8 @@ pub enum RustType {
     /// A map, `IndexMap<K, V>`, keyed by `I64` or by the text of the key, `String`
     /// (P2R-240).
     Map(Box<RustType>, Box<RustType>),
+    /// PHP's `DateTime`, as the helper struct `PhpDateTime` (P2R-330).
+    DateTime,
 }
 
 impl RustType {
@@ -127,6 +150,7 @@ impl RustType {
                 name.clone()
             }
             Self::Map(key, value) => format!("IndexMap<{}, {}>", key.owned(), value.owned()),
+            Self::DateTime => DATE_TIME.into(),
         }
     }
 
@@ -175,7 +199,7 @@ impl RustType {
     /// (P2R-26).
     pub fn is_copy(&self) -> bool {
         match self {
-            Self::I64 | Self::F64 | Self::Bool | Self::Enum(_) => true,
+            Self::I64 | Self::F64 | Self::Bool | Self::Enum(_) | Self::DateTime => true,
             Self::String | Self::Vec(_) | Self::Class(_) | Self::Shape(_) | Self::Union(_) => false,
             Self::Map(..) => false,
             Self::Option(inner) => inner.is_copy(),
@@ -199,6 +223,7 @@ pub fn built(ty: &RustType) -> bool {
     match ty {
         RustType::I64 | RustType::F64 | RustType::Bool | RustType::String => true,
         RustType::Enum(_) | RustType::Class(_) | RustType::Shape(_) | RustType::Union(_) => true,
+        RustType::DateTime => true,
         RustType::Vec(element) | RustType::Map(_, element) => built(element),
         RustType::Option(inner) => !matches!(**inner, RustType::Option(_)) && built(inner),
     }
@@ -226,9 +251,17 @@ pub fn rust_type(union: &TUnion, enums: &TypeNames) -> Result<RustType, String> 
     let unknown = || format!("the type {} has no Rust type (P2R-22)", union.get_id());
     let mut found: Option<RustType> = None;
     let mut nullable = false;
+    let mut falsy = false;
     for atomic in union.types.iter() {
         if matches!(atomic, TAtomic::Null) {
             nullable = true;
+            continue;
+        }
+        if matches!(
+            atomic,
+            TAtomic::Scalar(TScalar::Bool(TBool { value: Some(false) }))
+        ) {
+            falsy = true;
             continue;
         }
         let this = match atomic {
@@ -240,6 +273,16 @@ pub fn rust_type(union: &TUnion, enums: &TypeNames) -> Result<RustType, String> 
             return Err(unknown());
         }
         found = Some(this);
+    }
+    if falsy {
+        // `DateTime|false`, what `DateTime::createFromFormat()` gives (P2R-330).
+        if found == Some(RustType::DateTime) && !nullable {
+            return Ok(RustType::Option(Box::new(RustType::DateTime)));
+        }
+        if found.as_ref().is_some_and(|seen| *seen != RustType::Bool) {
+            return Err(unknown());
+        }
+        found = Some(RustType::Bool);
     }
     match found {
         // `?T` where `T` is itself nullable cannot be written; the union holds one null.
@@ -303,7 +346,8 @@ pub fn declared_type(union: &TUnion, enums: &TypeNames) -> Result<RustType, Stri
             map
         });
     }
-    if members.len() < 2 {
+    // Only `DateTime|false` holds a `DateTime` (P2R-330).
+    if members.len() < 2 || members.contains(&RustType::DateTime) {
         return Err(error);
     }
     members.sort_by_key(variant);
@@ -360,8 +404,12 @@ pub fn variant(ty: &RustType) -> String {
         | RustType::Shape(name)
         | RustType::Union(name) => name.clone(),
         RustType::Option(inner) => variant(inner),
+        RustType::DateTime => "DateTime".to_owned(),
     }
 }
+
+/// The Rust name of the helper struct of PHP's `DateTime` (P2R-330).
+pub const DATE_TIME: &str = "PhpDateTime";
 
 /// True for an array with known keys and no other elements, such as
 /// `array{year: string}`; `array{}`, whose `[]` widens to a list (P2R-21), has none.
@@ -660,9 +708,14 @@ fn atomic_type(atomic: &TAtomic, enums: &TypeNames) -> Option<RustType> {
             }
         }
         // `$this(C)` widens to `C` (P2R-132).
-        TAtomic::Object(TObject::Named(found)) => enums
-            .get(&found.name.as_bytes().to_ascii_lowercase())
-            .cloned(),
+        TAtomic::Object(TObject::Named(found)) => {
+            let key = found.name.as_bytes().to_ascii_lowercase();
+            match enums.get(&key) {
+                Some(ty) => Some(ty.clone()),
+                None if key == b"datetime" => Some(RustType::DateTime),
+                None => None,
+            }
+        }
         _ => None,
     }
 }

@@ -436,8 +436,8 @@ requirement IDs.
     empty string when the string is empty.
   - `explode()` with an empty separator that is not a literal: PHP throws a
     `ValueError`, Rust panics (exit code 101).
-  - `trim()`, `ltrim()` or `rtrim()` with a second argument that is not a
-    literal (P2R-291): where it holds a `..` that starts no range, PHP
+  - `trim()`, `ltrim()` or `rtrim()` with a second argument whose value
+    the tool does not know (P2R-291): where it holds a `..` that starts no range, PHP
     warns and Rust does not, and both remove the same bytes; where its mask
     holds a byte above `7F`, a cut character gives U+FFFD in Rust, as for
     `substr()`.
@@ -2679,12 +2679,17 @@ run of both packages at the start of this slice.
   hold: the `if` is a top-level statement of the body of a function or
   method; the last statement of its body is a `return` or a `throw`; the
   inner type of `$v` is `string`, `list<T>` of a type that does not
-  change its objects (P2R-143), `int`, `float`, `bool` or an enum; and a
-  later top-level statement of that body writes `$v` (an assignment, `.=`
-  or an append, at any depth). The line after the `let ... else` is then
+  change its objects (P2R-143), a map (P2R-240), `int`, `float`, `bool`
+  or an enum; and a
+  later top-level statement of that body writes `$v` (`=`, a compound
+  assignment such as `.=` or `+=`, `++`, `--` or an append, at any
+  depth). The line after the `let ... else` is then
   a copy line, as P2R-181 writes one for a parameter:
-  `let mut v = v.to_string();`, `let mut v = v.to_vec();`, or
-  `let mut v = v;` for an int, float, bool or enum. From the copy line on,
+  `let mut v = v.to_string();`, `let mut v = v.to_vec();`,
+  `let mut v = v.clone();` for a map, or `let mut v = v;` for an int,
+  float, bool or enum. The check is the binding's first write for P2R-35,
+  so a write of `$v` before any read of it after the check stops the
+  conversion, as rustc would warn about the copy line. From the copy line on,
   `$v` is an owned local variable of the inner type for every rule
   (P2R-26, P2R-34, P2R-35, P2R-105, P2R-122, P2R-160), and each later
   write of `$v`, also in a nested block, writes it. A write after the
@@ -2698,9 +2703,10 @@ run of both packages at the start of this slice.
   `Option` outside. These still stop: a write in the body of the `if let`
   form of P2R-104; a write after a `let ... else` that is not a top-level
   statement of the body, or whose body does not end with a `return` or a
-  `throw`; a write after a type test of P2R-252 (a later slice); and a
-  write after a check of a shape or an object, which P2R-201 and P2R-143
-  do not let change.
+  `throw`; a write after a type test of P2R-252 (a later slice); a write
+  after a check of a shape or an object, which P2R-201 and P2R-143 do not
+  let change; and a `foreach` key or value named `$v` after the check,
+  whose loop variable would hide the binding (P2R-41).
 - **P2R-291** `trim($s, $characters)`, `ltrim($s, $characters)` and
   `rtrim($s, $characters)` with two `string` arguments MUST convert to
   `php_trim_chars(s, characters)`, `php_ltrim_chars(s, characters)` and
@@ -2711,14 +2717,17 @@ run of both packages at the start of this slice.
   both, as PHP does, and gives the rest through `String::from_utf8_lossy`.
   `php_charmask` walks the bytes as PHP's `php_charmask` does: a byte,
   `..` and a byte that is not lower than the first add the range from
-  the first to the last; a `..` that starts no such range adds nothing,
-  and the walk goes on at the next byte (PHP warns there); every other
-  byte adds itself. Where the second argument is a string literal, the
-  tool does the same walk when it converts, and these stop the
-  conversion: a `..` that starts no range, which PHP warns about, and a
-  byte above `7F` in the mask, which can cut a character of more than one
-  byte. Any other second argument converts, and its differences at run
-  time are listed by P2R-60. A named or spread argument stops the
+  the first to the last, and the walk goes on after the last; where the
+  byte at the walk position is `.`, the next byte is `.` and no such
+  range starts there, that byte adds nothing and the walk goes on at the
+  second `.` (PHP warns there), so `a..` adds `a` and `.`; every other
+  byte adds itself. Where the second argument is a string literal, or a
+  class constant whose value the tool reads from its declaration
+  (P2R-260), the tool does the same walk when it converts, and these
+  stop the conversion: a `..` that starts no range, which PHP warns
+  about, and a byte above `7F` in the mask, which can cut a character of
+  more than one byte. Any other second argument converts, and its
+  differences at run time are listed by P2R-60. A named or spread argument stops the
   conversion (P2R-169). A function, variable or parameter named like one
   of the four helpers stops by P2R-31.
 - **P2R-292** `checkdate($month, $day, $year)` with three `int` arguments
@@ -2728,7 +2737,9 @@ run of both packages at the start of this slice.
   February in a year that 4 divides and 100 does not, or that 400
   divides, as PHP does. The helper uses only comparisons and `%` by a
   positive number, so no argument value overflows. Another argument count,
-  and a named or spread argument (P2R-169), stop the conversion. P2R-188
+  an argument of another type (PHP throws a `TypeError` under
+  `strict_types`, and Mago does not report it), and a named or spread
+  argument (P2R-169), stop the conversion. P2R-188
   places `php_charmask`, `php_trim_chars`, `php_ltrim_chars`,
   `php_rtrim_chars` and `php_checkdate` after `php_strtr`, in this order.
 

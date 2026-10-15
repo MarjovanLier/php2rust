@@ -86,6 +86,9 @@ pub(super) struct Facts {
     /// object, before its next write, so a copy of a string or list is needed only at these
     /// reads (P2R-26).
     pub read_again: Vec<(Var, Span)>,
+    /// Every read, so a read that moves a value can find an earlier read of the same
+    /// statement that may still be borrowed (P2R-26).
+    pub reads: Vec<(Var, Span)>,
     /// The field writes after which no path reads the variable (P2R-142).
     pub dead_fields: Vec<Span>,
     /// By block, then by variable: some path from the start of the block reads the
@@ -187,6 +190,15 @@ impl Flow {
             unread: Vec::new(),
             reassigned: vec![false; vars],
             read_again: Vec::new(),
+            reads: self
+                .blocks
+                .iter()
+                .flat_map(|block| &block.events)
+                .filter_map(|event| match *event {
+                    Event::Read(var, span) => Some((var, span)),
+                    _ => None,
+                })
+                .collect(),
             dead_fields: Vec::new(),
             live: Vec::new(),
         };

@@ -75,6 +75,92 @@ function maybe(?array $parts): ?array
 }
 
 /**
+ * @return array{a: string, b: string}
+ */
+function ab(string $x): array
+{
+    return ['a' => $x, 'b' => 'B'];
+}
+
+/**
+ * @param array<string, array<string, string>|bool> $m
+ *
+ * @return array<string, array<string, string>|bool>
+ */
+function insert(array $m, string $k): array
+{
+    $m[$k] = ab('z');
+    return $m;
+}
+
+/**
+ * @return array<string, array<string, string>|bool>
+ */
+function built(): array
+{
+    $m = [];
+    $m['y'] = true;
+    $m['x'] = ab('mx');
+    return $m;
+}
+
+final class Holder
+{
+    /** @var array<string, string> */
+    public array $map = [];
+
+    public function fill(string $x): void
+    {
+        $this->map = ab($x);
+    }
+}
+
+/**
+ * @param array{a: string, b: string}|null $s
+ *
+ * @return array<string, string>
+ */
+function orEmpty(?array $s): array
+{
+    if ($s !== null) {
+        return $s;
+    }
+    return [];
+}
+
+/**
+ * @return array<string, string>
+ */
+function escaped(): array
+{
+    $keys = ["tab\tx" => '1', 'q\'s' => '2'];
+    return $keys;
+}
+
+function pair(string $x, string $y): string
+{
+    return $x . '/' . $y;
+}
+
+function both(): string
+{
+    $s = ['a' => '5', 'b' => 'A'];
+    return pair($s['a'], implode(';', values($s)));
+}
+
+/**
+ * @param array<string, array<string, string>|bool> $row
+ */
+function kinds(array $row): string
+{
+    $text = '';
+    foreach ($row as $value) {
+        $text .= gettype($value) . ' ';
+    }
+    return $text;
+}
+
+/**
  * @param array<string, string>|null $map
  */
 function described(?array $map): string
@@ -148,3 +234,8 @@ echo implode(',', values((new Card($birth->toArray()))->asMap())), "\n";
 echo labelled($birth)['label'], ' ', implode(',', values(labelled($birth)['parts'])), "\n";
 echo count(nested($birth)), ' ', implode(',', values(nested($birth)['birth'])), "\n";
 echo described(maybe($birth->toArray())), ' ', described(maybe(null)), "\n";
+echo kinds(insert(['k' => false], 'z')), kinds(built()), "\n";
+$holder = new Holder();
+$holder->fill('h');
+echo implode(',', values($holder->map)), ' ', implode(',', values(orEmpty(ab('n')))), ' ', count(orEmpty(null)), "\n";
+echo implode(',', values(escaped())), ' ', both(), "\n";

@@ -723,8 +723,10 @@ impl Converter<'_> {
         match (self.kept(value, expr, ty)?, strings::sole_read(value)) {
             (RExpr::Var(name), Some(read)) if !ty.is_copy() => {
                 // The mark rides in the variable's text, so it lands right after the
-                // variable wherever the value is rendered.
+                // variable wherever the value is rendered. It looks for earlier reads in
+                // the whole statement, where `statement` may be only a literal in it.
                 let strict = self.is_changing(ty);
+                let statement = self.statement.unwrap_or(statement);
                 let mark = self.variables.copy_mark(read, statement, strict);
                 Some(RExpr::Var(format!("{name}{mark}")))
             }
@@ -2023,7 +2025,13 @@ impl Converter<'_> {
             }
             for mut text in finished {
                 let mut copied = Vec::new();
-                resolve_copy(&mut text, &copies, &facts.read_again, &mut copied);
+                resolve_copy(
+                    &mut text,
+                    &copies,
+                    &facts.reads,
+                    &facts.read_again,
+                    &mut copied,
+                );
                 for span in copied {
                     self.refuse(&span, NO_COPY);
                 }
@@ -2141,11 +2149,14 @@ impl<'ast, 'arena> Walker<'ast, 'arena, Vec<&'ast DirectVariable<'arena>>> for W
 }
 
 /// Replaces each copy mark with `.clone()` when the variable it moves is read again, or
-/// with nothing (P2R-26). A list literal can move several variables on one line. A strict
-/// mark read again is pushed to `copied` instead, for its P2R-145 problem.
+/// read earlier in the same statement, where Rust may still hold that read's borrow
+/// (`pair(&s.b, &show(s))`), or with nothing (P2R-26). A list literal can move several
+/// variables on one line. A strict mark read again is pushed to `copied` instead, for its
+/// P2R-145 problem.
 fn resolve_copy(
     line: &mut String,
     copies: &[(Span, Span, bool)],
+    reads: &[(Var, Span)],
     read_again: &[(Var, Span)],
     copied: &mut Vec<Span>,
 ) {
@@ -2154,10 +2165,19 @@ fn resolve_copy(
             return;
         };
         let number = usize::from_str_radix(&line[start + 1..end], 16).ok();
-        let Some(&(read, _, strict)) = number.and_then(|number| copies.get(number)) else {
+        let Some(&(read, statement, strict)) = number.and_then(|number| copies.get(number)) else {
             return;
         };
-        let again = read_again.iter().any(|&(_, span)| span == read);
+        let var = reads.iter().find(|&&(_, span)| span == read);
+        let earlier = var.is_some_and(|&(var, _)| {
+            reads.iter().any(|&(other, span)| {
+                other == var
+                    && span.start.offset >= statement.start.offset
+                    && span.end.offset <= statement.end.offset
+                    && span.start.offset < read.start.offset
+            })
+        });
+        let again = earlier || read_again.iter().any(|&(_, span)| span == read);
         if again && strict {
             copied.push(read);
         }

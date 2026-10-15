@@ -1,6 +1,7 @@
 //! Statements inside `fn main()` and function bodies (P2R-40, P2R-46). Block statements
 //! are in control.rs.
 
+use mago_span::HasSpan;
 use mago_syntax::cst::*;
 
 use super::control::emit;
@@ -21,6 +22,19 @@ impl Converter<'_> {
         if self.unreachable(statement) {
             return;
         }
+        let outer = self.statement.replace(statement.span());
+        self.statement_by_kind(statement, depth, context, body);
+        self.statement = outer;
+    }
+
+    /// The statement `statement`, by its kind.
+    fn statement_by_kind(
+        &mut self,
+        statement: &Statement<'_>,
+        depth: usize,
+        context: Context<'_>,
+        body: &mut Vec<String>,
+    ) {
         match statement {
             Statement::Echo(echo) => self.echo(echo, depth, body),
             Statement::Return(ret) => {

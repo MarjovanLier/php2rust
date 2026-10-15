@@ -3,9 +3,34 @@
 use indexmap::IndexMap;
 
 #[derive(Clone, Debug)]
+pub struct ABShape {
+    pub a: String,
+    pub b: String,
+}
+
+#[derive(Clone, Debug)]
+pub enum ABShapeOrBoolOrMap {
+    ABShape(ABShape),
+    Bool(bool),
+    Map(IndexMap<String, String>),
+}
+
+#[derive(Clone, Debug)]
 pub enum BoolOrMap {
     Bool(bool),
     Map(IndexMap<String, i64>),
+}
+
+#[derive(Clone, Debug)]
+pub enum IntOrMap {
+    Int(i64),
+    Map(IndexMap<String, IntOrString>),
+}
+
+#[derive(Clone, Debug)]
+pub enum IntOrString {
+    Int(i64),
+    String(String),
 }
 
 #[derive(Clone, Debug)]
@@ -61,7 +86,60 @@ pub fn wrap(values: &IndexMap<String, i64>, flag: bool) -> IndexMap<String, Bool
     ]);
 }
 
+pub fn mixed(value: &IntOrMap) -> String {
+    if matches!(value, IntOrMap::Int(_)) {
+        return (match value {
+            IntOrMap::Int(_) => "integer",
+            IntOrMap::Map(_) => "array",
+        })
+        .to_string();
+    }
+    return format!(
+        "map {}",
+        match value {
+            IntOrMap::Int(_) => "integer",
+            IntOrMap::Map(_) => "array",
+        }
+    );
+}
+
+pub fn labels() -> IndexMap<String, IntOrString> {
+    return IndexMap::from([
+        (String::from("n"), IntOrString::Int(1)),
+        (String::from("s"), IntOrString::String(String::from("one"))),
+    ]);
+}
+
+pub fn both(value: &ABShapeOrBoolOrMap) -> String {
+    return (match value {
+        ABShapeOrBoolOrMap::ABShape(_) | ABShapeOrBoolOrMap::Map(_) => "array",
+        ABShapeOrBoolOrMap::Bool(_) => "boolean",
+    })
+    .to_string();
+}
+
+pub fn ab(x: &str) -> ABShape {
+    return ABShape {
+        a: x.to_string(),
+        b: String::from("B"),
+    };
+}
+
+pub fn cd(x: &str) -> IndexMap<String, String> {
+    return IndexMap::from([(String::from("c"), x.to_string())]);
+}
+
 fn main() {
+    print!("{}", mixed(&IntOrMap::Int(7)));
+    print!(" ");
+    print!("{}", mixed(&IntOrMap::Map(labels())));
+    print!("\n");
+    print!("{}", both(&ABShapeOrBoolOrMap::ABShape(ab("x"))));
+    print!(" ");
+    print!("{}", both(&ABShapeOrBoolOrMap::Map(cd("y"))));
+    print!(" ");
+    print!("{}", both(&ABShapeOrBoolOrMap::Bool(false)));
+    print!("\n");
     print!("{}", describe(&MapOrString::String(String::from("x"))));
     print!(" ");
     print!("{}", describe(&MapOrString::Map(counts(1))));

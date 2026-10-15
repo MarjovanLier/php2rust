@@ -3,6 +3,18 @@
 use indexmap::IndexMap;
 
 #[derive(Clone, Debug)]
+pub struct ABShape {
+    pub a: String,
+    pub b: String,
+}
+
+impl From<ABShape> for IndexMap<String, String> {
+    fn from(shape: ABShape) -> Self {
+        IndexMap::from([(String::from("a"), shape.a), (String::from("b"), shape.b)])
+    }
+}
+
+#[derive(Clone, Debug)]
 pub struct DateOfBirthHomeTownShape {
     pub date_of_birth: String,
     pub home_town: String,
@@ -38,6 +50,27 @@ impl From<DayMonthYearShape> for IndexMap<String, String> {
 pub struct LabelPartsShape {
     pub label: String,
     pub parts: IndexMap<String, String>,
+}
+
+#[derive(Clone, Debug)]
+pub struct QSTabXShape {
+    pub q_s: String,
+    pub tab_x: String,
+}
+
+impl From<QSTabXShape> for IndexMap<String, String> {
+    fn from(shape: QSTabXShape) -> Self {
+        IndexMap::from([
+            (String::from("tab\tx"), shape.tab_x),
+            (String::from("q's"), shape.q_s),
+        ])
+    }
+}
+
+#[derive(Clone, Debug)]
+pub enum BoolOrMap {
+    Bool(bool),
+    Map(IndexMap<String, String>),
 }
 
 #[derive(Clone, Debug)]
@@ -142,6 +175,84 @@ pub fn maybe(parts: Option<&DayMonthYearShape>) -> Option<IndexMap<String, Strin
     return parts.map(ToOwned::to_owned).map(IndexMap::from);
 }
 
+pub fn ab(x: &str) -> ABShape {
+    return ABShape {
+        a: x.to_string(),
+        b: String::from("B"),
+    };
+}
+
+pub fn insert(m: &IndexMap<String, BoolOrMap>, k: &str) -> IndexMap<String, BoolOrMap> {
+    let mut m = m.clone();
+    m.insert(k.to_string(), BoolOrMap::Map(IndexMap::from(ab("z"))));
+    return m;
+}
+
+pub fn built() -> IndexMap<String, BoolOrMap> {
+    let mut m: IndexMap<String, BoolOrMap> = IndexMap::new();
+    m.insert(String::from("y"), BoolOrMap::Bool(true));
+    m.insert(String::from("x"), BoolOrMap::Map(IndexMap::from(ab("mx"))));
+    return m;
+}
+
+#[derive(Debug)]
+pub struct Holder {
+    pub map: IndexMap<String, String>,
+}
+
+impl Holder {
+    pub fn new() -> Holder {
+        Holder {
+            map: IndexMap::new(),
+        }
+    }
+
+    pub fn fill(&mut self, x: &str) {
+        self.map = IndexMap::from(ab(x));
+    }
+}
+
+pub fn or_empty(s: Option<&ABShape>) -> IndexMap<String, String> {
+    if let Some(s) = s {
+        return IndexMap::from(s.clone());
+    }
+    return IndexMap::new();
+}
+
+pub fn escaped() -> IndexMap<String, String> {
+    let keys = QSTabXShape {
+        tab_x: String::from("1"),
+        q_s: String::from("2"),
+    };
+    return IndexMap::from(keys);
+}
+
+pub fn pair(x: &str, y: &str) -> String {
+    return format!("{}/{}", x, y);
+}
+
+pub fn both() -> String {
+    let s = ABShape {
+        a: String::from("5"),
+        b: String::from("A"),
+    };
+    return pair(&s.a, &values(&IndexMap::from(s.clone())).join(";"));
+}
+
+pub fn kinds(row: &IndexMap<String, BoolOrMap>) -> String {
+    let mut text = String::from("");
+    for value in row.values().cloned() {
+        text += &format!(
+            "{} ",
+            match &value {
+                BoolOrMap::Bool(_) => "boolean",
+                BoolOrMap::Map(_) => "array",
+            }
+        );
+    }
+    return text;
+}
+
 pub fn described(map: Option<&IndexMap<String, String>>) -> String {
     let Some(map) = map else {
         return String::from("none");
@@ -232,5 +343,26 @@ fn main() {
     print!("{}", described(maybe(Some(&birth.to_array())).as_ref()));
     print!(" ");
     print!("{}", described(maybe(None).as_ref()));
+    print!("\n");
+    print!(
+        "{}",
+        kinds(&insert(
+            &IndexMap::from([(String::from("k"), BoolOrMap::Bool(false))]),
+            "z"
+        ))
+    );
+    print!("{}", kinds(&built()));
+    print!("\n");
+    let mut holder = Holder::new();
+    holder.fill("h");
+    print!("{}", values(&holder.map).join(","));
+    print!(" ");
+    print!("{}", values(&or_empty(Some(&ab("n")))).join(","));
+    print!(" ");
+    print!("{}", or_empty(None).len() as i64);
+    print!("\n");
+    print!("{}", values(&escaped()).join(","));
+    print!(" ");
+    print!("{}", both());
     print!("\n");
 }

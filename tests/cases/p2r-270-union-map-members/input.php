@@ -50,6 +50,51 @@ function wrap(array $values, bool $flag): array
     return ['values' => $values, 'flag' => $flag];
 }
 
+/**
+ * @param array<string, int|string>|int $value
+ */
+function mixed(array|int $value): string
+{
+    if (is_scalar($value)) {
+        return gettype($value);
+    }
+    return 'map ' . gettype($value);
+}
+
+/**
+ * @return array<string, int|string>
+ */
+function labels(): array
+{
+    return ['n' => 1, 's' => 'one'];
+}
+
+/**
+ * @param array{a: string, b: string}|array<string, string>|bool $value
+ */
+function both(array|bool $value): string
+{
+    return gettype($value);
+}
+
+/**
+ * @return array{a: string, b: string}
+ */
+function ab(string $x): array
+{
+    return ['a' => $x, 'b' => 'B'];
+}
+
+/**
+ * @return array<string, string>
+ */
+function cd(string $x): array
+{
+    return ['c' => $x];
+}
+
+echo mixed(7), ' ', mixed(labels()), "\n";
+echo both(ab('x')), ' ', both(cd('y')), ' ', both(false), "\n";
 echo describe('x'), ' ', describe(counts(1)), "\n";
 echo scalarText('y'), ' ', scalarText(counts(2)), ' ', scalarText(null), "\n";
 echo describe(pick(true)), ' ', describe(pick(false)), "\n";

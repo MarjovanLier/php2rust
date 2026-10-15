@@ -509,6 +509,9 @@ struct Converter<'c> {
     shape_orders: BTreeMap<String, BTreeSet<Vec<Vec<u8>>>>,
     /// The places that turn a value of a shape struct into a map, with its struct (P2R-271).
     shape_maps: Vec<(Span, String)>,
+    /// The innermost statement converting, whose earlier reads of a variable a move in it
+    /// must not break (P2R-26).
+    statement: Option<Span>,
 }
 
 impl<'c> Converter<'c> {
@@ -544,6 +547,7 @@ impl<'c> Converter<'c> {
             scalar_guard: None,
             shape_orders: BTreeMap::new(),
             shape_maps: Vec::new(),
+            statement: None,
         }
     }
 

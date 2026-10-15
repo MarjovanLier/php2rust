@@ -34,7 +34,7 @@ pub(super) const UNSET: &str =
 const KEY_CHECK: &str = "isset and array_key_exists() convert only on a map in a variable, parameter or property (P2R-242)";
 
 /// The problem of a list or shape where a map is needed, or the other way round (P2R-240).
-pub(super) const MAP_CLASH: &str = "a map goes only where a map of the same key and value types is needed, and a list or array shape never goes where a map is needed (P2R-240)";
+pub(super) const MAP_CLASH: &str = "a map goes only where a map of the same key and value types is needed, and a list, or an array shape outside P2R-271, never goes where a map is needed (P2R-240)";
 
 /// True for a map in a variable, a parameter or a chain of property reads, which reads no
 /// element and calls nothing on the way (P2R-242).

@@ -145,17 +145,22 @@ impl Converter<'_> {
     /// Refuses each place that turns a shape into a map when the literals that build the
     /// shape give no key order or more than one (P2R-271). Runs once every body converted.
     pub(super) fn check_shape_maps(&mut self) {
-        let refused: Vec<Span> = self
+        let refused: Vec<(Span, bool)> = self
             .shape_maps
             .iter()
-            .filter(|(_, shape)| self.shape_orders.get(shape).is_none_or(|o| o.len() != 1))
-            .map(|&(span, _)| span)
+            .filter_map(|(span, shape)| match self.shape_orders.get(shape) {
+                None => Some((*span, false)),
+                Some(orders) if orders.len() != 1 => Some((*span, true)),
+                Some(_) => None,
+            })
             .collect();
-        for span in refused {
-            self.refuse(
-                &span,
-                "an array shape converts to a map only when every array literal that builds it lists its keys in one order, because PHP keeps the order of the literal (P2R-271)",
-            );
+        for (span, built) in refused {
+            let message = if built {
+                "an array shape converts to a map only when every array literal that builds it lists its keys in one order, because PHP keeps the order of the literal (P2R-271)"
+            } else {
+                "an array shape converts to a map only when an array literal of the input builds it, which gives its key order (P2R-271)"
+            };
+            self.refuse(&span, message);
         }
     }
 

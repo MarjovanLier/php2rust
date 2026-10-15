@@ -298,16 +298,16 @@ the others are findings of the Mago analyser. In short:
   changes its objects, on a void method or one that throws, and with an argument that is
   more than a literal, a constant, a variable or a property read.
 - A union inside a list or a shape field, a union whose PHP type and docblock type
-  disagree on int and float, `(string)` of a union that may hold a float, a list, a shape
-  or an object (outside `is_scalar($v) ? (string) $v : ..`), and a union value passed
+  disagree on int and float, `(string)` of a union that may hold a float, a list, a map,
+  a shape or an object (outside `is_scalar($v) ? (string) $v : ..`), and a union value passed
   where another union type is needed. `is_string()` and its kin on a value that is not a
   union, a use of the member value after a test in any other form
   (`if (!is_string($v) || $b) { return; } strlen($v)`), which narrows nothing, and a write
   to a narrowed variable while its binding holds.
 - For maps: a value type that is `mixed` or a class that changes its objects, a union
-  value type outside a declared type, a
-  map inside a union, a key type other than int, string or `array-key`, a list or shape
-  where a map is needed (or the other way round), a map where a map of other key or value
+  value type outside a declared type, a second map inside a union, a key type other than
+  int, string or `array-key`, a list, or a shape outside the rules above, where a map is
+  needed, a map where a list or shape is needed, a map where a map of other key or value
   types is needed (`array<string, int>` for `array<string, ?int>`), a float, bool, null or union key, a
   string key of an int-keyed map, an int for a `float` value, `$m[] = v`, a key with
   `foreach` over a map with text keys, `+=`, `++` or `??=` on an element, a write or

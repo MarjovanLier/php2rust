@@ -395,6 +395,16 @@ pub fn within(site: &TUnion, members: &[RustType], nullable: bool, enums: &TypeN
         TAtomic::Scalar(TScalar::ArrayKey) => members
             .iter()
             .any(|member| matches!(member, RustType::I64 | RustType::String)),
+        // A map member takes a map, also of union values, or a shape whose keys and values
+        // fit it (P2R-270, P2R-271).
+        keyed @ TAtomic::Array(TArray::Keyed(_))
+            if members.iter().any(|member| {
+                matches!(member, RustType::Map(..))
+                    && fits_map(&TUnion::from_vec(vec![keyed.clone()]), member, enums)
+            }) =>
+        {
+            true
+        }
         other => rust_type(&TUnion::from_vec(vec![other.clone()]), enums)
             .is_ok_and(|ty| members.contains(&ty)),
     })

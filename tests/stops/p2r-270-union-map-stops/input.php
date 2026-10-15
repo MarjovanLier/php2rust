@@ -46,6 +46,21 @@ function twoMaps(array $value): int
 }
 
 /**
+ * @param array<string, int>|string $value
+ */
+function total(array|string $value): int
+{
+    if (is_string($value)) {
+        return 0;
+    }
+    $sum = 0;
+    foreach ($value as $v) {
+        $sum += $v;
+    }
+    return $sum;
+}
+
+/**
  * @param array<string, string>|bool $first
  */
 function textMap(array|bool $first): int

@@ -60,3 +60,32 @@ function noLiteral(array $given): array
 {
     return $given;
 }
+
+/**
+ * @return array{u: string, v: string}
+ */
+function uv(string $u): array
+{
+    return ['u' => $u, 'v' => 'V'];
+}
+
+/**
+ * @return array<string, int|string>
+ */
+function unionValues(): array
+{
+    return uv('u');
+}
+
+/**
+ * @param array{u: string}|bool $value
+ */
+function narrow(array|bool $value): bool
+{
+    return is_bool($value);
+}
+
+function intoNarrow(): bool
+{
+    return narrow(uv('n'));
+}

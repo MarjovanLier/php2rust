@@ -294,16 +294,7 @@ enum Last {
 
 /// The Rust pattern of the PHP pattern `php`, or the problem that stops it (P2R-260).
 pub(super) fn rust_pattern(php: &[u8]) -> Result<Pattern, String> {
-    if !php.iter().all(|byte| (0x20..=0x7e).contains(byte)) {
-        return Err(problem("only printable ASCII bytes"));
-    }
-    // A two-letter class of 4 bytes compiles to 33 in PCRE, which rejects a pattern over
-    // 64 KiB: 1990 copies of `[ab]` fail in PHP.
-    if php.len() > 4096 {
-        return Err(problem(
-            "4096 bytes at most, because PCRE rejects a pattern whose compiled form passes 64 KiB",
-        ));
-    }
+    printable(php)?;
     let (body, flags) = split(php)?;
     if !flags.iter().all(|flag| b"ims".contains(flag)) {
         return Err(problem("the flags i, m and s only"));
@@ -345,12 +336,16 @@ fn lookaround(php: &[u8]) -> Option<Result<Pattern, String>> {
     if !flags.contains(&b'u') {
         return None;
     }
+    if let Err(message) = printable(php) {
+        return Some(Err(message));
+    }
     let word = body
         .strip_prefix(br"(?<!\p{L})")
         .and_then(|rest| rest.strip_suffix(b"(?! )"))
         .filter(|word| !word.is_empty() && word.iter().all(u8::is_ascii_alphanumeric));
     Some(match word {
-        Some(word) if flags == b"u" => Ok(Pattern {
+        // PHP reads `uu` as `u`, as it reads every repeated flag once.
+        Some(word) if flags.iter().all(|&flag| flag == b'u') => Ok(Pattern {
             text: format!(
                 r"(?:^|\P{{L}}){}(?:[^ ]|$)",
                 String::from_utf8_lossy(word)
@@ -363,6 +358,22 @@ fn lookaround(php: &[u8]) -> Option<Result<Pattern, String>> {
                 .to_owned(),
         ),
     })
+}
+
+/// The problem of a pattern with a byte outside printable ASCII or of more than 4096 bytes,
+/// which every form must pass before its delimiters are read (P2R-260, P2R-320).
+fn printable(php: &[u8]) -> Result<(), String> {
+    if !php.iter().all(|byte| (0x20..=0x7e).contains(byte)) {
+        return Err(problem("only printable ASCII bytes"));
+    }
+    // A two-letter class of 4 bytes compiles to 33 in PCRE, which rejects a pattern over
+    // 64 KiB: 1990 copies of `[ab]` fail in PHP.
+    if php.len() > 4096 {
+        return Err(problem(
+            "4096 bytes at most, because PCRE rejects a pattern whose compiled form passes 64 KiB",
+        ));
+    }
+    Ok(())
 }
 
 /// True when the pattern can match a byte above `7F`, which may be one byte of a character
@@ -757,7 +768,15 @@ mod tests {
             text(r"/(?<!\p{L})Mac2(?! )/u"),
             Some(Ok(r"(?:^|\P{L})Mac2(?:[^ ]|$)".to_owned()))
         );
+        assert_eq!(
+            text(r"#(?<!\p{L})mc(?! )#uu"),
+            Some(Ok(r"(?:^|\P{L})mc(?:[^ ]|$)".to_owned()))
+        );
         assert_eq!(text("/mc/"), None);
+        // PHP rejects a tab delimiter and a pattern too large to compile.
+        assert!(matches!(text("\t(?<!\\p{L})mc(?! )\tu"), Some(Err(_))));
+        let long = format!(r"#(?<!\p{{L}}){}(?! )#u", "a".repeat(5000));
+        assert!(matches!(text(&long), Some(Err(_))));
         for php in [
             r"#(?<!\p{L})mc(?! )#ui",
             r"#(?<!\p{L})mc#u",

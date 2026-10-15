@@ -24,6 +24,7 @@ function forms(string $s): string
     $out .= preg_match('#(?<!\p{L})aa(?! )#u', $s) === 0 ? '-' : 'c';
     $out .= !preg_match('#(?<!\p{L})7(?! )#u', $s) ? '-' : 'd';
     $out .= preg_match('#(?<!\p{L})aba(?! )#u', $s) !== 1 ? '-' : 'e';
+    $out .= preg_match('#(?<!\p{L})B(?! )#uu', $s) === 1 ? 'f' : '-';
     return $out;
 }
 

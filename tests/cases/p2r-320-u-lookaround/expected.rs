@@ -46,6 +46,11 @@ pub fn forms(s: &str) -> String {
     } else {
         "e"
     };
+    out += if php_preg_match(r"(?:^|\P{L})B(?:[^ ]|$)", s) {
+        "f"
+    } else {
+        "-"
+    };
     return out;
 }
 

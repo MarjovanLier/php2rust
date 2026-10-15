@@ -3295,15 +3295,17 @@ and nine of the package's own, which bring `JsonSerializable`,
 such a class from a request, are the only code that reads the
 attributes or those two properties; the engine reads the properties
 too for `var_dump`, `(array)`, `==`, `clone` and `serialize`, which
-all stop in the converted code (P2R-48, P2R-136). This section converts
-such a class as a plain struct and leaves every use of the parent to a
-later section.
+all stop in the converted code (P2R-07, P2R-48, P2R-136). This section
+converts such a class as a plain struct and leaves every use of the
+parent to a later section.
 
 - **P2R-350** A class whose `extends` names one class, which PHP
-  resolves in any letter case to `\Spatie\LaravelData\Data`, MUST
-  convert as the same class without `extends` converts: nothing of the
-  parent enters the Rust output. A list of parents stops, because PHP
-  rejects it and Mago's parser accepts it. Only that direct parent
+  resolves in any letter case to `\Spatie\LaravelData\Data` declared in
+  an included file, MUST convert as the same class without `extends`
+  converts: nothing of the parent enters the Rust output. A `Data` that
+  the input declares is a class of the input, so extending it stops by
+  P2R-130. A list of parents stops, because PHP rejects it and Mago's
+  parser accepts it. Only that direct parent
   qualifies; a class that extends such a class, or extends anything
   else, still stops (P2R-130), and so does a `readonly` one, which PHP
   rejects because `Data` is not readonly. Everything the parent brings
@@ -3321,12 +3323,17 @@ later section.
   `rules()`); a class whose parent, as Mago knows it, names a trait or
   interface that no included file declares (an `--include` of
   `Data.php` alone), because then the methods of `Data` are not all
-  known; and such a class after a
+  known; a class whose parent, as Mago knows it, has a method that PHP
+  calls by itself (`__construct`, `__destruct`, `__get`, `__set`,
+  `__isset`, `__unset`, `__call` or `__toString`), which version 4.18.0
+  does not have and the struct would drop; and such a class after a
   statement outside functions, because PHP declares it before any
   statement runs only when `Data` is loaded before the file compiles,
-  which Composer's autoloader does not do. Without `--include` of the
-  package, Mago does not know the parent and reports the class, so the
-  conversion stops (P2R-340).
+  which Composer's autoloader does not do. These checks see the `Data`
+  that `--include` gives: a stand-in that declares fewer methods than
+  the package (as the test folders use) hides an override of the
+  others. Without `--include` of the package, Mago does not know the
+  parent and reports the class, so the conversion stops (P2R-340).
 - **P2R-351** On a class of P2R-350, an attribute whose class PHP
   resolves, in any letter case, to a name that starts with
   `\Spatie\LaravelData\Attributes\` (`MapInputName`, `MapOutputName`,
@@ -3343,7 +3350,7 @@ later section.
   forms, such as a call or `static::class`, when it compiles the file,
   and Mago does not report them all. Every other attribute there, and
   one with another argument, stops (P2R-07), and an attribute group
-  (`#[A, B]`) that holds such an attribute stops as a whole.
+  (`#[A, B]`) that holds an attribute that stops, stops as a whole.
 
 ## Spec checklist
 

@@ -95,8 +95,12 @@ of a map variable after writes by literal keys, and the stop for map
 property writes; the two final reviewers added the stop for a map of
 other values and the stop for a module named `indexmap` at any depth.
 Section 26 (unions as map values, type tests and their narrowing) was
-written on 15 Oct 2026; it changes P2R-07, P2R-230, P2R-240 and the
-roadmap of section 10.
+written on 15 Oct 2026; it changes P2R-07, P2R-106, P2R-230, P2R-232,
+P2R-240, P2R-241 and the roadmap of section 10. The two spec reviewers
+added the `as_str()` line after a string member's binding, enums among
+the Copy members, the forms for the `&U` binding of a null check, and
+the exceptions in P2R-106 and P2R-232; the build added plain-value
+literals where a map is needed and the declared map type of a `[]`.
 
 php2rust converts typed PHP source into normal, readable Rust (`Vec`,
 `String`, `i64`), without AI. It reads PHP with the Mago crates, uses Mago's
@@ -624,7 +628,8 @@ Sections 3 to 9 apply to nullable values unless this section says otherwise.
   `!` (P2R-42); the list of a `foreach`; the list or the index of a list
   read or an append; an element of a list literal, or an appended value,
   whose list holds values that cannot be null; an argument of a built-in
-  function (P2R-48), of `E::from()` or of `E::tryFrom()`; the enum of
+  function (P2R-48) other than the tests on an `Option<U>` of P2R-233 and
+  P2R-251, of `E::from()` or of `E::tryFrom()`; the enum of
   `->name` or `->value`; the subject of a `match` (P2R-120); an operand of
   a cast (P2R-166) or of `<<`, `>>`, `<<=` or `>>=` (P2R-167); the string
   or the index of a string offset read (P2R-165); the object of a property
@@ -2090,14 +2095,15 @@ inside a list or a shape field waits for a later slice.
   where Mago narrows it to one or more of its members (after
   `is_scalar()`, `is_string()` or a check against null) or types it
   `mixed` or `scalar` (P2R-220), so a use of such a read as a member type
-  stops by the rules below. `$v === null` and `$v !== null` on `Option<U>`
+  stops by the rules below; only the binding of P2R-252 reads a member
+  value. `$v === null` and `$v !== null` on `Option<U>`
   convert by P2R-103 and P2R-104, whose binding has the type `&U`, and
   `$v ?? $w` with `$w` of type `U` converts by P2R-105. A union value
   converts into a place of its own union (P2R-231) and in the calls of
-  P2R-233. Every other use stops the conversion: `echo`, interpolation and
+  P2R-233 and P2R-251. Every other use stops the conversion: `echo`, interpolation and
   joining, arithmetic, every comparison other than with the literal
   `null`, a condition, a cast other than `(string)`, the argument of a
-  built-in function other than those of P2R-233, `??` with a default of
+  built-in function other than those of P2R-233 and P2R-251, `??` with a default of
   another type, a `foreach`, an element read, a property read or method
   call, and the subject of a `match`.
 - **P2R-233** `is_scalar($v)`, `gettype($v)` and `(string) $v`, where `$v`
@@ -2207,18 +2213,22 @@ application's `array<string, mixed>` values keep P2R-22.
   `IndexMap::from([(key, value), ..])` in source order, so a key that
   repeats at run time (`[$a => 1, $b => 2]` with `$a` equal to `$b`)
   keeps its first position and its last value, as in PHP; `[]` there
-  converts to `IndexMap::new()`. `$m = []` on a variable takes its map
+  converts to `IndexMap::new()`. A literal of plain values only
+  (`['a', 'b']`) there takes the keys 0, 1, 2 in order, as PHP gives them:
+  `IndexMap::from([(0, ..), (1, ..)])`, or with `String::from("0")` and on
+  for a map keyed by text. `$m = []` on a variable takes its map
   type from the other reads and writes of the variable and the declared
-  types it flows into, as P2R-21 gives a list type, and converts to
-  `IndexMap::new()`. Each key and each value converts as a
+  types it flows into, as P2R-21 gives a list type, where a declared map
+  type it flows into wins over Mago's narrower types of its sites, and
+  converts to `IndexMap::new()`. Each key and each value converts as a
   value assigned to a variable of `K` or `V` (P2R-25, P2R-26, P2R-102), so
   a key is owned: a string literal as `String::from("k")`, a `&str`
   parameter as `p.to_string()`. An int key of an `IndexMap<String, V>`
   becomes the decimal text of its value (P2R-49): `0x10` gives
   `String::from("16")`, `-0` gives `String::from("0")`, and any other int
   `(n).to_string()` with the parentheses P2R-43 needs. These stop the
-  conversion: an element without a key, a spread element or a by-reference
-  element; a key whose own expression type is float, bool or null, judged
+  conversion: elements with and without a key in one literal, a spread
+  element or a by-reference element; a key whose own expression type is float, bool or null, judged
   before Mago turns it into an int or string key in the array's type; a
   string key of an `IndexMap<i64, V>`, because PHP makes a canonical
   decimal string an int and keeps any other string; a key of a union type;
@@ -2325,17 +2335,23 @@ key order, which Mago does not keep (P2R-200).
     leaves becomes `let P = S else { ... };`.
 
   The pattern `P` is `U::V(v)`, or `Some(U::V(v))` for `Option<U>`, where
-  `V` is the variant of the member. The scrutinee `S` is `v` for an int,
-  float or bool member and `&v` for any other member when `$v` owns its
-  value, and `*v` for an int, float or bool member and `v` for any other
-  member when `$v` is a `&U` parameter; for a borrowed `Option<&U>`, the
-  pattern of an int, float or bool member is `Some(&U::V(v))` and `S` is
-  `v`. The binding has the member's Rust type, as a parameter of that type
-  has it (P2R-24, P2R-26) for a string, list or shape member, so a value of
-  the variable is never moved by the test. When nothing reads the binding,
+  `V` is the variant of the member. A Copy member is an int, float, bool or
+  enum (P2R-110). The scrutinee `S` is `v` for a Copy member and `&v` for
+  any other member when `$v` owns its value, and `*v` for a Copy member and
+  `v` for any other member when `$v` is a `&U`: a parameter, or the binding
+  of a P2R-104 check on an `Option<U>`. For an `Option<&U>` parameter, the
+  pattern of a Copy member is `Some(&U::V(v))`, and `S` is `v` for every
+  member. The binding has the member's Rust type, as a parameter of that
+  type has it (P2R-24, P2R-26) for a string, list or shape member, so a
+  value of the variable is never moved by the test. A string member binds a
+  `&String`, so `let v = v.as_str();` follows the `let .. else`, and
+  `&& let v = v.as_str()` follows the pattern in an `if let`, and the
+  binding then reads as a `&str` parameter does. When nothing reads the binding,
   or the body of `if (!is_T($v))` does not always leave, the test converts
   by P2R-251 and nothing binds. A test in any other form (`!is_T($v) || ..`,
-  inside `?:`) converts by P2R-251 only.
+  inside `?:`) converts by P2R-251 only. A reference assignment
+  (`$r = &$v`), which would change `$v` through another name, stops the
+  conversion (P2R-07).
 
 ## Spec checklist
 

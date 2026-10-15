@@ -553,6 +553,19 @@ impl Converter<'_> {
                 "Spatie\\LaravelData\\Data names a trait or interface that no included file declares, so its methods are not all known; include the whole package (P2R-350)",
             );
         }
+        // Data 4.18 has no parent, whose methods the override check would also need.
+        if data
+            && let Some(extends) = &declaration.extends
+            && self
+                .codebase
+                .get_class_like(b"spatie\\laraveldata\\data")
+                .is_some_and(|parent| parent.direct_parent_class.is_some())
+        {
+            self.refuse(
+                extends,
+                "Spatie\\LaravelData\\Data extends another class, which version 4.18.0 does not (P2R-350)",
+            );
+        }
         // PHP calls these by itself, so a Data that has one is not the 4.18 shape.
         if data
             && let Some(extends) = &declaration.extends

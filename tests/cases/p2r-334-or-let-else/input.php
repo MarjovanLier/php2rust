@@ -29,6 +29,39 @@ function parsed(string $text): bool
     return true;
 }
 
+function counted(string $text, bool $flag): int
+{
+    $n = 0;
+    $date = DateTime::createFromFormat('!Y', $text);
+    if ($date === false || $flag) {
+        $n++;
+    }
+    return $n;
+}
+
+function looped(string $texts): int
+{
+    $n = 0;
+    foreach (explode(',', $texts) as $text) {
+        $date = DateTime::createFromFormat('!Y', $text);
+        if ($date === false || $date->format('Y') === '1900') {
+            continue;
+        }
+        $n += (int) $date->format('Y');
+    }
+    return $n;
+}
+
+function withElse(string $text): string
+{
+    $date = DateTime::createFromFormat('!Y', $text);
+    if ($date === false || strlen($text) > 3) {
+        return 'a';
+    } else {
+        return 'b';
+    }
+}
+
 function half(?int $value): int
 {
     if ($value === null || $value % 2 !== 0) {
@@ -41,3 +74,5 @@ echo same('19800229', 'Ymd') ? 'y' : 'n', same('19810229', 'Ymd') ? 'y' : 'n', s
 echo leap('1980'), ' ', leap('2000'), ' ', leap('1900'), ' ', leap('x'), "\n";
 echo parsed('19800101') ? 'y' : 'n', parsed('1980011') ? 'y' : 'n', parsed('x') ? 'y' : 'n', "\n";
 echo half(8), ' ', half(7), ' ', half(null), "\n";
+echo counted('x', true), counted('x', false), counted('1980', true), counted('1980', false), "\n";
+echo looped('1980,x,1900,2000'), ' ', withElse('x'), withElse('1980'), withElse('198'), "\n";

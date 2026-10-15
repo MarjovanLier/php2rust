@@ -21,6 +21,19 @@ function writes(string $text): string
     return $text;
 }
 
+function stepped(int $max): int
+{
+    $n = 0;
+    for ($i = 0; $i < $max; $i++) {
+        $date = DateTime::createFromFormat('!Y', (string) $i);
+        if ($date === false || $date->format('Y') === '0003') {
+            continue;
+        }
+        $n++;
+    }
+    return $n;
+}
+
 function later(?int $value): int
 {
     if ($value % 2 !== 0 || $value === null) {

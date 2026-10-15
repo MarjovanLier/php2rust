@@ -43,6 +43,40 @@ pub fn parsed(text: &str) -> bool {
     return true;
 }
 
+pub fn counted(text: &str, flag: bool) -> i64 {
+    let mut n: i64 = 0;
+    let date = php_date_create_from_format("!Y", text);
+    if date.is_none() || flag {
+        n += 1;
+    }
+    return n;
+}
+
+pub fn looped(texts: &str) -> i64 {
+    let mut n: i64 = 0;
+    let mut date: Option<PhpDateTime>;
+    for text in php_explode(",", texts) {
+        date = php_date_create_from_format("!Y", &text);
+        let Some(date) = date else {
+            continue;
+        };
+        if php_date_format(date, "Y") == "1900" {
+            continue;
+        }
+        n += php_int(&php_date_format(date, "Y"));
+    }
+    return n;
+}
+
+pub fn with_else(text: &str) -> String {
+    let date = php_date_create_from_format("!Y", text);
+    if date.is_none() || text.len() as i64 > 3 {
+        return String::from("a");
+    } else {
+        return String::from("b");
+    }
+}
+
 pub fn half(value: Option<i64>) -> i64 {
     let Some(value) = value else {
         return -1;
@@ -51,6 +85,53 @@ pub fn half(value: Option<i64>) -> i64 {
         return -1;
     }
     return value / 2;
+}
+
+fn php_int(text: &str) -> i64 {
+    let text = text.trim_start_matches([' ', '\t', '\n', '\r', '\x0B', '\x0C']);
+    let bytes = text.as_bytes();
+    let mut end = usize::from(matches!(bytes.first(), Some(b'+' | b'-')));
+    let digits = end;
+    while bytes.get(end).is_some_and(u8::is_ascii_digit) {
+        end += 1;
+    }
+    let whole = end;
+    if bytes.get(end) == Some(&b'.') {
+        end += 1;
+        while bytes.get(end).is_some_and(u8::is_ascii_digit) {
+            end += 1;
+        }
+    }
+    if end == digits || (end == digits + 1 && whole == digits) {
+        return 0;
+    }
+    if matches!(bytes.get(end), Some(b'e' | b'E')) {
+        let mut exponent = end + 1;
+        if matches!(bytes.get(exponent), Some(b'+' | b'-')) {
+            exponent += 1;
+        }
+        if bytes.get(exponent).is_some_and(u8::is_ascii_digit) {
+            end = exponent;
+            while bytes.get(end).is_some_and(u8::is_ascii_digit) {
+                end += 1;
+            }
+        }
+    }
+    if end == whole {
+        if let Ok(value) = text[..end].parse::<i64>() {
+            return value;
+        }
+    }
+    let value: f64 = text[..end].parse().unwrap_or(0.0);
+    if value.is_finite() { value as i64 } else { 0 }
+}
+
+fn php_explode(separator: &str, text: &str) -> Vec<String> {
+    assert!(
+        !separator.is_empty(),
+        "explode(): separator must not be empty"
+    );
+    text.split(separator).map(str::to_owned).collect()
 }
 
 fn php_date_create_from_format(format: &str, text: &str) -> Option<PhpDateTime> {
@@ -258,5 +339,16 @@ fn main() {
     print!("{}", half(Some(7)));
     print!(" ");
     print!("{}", half(None));
+    print!("\n");
+    print!("{}", counted("x", true));
+    print!("{}", counted("x", false));
+    print!("{}", counted("1980", true));
+    print!("{}", counted("1980", false));
+    print!("\n");
+    print!("{}", looped("1980,x,1900,2000"));
+    print!(" ");
+    print!("{}", with_else("x"));
+    print!("{}", with_else("1980"));
+    print!("{}", with_else("198"));
     print!("\n");
 }

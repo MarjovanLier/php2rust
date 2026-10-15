@@ -308,8 +308,8 @@ impl<'ast, 'arena> Walker<'ast, 'arena, Found<'_, '_>> for Throwing {
 }
 
 /// Finds a `break` or `continue` that leaves the statements it walks, outside the loops
-/// inside them (P2R-214).
-struct Leaving;
+/// inside them (P2R-214, P2R-334).
+pub(super) struct Leaving;
 
 impl<'ast, 'arena> Walker<'ast, 'arena, bool> for Leaving {
     fn walk_in_break(&self, _: &'ast Break<'arena>, found: &mut bool) {

@@ -18,9 +18,9 @@ pub(super) const DATE_PARTS: &str = "DayHourMinuteMonthSecondYearShape";
 
 /// The first byte of a literal format at which a helper would panic: an ASCII letter it
 /// does not read or write, and for `createFromFormat()` also `*` and `+` (P2R-331,
-/// P2R-332). PHP reads a format up to its first NUL.
+/// P2R-332). `createFromFormat()` reads a format up to its first NUL, `format()` all of it.
 fn unsupported(format: &[u8], reading: bool) -> Option<u8> {
-    let mut bytes = format.iter().take_while(|&&byte| byte != 0);
+    let mut bytes = format.iter().take_while(|&&byte| !reading || byte != 0);
     while let Some(&byte) = bytes.next() {
         match byte {
             b'\\' => {

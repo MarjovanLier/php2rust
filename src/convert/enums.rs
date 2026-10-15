@@ -418,10 +418,12 @@ impl Converter<'_> {
             }
         });
         let Some((method, result)) = found else {
-            self.refuse(
-                node,
-                "only ->name of an enum and ->value of a backed enum are supported (P2R-113)",
-            );
+            let message = if ty == RustType::DateTime {
+                "of DateTime only DateTime::createFromFormat() and format() convert (P2R-330)"
+            } else {
+                "only ->name of an enum and ->value of a backed enum are supported (P2R-113)"
+            };
+            self.refuse(node, message);
             return None;
         };
         Some((RExpr::Method(Box::new(object), method), result))

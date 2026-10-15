@@ -54,3 +54,33 @@ function stamp(string $text): string
     }
     return $text . $date->getTimestamp() . $date;
 }
+
+function known(string $text): bool
+{
+    return parse($text) !== null;
+}
+
+function order(string $a, string $b): bool
+{
+    $first = parse($a);
+    $second = parse($b);
+    if ($first === false || $second === false) {
+        return false;
+    }
+    return $first < $second;
+}
+
+function loose(string $a, string $b): bool
+{
+    $first = parse($a);
+    $second = parse($b);
+    if ($first === false || $second === false) {
+        return false;
+    }
+    return $first == $second;
+}
+
+function interfaced(DateTimeInterface $other): string
+{
+    return $other->format('Y');
+}

@@ -262,11 +262,29 @@ impl Converter<'_> {
             return None;
         }
         let (variable, ..) = self.null_checked(first, false)?;
+        // The copy of the body must leave as the let-else does. Inside a `for` with a step,
+        // it must hold no `break` or `continue` that leaves it, because the step goes in at
+        // each `continue` of the first copy only.
+        let ends = match statements.last() {
+            Some(Statement::Return(_) | Statement::Break(_) | Statement::Continue(_)) => true,
+            Some(Statement::Expression(statement)) => {
+                matches!(statement.expression, Expression::Throw(_))
+            }
+            _ => false,
+        };
+        let mut leaves = false;
         let mut found = Vec::new();
         for statement in statements {
+            super::throws::Leaving.walk_statement(statement, &mut leaves);
             super::nullsafe::Variables.walk_statement(statement, &mut found);
         }
-        if found.iter().any(|name| name.as_slice() == variable.name) {
+        let stepped = self
+            .variables
+            .loops
+            .iter()
+            .any(|frame| frame.steps.is_some());
+        if !ends || (leaves && stepped) || found.iter().any(|name| name.as_slice() == variable.name)
+        {
             return None;
         }
         Some((*first, rest.to_vec()))

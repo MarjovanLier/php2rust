@@ -313,9 +313,12 @@ the others are findings of the Mago analyser. In short:
   type other than `false`, a comparison of two dates, `=== null`, `??` and `?->` on a
   `DateTime|false` value (it holds `false`, not `null`), a literal format with a letter
   the helpers do not read, or with `*` or `+` for `createFromFormat()`, `format()` on a
-  value that may be `false`, `instanceof` with another class, a `||` check whose body
-  reads the date, and `date_parse()` of any other text or into a variable whose
-  docblock gives another type.
+  value that may be `false`, `instanceof` with another class, a read of the date in
+  the rest of a `||` condition where the let-else does not apply (the body reads the
+  date or does not end with `return`, `throw`, `break` or `continue`, the `if` has an
+  `else`, or a `for` with a step holds a `continue` or `break` of the body), and
+  `date_parse()` of any other text or into a variable whose docblock gives another
+  type.
 - For traits and `strtr`: a trait with a method, a property or a `use` of another
   trait, a `use` with a block of conflict rules, a trait the input does not declare, a
   trait constant whose name the class or another trait it uses declares too, a trait

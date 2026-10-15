@@ -1,5 +1,6 @@
 input.php:8:28: a method call on a value that may be null is not supported (P2R-106)
 input.php:11:12: a method call on a value that may be null is not supported (P2R-106)
 input.php:20:5: a variable that a check against null or a type test binds cannot be assigned until the check's block ends (P2R-104, P2R-252)
-input.php:26:9: arithmetic on a value that may be null is not supported (P2R-106)
-input.php:29:12: a value that may be null cannot be returned where the return type is not nullable (P2R-106)
+input.php:29:32: a method call on a value that may be null is not supported (P2R-106)
+input.php:39:9: arithmetic on a value that may be null is not supported (P2R-106)
+input.php:42:12: a value that may be null cannot be returned where the return type is not nullable (P2R-106)

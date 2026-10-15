@@ -252,6 +252,10 @@ impl Converter<'_> {
                 );
                 None
             }
+            _ if ty == RustType::DateTime => {
+                self.refuse(value, "echo of a DateTime is not supported (P2R-330)");
+                None
+            }
             _ => {
                 self.refuse(value, "echo of a float or bool is not supported (P2R-46)");
                 None

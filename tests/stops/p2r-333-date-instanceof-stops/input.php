@@ -27,3 +27,9 @@ function named(string $text, string $class): bool
     $date = DateTime::createFromFormat('!Y', $text);
     return $date instanceof $class;
 }
+
+function quoted(string $text): bool
+{
+    $date = DateTime::createFromFormat('!Y', $text);
+    return $date instanceof ('DateTime');
+}

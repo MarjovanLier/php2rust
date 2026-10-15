@@ -131,8 +131,8 @@ its Rust spec reviewer found the missing `use` line of a module whose
 helper alone names `PhpDateTime`; the build found that Mago types
 `date_parse()` as `mixed` and that `DateTime|false` must not take the
 forms of `null`. Section 35 (code that the input uses but does not
-convert) was written on 15 Oct 2026; it changes P2R-73, P2R-82 and the
-roadmap of section 10. Its tool spec reviewer found that a namespaced
+convert) was written on 15 Oct 2026; it changes P2R-07, P2R-73, P2R-82
+and the roadmap of section 10. Its tool spec reviewer found that a namespaced
 included function must block the built-in of its short name, that an
 included file needs a name no input can have, and that Mago's findings
 in an included file must not be printed; its Mago spec reviewer found
@@ -183,7 +183,7 @@ requirement IDs.
   the same stdout bytes, the same output file bytes and the same stderr
   bytes.
 - **P2R-07** Only the constructs that sections 3 to 5, 11 to 19 and 21 to
-  34 list as converting may convert. Any other construct MUST stop the conversion,
+  35 list as converting may convert. Any other construct MUST stop the conversion,
   which means it is reported as a problem under P2R-03. Examples that stop
   in version 1 (section 16 converts `namespace`, `use` and class
   constants, and section 17 two casts):
@@ -3214,10 +3214,10 @@ later sections.
   name) is skipped without a problem line. Mago keeps a symbol of PHP's
   built-ins or of the input over an included symbol of the same name, so
   a polyfill in an included file changes no built-in function, and an
-  input file that also lies under an include path is read as input only. The checks of a name against PHP's
-  built-ins (P2R-31, P2R-111, P2R-131, P2R-151) see PHP's built-ins only,
-  and an included declaration is not a declaration of the crate
-  (P2R-173). A type or call of the input that names an included symbol
+  input file that also lies under an include path is read as input only.
+  The checks of a name against PHP's built-ins (P2R-31, P2R-111, P2R-131,
+  P2R-151) see PHP's built-ins only, and an included declaration is not a
+  declaration of the crate (P2R-173). A type or call of the input that names an included symbol
   converts by the rules of the earlier sections, so it stops (a class
   type by P2R-22, a call by P2R-48 or P2R-153) until a later section maps
   it. An unqualified call in a namespace whose function of that short

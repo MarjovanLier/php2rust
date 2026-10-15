@@ -101,6 +101,8 @@ added the `as_str()` line after a string member's binding, enums among
 the Copy members, the forms for the `&U` binding of a null check, and
 the exceptions in P2R-106 and P2R-232; the build added plain-value
 literals where a map is needed and the declared map type of a `[]`.
+Section 27 (regular expressions without the `u` flag) was written on 15
+Oct 2026; it changes P2R-07, P2R-60 and the roadmap of section 10.
 
 php2rust converts typed PHP source into normal, readable Rust (`Vec`,
 `String`, `i64`), without AI. It reads PHP with the Mago crates, uses Mago's
@@ -144,7 +146,7 @@ requirement IDs.
   the same stdout bytes, the same output file bytes and the same stderr
   bytes.
 - **P2R-07** Only the constructs that sections 3 to 5, 11 to 19 and 21 to
-  26 list as converting may convert. Any other construct MUST stop the conversion,
+  27 list as converting may convert. Any other construct MUST stop the conversion,
   which means it is reported as a problem under P2R-03. Examples that stop
   in version 1 (section 16 converts `namespace`, `use` and class
   constants, and section 17 two casts):
@@ -400,11 +402,15 @@ requirement IDs.
     variable.
   - Reading a string offset past either end of the string: PHP warns and
     gives `""`. Rust panics.
-  - `substr()` or a string offset that cuts a character of more than one
-    byte: PHP gives the raw bytes, Rust gives U+FFFD (three bytes) in their
-    place, so later lengths, comparisons and joins of that value differ
-    too. The README lists these two; no case folder can show them, because
-    PHP warns or prints bytes that are not UTF-8.
+  - `substr()`, a string offset or a `preg_replace` of P2R-261 that cuts a
+    character of more than one byte: PHP gives the raw bytes, Rust gives
+    U+FFFD (three bytes) in their place, so later lengths, comparisons and
+    joins of that value differ too. The README lists these; no case folder
+    can show them, because PHP warns or prints bytes that are not UTF-8.
+  - A `preg_replace` or `preg_match` of section 27 past PHP's
+    `pcre.backtrack_limit`: PHP gives null or `false`, so the default of
+    `??` applies; the `regex` crate does not backtrack and gives the
+    result.
   - `(int)` of a string of 19 digits above `PHP_INT_MAX` followed by `e+`
     or `e-` without exponent digits (`"9300000000000000000e+"`): PHP's
     number parser reads one byte late and gives a wrapped value
@@ -515,7 +521,9 @@ Each milestone gets its own requirements in this file when its work starts.
   declared unions as generated enums and `?->` (section 24); maps on
   `indexmap` (section 25); unions as map values, narrowing a union value
   with `is_string()` and its kin (section 26), and unions as list values
-  and maps as union members; `preg_*`; interfaces and
+  and maps as union members; `preg_replace` and `preg_match` without the
+  `u` flag (section 27), then patterns with `u` and look-around;
+  interfaces and
   inheritance; closures; then the
   `StringManipulation` library, which `SouthAfricanIDValidator` calls.
   `SouthAfricanIDValidator` calls `StringManipulation::isValidDate`, which
@@ -2356,6 +2364,82 @@ key order, which Mago does not keep (P2R-200).
   inside `?:`) converts by P2R-251 only. A reference assignment
   (`$r = &$v`), which would change `$v` through another name, stops the
   conversion (P2R-07).
+
+## 27. Regular expressions without the u flag (milestone 2, slice 17)
+
+The validator cleans a number with
+`\preg_replace(self::NON_DIGIT_REGEX, '', $number) ?? ''`, where the
+constant is `'#\D#'`, and `StringManipulation` squeezes spaces twice with
+`\preg_replace('# {2,}#', ' ', $text) ?? ''`. Without the `u` flag PHP's
+PCRE matches bytes, and `\d`, `\w`, `\s` and `\b` are ASCII classes:
+`#\D#` removes every byte of `"\u{0663}"`, an Arabic digit, where `#\D#u`
+keeps it. Rust's `regex::bytes::Regex` in `(?-u)` mode matches the same
+way, so this section converts such patterns on the `regex` crate. A
+pattern with `u`, all of whose uses in `StringManipulation` also need
+look-around, which `regex` lacks, waits for an engine chosen against
+those patterns.
+
+- **P2R-260** A pattern MUST convert when it is a string literal, or a
+  class constant whose Mago type is one literal string, and it has a
+  delimiter PHP accepts (any byte other than a letter, a digit, a
+  backslash and whitespace; `(`, `{`, `[` and `<` close with `)`, `}`, `]`
+  and `>`), flags from `i`, `m` and `s` only, ASCII bytes only, and a body
+  built only from: literal characters and escaped punctuation; `.`;
+  character classes, also negated, with ranges and POSIX classes
+  (`[[:alpha:]]`); `\d`, `\D`, `\w`, `\W`, `\s`, `\S`, `\b` and `\B`;
+  `\t`, `\n`, `\r`, `\f`, `\v`, `\xhh` and `\x{h..}`; groups `( )` and
+  `(?: )`; alternation; the quantifiers `*`, `+`, `?`, `{n}`, `{n,}` and
+  `{n,m}` and their lazy forms; `^`, `\A` and `\z`; and `$` with the `m`
+  flag. It converts to the Rust pattern `(?-u)` followed by `(?i)`, `(?m)`
+  and `(?s)` for its flags and by the body, as a raw string literal
+  (`r"(?-u)\D"`), and the tool compiles each converted pattern with
+  `regex` 1.13.1 when it converts. These stop the conversion: a pattern
+  of any other form (a variable, a concatenation, interpolation); the `u`
+  flag and every flag other than `i`, `m` and `s` (a later slice); a
+  non-ASCII byte; `$` without `m`, because PCRE's `$` also matches before
+  a final newline; `\Z`, `\G`, `\K`, `\Q..\E`, `\p`, look-around,
+  backreferences, `\k`, atomic groups, possessive quantifiers,
+  conditionals, recursion and octal escapes; and a pattern that does not
+  compile.
+- **P2R-261** `preg_replace(P, R, S) ?? $d`, where `P` converts by
+  P2R-260 and can match no empty string, `R` is a string literal or a
+  class constant of one literal string with no `$` and no `\`, and `S` is
+  a string, MUST convert to `php_preg_replace(r"..", "R", s)`, a call of
+  the helper below, and `$d` is dropped: PHP's `preg_replace` returns
+  null only on a PCRE error, which these patterns raise only past
+  `pcre.backtrack_limit` (P2R-60). The output then holds
+  `fn php_preg_replace(pattern: &str, replacement: &str, subject: &str) -> String`,
+  which compiles `pattern` with `::regex::bytes::Regex::new` and returns
+  `String::from_utf8_lossy` of `replace_all` on the subject's bytes with
+  the replacement taken as it is (`::regex::bytes::NoExpand`). A pattern
+  that can match the empty string stops, because PCRE then also matches
+  empty right after a match where `regex` does not
+  (`preg_replace('#x*#', '-', 'xab')` gives `--a-b-` in PHP and `-a-b-`
+  in Rust). These also stop: `preg_replace` without `??`, with a fourth
+  or fifth argument, with an array, named or spread argument, and a
+  replacement with `$` or `\`, which PHP reads as a group reference.
+- **P2R-262** `preg_match(P, S)`, where `P` converts by P2R-260 and `S` is
+  a string, MUST convert to `php_preg_match(r"..", s)`, which gives a
+  `bool`, where the result is read as one: the whole condition of an
+  `if`, `elseif`, `while`, `for` or `?:`, an operand of `!`, `&&` and
+  `||` there, and an operand of `=== 1` or `!== 0` (true on a match) or
+  `=== 0` or `!== 1` (true on no match), with the literal on either side.
+  The output then holds
+  `fn php_preg_match(pattern: &str, subject: &str) -> bool`, which
+  returns `is_match` on the subject's bytes. These stop the conversion:
+  a third argument or more, a named or spread argument, a comparison with
+  any other value (`=== false` included), and every other use of the
+  result, whose PHP value is the int `0` or `1` or `false`.
+- **P2R-263** Output that calls either helper MUST build with plain
+  `rustc` given the `regex` crate (`--extern regex=<rlib>` and
+  `-L dependency=<deps folder>`). The helpers name the crate only through
+  `::regex::` paths, so the output holds no `use` line for it and no
+  module, function or type of the input can take its name over. The tests
+  MUST build `regex` 1.13.1 from the small cargo project of P2R-243 with
+  its dependencies fixed by its `Cargo.lock`, and the README MUST say that
+  such output needs `regex = "1"` in the `Cargo.toml` that builds it. A
+  function, variable or parameter named `php_preg_replace` or
+  `php_preg_match` stops by P2R-31.
 
 ## Spec checklist
 

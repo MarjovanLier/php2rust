@@ -118,7 +118,10 @@ and the roadmap of section 10. Section 31 (closures as callbacks of
 Oct 2026; it changes P2R-07, P2R-48, P2R-60, P2R-75, P2R-188 and the
 roadmap of section 10. Section 32 (arrays in `str_replace` and `strtr`)
 was written on 15 Oct 2026; it changes P2R-07, P2R-48, P2R-60, P2R-185,
-P2R-188, P2R-232, P2R-282 and the roadmap of section 10.
+P2R-188, P2R-232, P2R-282 and the roadmap of section 10. Section 33
+(look-around in two `u` patterns read as a bool) was written on 15 Oct
+2026; it changes P2R-07, P2R-60, P2R-260, P2R-262 and the roadmap of
+section 10.
 
 php2rust converts typed PHP source into normal, readable Rust (`Vec`,
 `String`, `i64`), without AI. It reads PHP with the Mago crates, uses Mago's
@@ -162,7 +165,7 @@ requirement IDs.
   the same stdout bytes, the same output file bytes and the same stderr
   bytes.
 - **P2R-07** Only the constructs that sections 3 to 5, 11 to 19 and 21 to
-  32 list as converting may convert. Any other construct MUST stop the conversion,
+  33 list as converting may convert. Any other construct MUST stop the conversion,
   which means it is reported as a problem under P2R-03. Examples that stop
   in version 1 (section 16 converts `namespace`, `use` and class
   constants, and section 17 two casts):
@@ -424,12 +427,22 @@ requirement IDs.
     U+FFFD (three bytes) in their place, so later lengths, comparisons and
     joins of that value differ too. The README lists these; no case folder
     can show them, because PHP warns or prints bytes that are not UTF-8.
-  - A `preg_replace` or `preg_match` of section 27, or a
+  - A `preg_replace` or `preg_match` of section 27 or 33, or a
     `preg_replace_callback` of P2R-302, past PCRE's backtrack,
     recursion or JIT stack limit (`/(?:a|b)*\z/` on 400000 bytes): PHP
     gives null or `false`, so the default of `??` applies and `!== 0` is
     true where a condition and `=== 1` are false; the `regex` crate has no
     such limit and gives the match.
+  - A `preg_match` of P2R-320 where a letter of only one Unicode version
+    stands before or after the word: Rust's `\p{L}` follows Unicode 16.0,
+    PHP's follows the PCRE2 it links (17.0 for PCRE2 10.48, 14.0 for
+    10.42), so one of them matches and the other does not (`"\u{10940}mc"`
+    gives no match in PHP with PCRE2 10.48 and a match in Rust).
+  - A `preg_match` of P2R-320 on a subject that is not valid UTF-8 in PHP
+    (after a cut of `substr()` above): PHP's `u` gives `false`, so a
+    condition and `=== 1` are false and `!== 0` is true; the Rust
+    subject holds U+FFFD there, a character that is not a letter, and
+    matches as any other.
   - A shape that P2R-271 turns into a map, where a PHP caller outside the
     input built the array in another key order than the input's literals:
     the Rust map has the input's order, because a struct has none.
@@ -560,11 +573,11 @@ Each milestone gets its own requirements in this file when its work starts.
   constants and `strtr` (section 29); writes after a null check, `trim`
   with a character list and `checkdate` (section 30); closures as
   callbacks of `array_map` and `preg_replace_callback`, and `ucwords`
-  (section 31); arrays in `str_replace` and `strtr` (section 32); then
-  the rest of the `StringManipulation` library, which
-  `SouthAfricanIDValidator` calls (`date_parse`), with `DateTime` and
-  patterns with `u` and look-around
-  last;
+  (section 31); arrays in `str_replace` and `strtr` (section 32); the
+  two look-around patterns with `u` that `nameFix` reads as a bool,
+  rewritten for `regex` (section 33); then the rest of the
+  `StringManipulation` library, which `SouthAfricanIDValidator` calls
+  (`date_parse`), with `DateTime` last;
   unions as list values; interfaces and inheritance; closures.
   `SouthAfricanIDValidator` calls `StringManipulation::isValidDate`, which
   lives in another package, and P2R-153 resolves calls inside the input
@@ -2439,7 +2452,7 @@ keeps it. Rust's `regex::bytes::Regex` in `(?-u)` mode matches the same
 way, so this section converts such patterns on the `regex` crate. A
 pattern with `u`, all of whose uses in `StringManipulation` also need
 look-around, which `regex` lacks, waits for an engine chosen against
-those patterns.
+those patterns; section 33 rewrites the two of them for `regex`.
 
 - **P2R-260** A pattern MUST convert when it is a string literal, or a
   constant of a class or enum of the file whose value is a string literal
@@ -2474,8 +2487,8 @@ those patterns.
   converts (`regex::Regex` rejects a `(?-u)` class that can match bytes
   that are not UTF-8). These stop the
   conversion: a pattern of any other form (a variable, a concatenation,
-  interpolation); the `u` flag and every flag other than `i`, `m` and `s`
-  (a later slice); a byte outside printable ASCII; a pattern longer than
+  interpolation); the `u` flag, outside the one form of P2R-320, and
+  every flag other than `i`, `m` and `s`; a byte outside printable ASCII; a pattern longer than
   4096 bytes, because PCRE rejects a pattern whose compiled form passes 64
   KiB and a two-letter class of 4 bytes compiles to 33 (1990 copies of
   `[ab]` fail in PHP); an unbalanced bracket
@@ -2517,7 +2530,7 @@ those patterns.
   in Rust). These also stop: `preg_replace` without `??`, with a fourth
   or fifth argument, with an array, named or spread argument, and a
   replacement with `$` or `\`, which PHP reads as a group reference.
-- **P2R-262** `preg_match(P, S)`, where `P` converts by P2R-260 and `S` is
+- **P2R-262** `preg_match(P, S)`, where `P` converts by P2R-260 or P2R-320 and `S` is
   a string, MUST convert to `php_preg_match(r"..", s)`, which gives a
   `bool`, where the result is read as one: the whole condition of an
   `if`, `elseif`, `while`, `for` or `?:`, an operand of `!`, `&&` and
@@ -2930,6 +2943,40 @@ array replacement.
   legacy `array(..)` literal, which P2R-282 stops. A key
   that is empty at run time, with a text that is not empty: PHP warns and
   ignores it, Rust ignores it without the warning (P2R-60).
+
+## 33. Look-around in two u patterns read as a bool (milestone 2, slice 23)
+
+`StringManipulation::nameFix` tests a surname with
+`\preg_match('#(?<!\p{L})mc(?! )#u', $lowerLastName) === 1`, and the same
+for `mac`. The `regex` crate has no look-around. Read as a bool, though,
+`(?<!\p{L})mc(?! )` matches somewhere in a subject exactly when
+`(?:^|\P{L})mc(?:[^ ]|$)` does: the look-behind tests one character
+before the word, or the start, and the look-ahead one character after
+it, or the end. A spike against PHP 8.5.9 with PCRE2 10.48 compared this
+form over every code point and over 100082 strings and found no
+difference other than the letters new in Unicode 17. A spike that added
+`fancy-regex` or `pcre2` gave the same Unicode 16 answers, at the cost
+of a new crate (and a C compiler for `pcre2`). This section converts the
+one tested form; general look-around waits for an engine.
+
+- **P2R-320** `preg_match(P, S)` read as a bool by P2R-262, where `P` is
+  a string literal or a constant as in P2R-260, with a delimiter as
+  there, the flag `u` alone, and the body `(?<!\p{L})`, then one or more
+  ASCII letters and digits, then `(?! )`, MUST convert to
+  `php_preg_match(r"(?:^|\P{L})mc(?:[^ ]|$)", s)` of P2R-262, with the
+  letters and digits of the body in place of `mc`. The Rust pattern has
+  no `(?-u)`, so `regex` reads the subject's bytes as UTF-8 and `\P{L}`
+  and `[^ ]` each match one character, as PCRE's `u` does; a subject
+  holds valid UTF-8 in Rust (section 5). `\p{L}` follows the Unicode 16.0
+  tables of `regex-syntax` 0.8.11 in Rust and the tables of the PCRE2
+  that PHP links in PHP (17.0 for PCRE2 10.48, 14.0 for 10.42), so a
+  letter that only one of the two versions has gives the other answer
+  (P2R-60). These stop the conversion: a pattern with `u` of any other
+  form, in `preg_match` or elsewhere (another look-around or class, a
+  word with other characters, a look-around in the middle, a missing
+  look-around); `u` with another flag; and a pattern with `u` in
+  `preg_replace` and `preg_replace_callback`, which P2R-260 still
+  stops for them.
 
 ## Spec checklist
 

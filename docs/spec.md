@@ -2143,8 +2143,8 @@ inside a list or a shape field waits for a later slice.
   it is a `&str` that borrows `$v`, as `gettype()` gives literals, and
   both may stand as an arm of a `?:`. `(string) $v` as the first arm of
   `is_scalar($v) ? .. : ..`, the same variable or parameter in both, is
-  the one place that writes `unreachable!()`: for the `List`, shape, enum
-  and class variants and for `None`, which the check rules out and which
+  the one place that writes `unreachable!()`: for the `List`, `Map`,
+  shape, enum and class variants and for `None`, which the check rules out and which
   no code between the check and the cast can change. These stop the
   conversion: `(string)` where `U` has a `Float` variant (P2R-46), because
   PHP prints a float its own way; `(string)` where `U` has a `List`,
@@ -2519,21 +2519,39 @@ the literal that built it.
   `U::Map(..)` (P2R-231). `is_scalar()` gives `false` and `gettype()`
   gives `"array"` for the `Map` variant (P2R-233), and no type test of
   P2R-251 matches it. A map type that Mago infers inside a body keeps
-  P2R-22, as P2R-230 keeps an inferred union. These stop the conversion:
-  `(string)` of a union value with a `Map` variant, because PHP gives
-  `"Array"` with a warning; two map members (P2R-230 names both `Map`);
-  and every other use of the `Map` variant's value (P2R-232).
+  P2R-22, as P2R-230 keeps an inferred union. `(string)` of such a union
+  value follows P2R-233 for the `Map` variant as for `List`: it writes
+  `unreachable!()` as the first arm of `is_scalar($v) ? .. : ..` and
+  stops anywhere else, because PHP gives `"Array"` with a warning. A
+  union with both a shape member and a map member puts a value of that
+  shape type into the shape's own variant (P2R-231). An array literal
+  where such a union is needed still stops (P2R-231). These stop the
+  conversion: two map members (P2R-230 names both `Map`); two unions that
+  differ only in the key or value type of their map member
+  (`array<string, string>|bool` and `array<string, int>|bool` both give
+  `BoolOrMap`, P2R-230); and every other
+  use of the `Map` variant's value (P2R-232), such as a condition,
+  `is_array()`, `count()` or `foreach`.
 - **P2R-271** A value of a shape type `S`, or `Option<S>`, MUST convert
   where a map with text keys is needed (`IndexMap<String, V>`: a map
   place of P2R-241, a parameter, a return value or a property of that
+  type, a shape field or a map value of that type, a variable of that
   type, or the `Map` variant of P2R-270), when every field of `S` has the
   Rust type `V`, to `IndexMap::from(s)`, or `s.map(IndexMap::from)` for
-  `Option<S>`, and a value that is not owned is copied first as P2R-26
-  copies it. The output then holds, after the struct `S`,
+  `Option<S>`, after the value is made owned as P2R-26 makes an assigned
+  value owned: `.clone()` for a property read, a `&S` parameter or
+  binding and a variable that is read again, `.map(ToOwned::to_owned)`
+  for an `Option<&S>` parameter, and a move otherwise. The output then holds, after the struct `S`,
   `impl From<S> for IndexMap<String, V>`, whose `from` builds the map with
-  `IndexMap::from([(String::from("k"), s.k), ..])` in one key order: the
-  order in which the array literals of the input that build `S` (P2R-202)
-  list their keys. Every such literal MUST list the keys in one order; two
+  `IndexMap::from([(String::from("key"), s.field), ..])`, where `key` is
+  the PHP string value of the shape key, escapes decoded, and `field` the
+  Rust name P2R-200 gives that key (`(String::from("dateOfBirth"),
+  s.date_of_birth)`), in one key order: the order in which the array
+  literals of the input that convert to a struct literal of `S`
+  (P2R-202), in any place (a return value, an argument, a property, a
+  local variable, an arm of `?:` or `match`, the default of `??`, a list
+  element, a map value), list their keys, compared by those string
+  values. Every such literal MUST list the keys in one order; two
   literals in different orders, and a shape that no literal of the input
   builds, stop the conversion at each place that needs the map, because
   the key order would not be PHP's. A PHP caller outside the input may

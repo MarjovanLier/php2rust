@@ -2418,7 +2418,10 @@ those patterns.
   that are not UTF-8). These stop the
   conversion: a pattern of any other form (a variable, a concatenation,
   interpolation); the `u` flag and every flag other than `i`, `m` and `s`
-  (a later slice); a byte outside printable ASCII; an unbalanced bracket
+  (a later slice); a byte outside printable ASCII; a pattern longer than
+  4096 bytes, because PCRE rejects a pattern whose compiled form passes 64
+  KiB and a two-letter class of 4 bytes compiles to 33 (1990 copies of
+  `[ab]` fail in PHP); an unbalanced bracket
   delimiter (`<a<>`); `$` without `m`, because PCRE's `$` also matches
   before a final newline; `^` with `m`, because PCRE's multiline `^` does
   not match after a newline that ends the subject; `\v`, which PCRE reads

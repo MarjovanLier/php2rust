@@ -45,9 +45,10 @@ Output that holds a map uses the `indexmap` crate (`use indexmap::IndexMap;`). T
 no `Cargo.toml`. With plain `rustc`, pass the built crate:
 `--extern indexmap=<path to libindexmap.rlib> -L dependency=<its deps directory>`.
 Output that calls `preg_replace()`, `preg_match()` or `preg_replace_callback()` uses the
-`regex` crate through `::regex::` paths, and needs `regex = "1.13"` in the same way
-(`--extern regex=<path to libregex.rlib>` with plain `rustc`); its patterns keep escapes
-that older versions reject. `preg_replace_callback()` also needs `indexmap`, because
+`regex` crate through `::regex::` paths, and needs `regex = "1.13"` with its default
+features in the same way (`--extern regex=<path to libregex.rlib>` with plain `rustc`);
+its patterns keep escapes that older versions reject, and the `u` form below needs the
+Unicode tables of the default features. `preg_replace_callback()` also needs `indexmap`, because
 its callback takes the matches as an `IndexMap`.
 
 | Exit code | Meaning |
@@ -513,11 +514,12 @@ php2rust refuses some valid PHP that version 1 converts in other forms:
   default, and `preg_match()` gives `false`. Rust's `regex` has no such limit and gives
   the full result.
 - The `u` form of `preg_match()` where a letter that only one Unicode version has
-  stands next to the word: Rust's `\p{L}` follows Unicode 16.0 (`regex-syntax`
-  0.8.11), PHP's follows the PCRE2 it links (17.0 for PCRE2 10.48, 14.0 for 10.42), so
-  one matches and the other does not.
+  stands right before the word: Rust's `\p{L}` follows Unicode 16.0 (`regex-syntax`
+  0.8.11, which the tests build), PHP's follows the PCRE2 it links (17.0 for PCRE2
+  10.48, 14.0 for 10.42), so that occurrence can count in one and not in the other.
 - The `u` form of `preg_match()` on a subject that is not valid UTF-8 in PHP (after a
-  cut character, above): PHP gives `false`; the Rust subject holds U+FFFD there and
+  cut character, above): PHP gives `false`, so a condition, `=== 1` and `=== 0` are
+  false and `!== 0`, `!== 1` and `!` are true; the Rust subject holds U+FFFD there and
   matches as any other.
 - An array shape that becomes a map, where a PHP caller outside the converted code
   built the array in another key order: the Rust map has the order of the converted

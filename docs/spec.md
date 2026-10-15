@@ -430,19 +430,20 @@ requirement IDs.
   - A `preg_replace` or `preg_match` of section 27 or 33, or a
     `preg_replace_callback` of P2R-302, past PCRE's backtrack,
     recursion or JIT stack limit (`/(?:a|b)*\z/` on 400000 bytes): PHP
-    gives null or `false`, so the default of `??` applies and `!== 0` is
-    true where a condition and `=== 1` are false; the `regex` crate has no
-    such limit and gives the match.
+    gives null or `false`, so the default of `??` applies, a condition,
+    `=== 1` and `=== 0` are false, and `!== 0`, `!== 1` and `!` are true;
+    the `regex` crate has no such limit and gives the match.
   - A `preg_match` of P2R-320 where a letter of only one Unicode version
-    stands before or after the word: Rust's `\p{L}` follows Unicode 16.0,
-    PHP's follows the PCRE2 it links (17.0 for PCRE2 10.48, 14.0 for
-    10.42), so one of them matches and the other does not (`"\u{10940}mc"`
+    stands right before the word: Rust's `\p{L}` follows Unicode 16.0
+    with `regex-syntax` 0.8.11, which the tests build, and PHP's follows
+    the PCRE2 it links (17.0 for PCRE2 10.48, 14.0 for 10.42), so that
+    occurrence can count in one and not in the other (`"\u{10940}mc"`
     gives no match in PHP with PCRE2 10.48 and a match in Rust).
   - A `preg_match` of P2R-320 on a subject that is not valid UTF-8 in PHP
-    (after a cut of `substr()` above): PHP's `u` gives `false`, so a
-    condition and `=== 1` are false and `!== 0` is true; the Rust
-    subject holds U+FFFD there, a character that is not a letter, and
-    matches as any other.
+    (after a cut of a bullet above): PHP's `u` gives `false`, so a
+    condition, `=== 1` and `=== 0` are false, and `!== 0`, `!== 1` and
+    `!` are true; the Rust subject holds U+FFFD there, a character that
+    is not a letter, and matches as any other.
   - A shape that P2R-271 turns into a map, where a PHP caller outside the
     input built the array in another key order than the input's literals:
     the Rust map has the input's order, because a struct has none.
@@ -2487,8 +2488,8 @@ those patterns; section 33 rewrites the two of them for `regex`.
   converts (`regex::Regex` rejects a `(?-u)` class that can match bytes
   that are not UTF-8). These stop the
   conversion: a pattern of any other form (a variable, a concatenation,
-  interpolation); the `u` flag, outside the one form of P2R-320, and
-  every flag other than `i`, `m` and `s`; a byte outside printable ASCII; a pattern longer than
+  interpolation); the `u` flag, except in a `preg_match` that P2R-320
+  converts, and every flag other than `i`, `m` and `s`; a byte outside printable ASCII; a pattern longer than
   4096 bytes, because PCRE rejects a pattern whose compiled form passes 64
   KiB and a two-letter class of 4 bytes compiles to 33 (1990 copies of
   `[ab]` fail in PHP); an unbalanced bracket
@@ -2952,17 +2953,20 @@ for `mac`. The `regex` crate has no look-around. Read as a bool, though,
 `(?<!\p{L})mc(?! )` matches somewhere in a subject exactly when
 `(?:^|\P{L})mc(?:[^ ]|$)` does: the look-behind tests one character
 before the word, or the start, and the look-ahead one character after
-it, or the end. A spike against PHP 8.5.9 with PCRE2 10.48 compared this
-form over every code point and over 100082 strings and found no
+it, or the end. A spike against PHP 8.5.9 with PCRE2 10.48 compared the
+words `mc` and `mac` over every code point and over 100082 strings, and
+a spec review compared 18 words over 1776152 strings; neither found a
 difference other than the letters new in Unicode 17. A spike that added
 `fancy-regex` or `pcre2` gave the same Unicode 16 answers, at the cost
 of a new crate (and a C compiler for `pcre2`). This section converts the
 one tested form; general look-around waits for an engine.
 
 - **P2R-320** `preg_match(P, S)` read as a bool by P2R-262, where `P` is
-  a string literal or a constant as in P2R-260, with a delimiter as
-  there, the flag `u` alone, and the body `(?<!\p{L})`, then one or more
-  ASCII letters and digits, then `(?! )`, MUST convert to
+  a string literal or a constant as in P2R-260, of printable ASCII bytes
+  and 4096 bytes at most, with a delimiter as there, no flag but `u`
+  (once or more, as PHP reads a repeated flag once), and the body
+  `(?<!\p{L})`, then one or more ASCII letters and digits, then `(?! )`,
+  MUST convert to
   `php_preg_match(r"(?:^|\P{L})mc(?:[^ ]|$)", s)` of P2R-262, with the
   letters and digits of the body in place of `mc`. The Rust pattern has
   no `(?-u)`, so `regex` reads the subject's bytes as UTF-8 and `\P{L}`
@@ -2970,13 +2974,16 @@ one tested form; general look-around waits for an engine.
   holds valid UTF-8 in Rust (section 5). `\p{L}` follows the Unicode 16.0
   tables of `regex-syntax` 0.8.11 in Rust and the tables of the PCRE2
   that PHP links in PHP (17.0 for PCRE2 10.48, 14.0 for 10.42), so a
-  letter that only one of the two versions has gives the other answer
-  (P2R-60). These stop the conversion: a pattern with `u` of any other
-  form, in `preg_match` or elsewhere (another look-around or class, a
-  word with other characters, a look-around in the middle, a missing
-  look-around); `u` with another flag; and a pattern with `u` in
-  `preg_replace` and `preg_replace_callback`, which P2R-260 still
-  stops for them.
+  letter of only one of the two versions right before the word can
+  change the answer (P2R-60). These stop the conversion: a pattern with
+  `u` of any other form, in `preg_match` or elsewhere (another
+  look-around or class, a word with other characters, a look-around in
+  the middle, a missing look-around); a delimiter that also stands in
+  the look-around, as in `<(?<!\p{L})mc(?! )>u`, whose `<` nests so that
+  it has no closing delimiter (P2R-260), and `!(?<!\p{L})mc(?! )!u`,
+  which ends at the `!` of the look-behind, as in PHP, where both give
+  `false` with a warning; `u` with another flag; and a pattern with `u` in `preg_replace` and
+  `preg_replace_callback`, which P2R-260 still stops for them.
 
 ## Spec checklist
 

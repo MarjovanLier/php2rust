@@ -182,7 +182,8 @@ converts:
   `(string)` on a union value become a `match` over its variants. `is_int()`,
   `is_float()`, `is_bool()` and `is_string()` on a union value become `matches!`, and
   `if (!is_string($v)) { continue; }` or `if (is_string($v)) { .. }` binds the string
-  (`let IntOrString::String(v) = v else { continue; };`), as a check against null does.
+  (`let IntOrString::String(v) = &v else { continue; };` then `let v = v.as_str();`), as
+  a check against null does.
   Other uses of a union value (echo, maths, comparisons) stop.
 - `$o?->p` and `$o?->m($x)` on a nullable object become `o.as_ref().map(|o| ..)`,
   and `??` works on the result.
@@ -267,8 +268,9 @@ the others are findings of the Mago analyser. In short:
   disagree on int and float, `(string)` of a union that may hold a float, a list, a shape
   or an object (outside `is_scalar($v) ? (string) $v : ..`), and a union value passed
   where another union type is needed. `is_string()` and its kin on a value that is not a
-  union, a narrowing in any other form (`!is_string($v) || ..`), and a write to a narrowed
-  variable while its binding holds.
+  union, a use of the member value after a test in any other form
+  (`if (!is_string($v) || $b) { return; } strlen($v)`), which narrows nothing, and a write
+  to a narrowed variable while its binding holds.
 - For maps: a value type that is `mixed` or a class that changes its objects, a union
   value type outside a declared type, a
   map inside a union, a key type other than int, string or `array-key`, a list or shape

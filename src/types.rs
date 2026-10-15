@@ -403,6 +403,33 @@ pub fn within(site: &TUnion, members: &[RustType], nullable: bool, enums: &TypeN
     })
 }
 
+/// True when `union`, a type Mago gives, fits `ty`: a map, a union, or the `Option` of
+/// either, or any other type that `union` maps to. A value of a declared map type keeps
+/// that type where Mago types it more narrowly, inside another map too (P2R-240, P2R-250).
+pub fn fits_type(union: &TUnion, ty: &RustType, enums: &TypeNames) -> bool {
+    if only_null(union) {
+        return matches!(ty, RustType::Option(_));
+    }
+    let rest: Vec<TAtomic> = union
+        .types
+        .iter()
+        .filter(|atomic| !matches!(atomic, TAtomic::Null))
+        .cloned()
+        .collect();
+    if rest.len() < union.types.len() && !matches!(ty, RustType::Option(_)) {
+        return false;
+    }
+    let rest = TUnion::from_vec(rest);
+    match ty.inner() {
+        // A union value takes a value of any of its members (P2R-250).
+        RustType::Union(name) => enums
+            .union(name)
+            .is_some_and(|members| within(&rest, &members, false, enums)),
+        map @ RustType::Map(..) => fits_map(&rest, map, enums),
+        inner => rust_type(&rest, enums).is_ok_and(|found| found == *inner),
+    }
+}
+
 /// True when `union`, Mago's type of a variable that holds the map `map`, has only keys and
 /// values the map takes. Mago types a map after a write by a literal key with that key, as
 /// a shape (`array{'z': int}` after `$m = []; $m['z'] = 2;`) or beside the key and value
@@ -411,19 +438,7 @@ pub fn fits_map(union: &TUnion, map: &RustType, enums: &TypeNames) -> bool {
     let RustType::Map(key, value) = map else {
         return false;
     };
-    let nullable = matches!(**value, RustType::Option(_));
-    let value_fits = |union: &TUnion| {
-        if only_null(union) {
-            return nullable;
-        }
-        // A union value takes a value of any of its members (P2R-250).
-        if let RustType::Union(name) = value.inner() {
-            return enums
-                .union(name)
-                .is_some_and(|members| within(union, &members, nullable, enums));
-        }
-        rust_type(union, enums).is_ok_and(|found| found == **value || found == *value.inner())
-    };
+    let value_fits = |union: &TUnion| fits_type(union, value, enums);
     union.types.iter().all(|atomic| {
         let TAtomic::Array(TArray::Keyed(keyed)) = atomic else {
             return false;

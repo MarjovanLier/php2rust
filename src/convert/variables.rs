@@ -68,6 +68,10 @@ pub(super) const THIS: &[u8] = b"this";
 /// The problem of a copy of a value of a changing type (P2R-145).
 const NO_COPY: &str = "an object whose class changes its objects is never copied; it moves only from a local variable or an owned parameter that is not read again (P2R-145)";
 
+/// The problem of a `for` step that writes a variable a let-else in the loop body binds
+/// (P2R-104, P2R-252).
+const STEP_WRITE: &str = "a for step cannot write a variable that a let-else in the loop body binds by a check against null or a type test (P2R-104, P2R-252)";
+
 /// The problem of a write to the binding of a null check or a type test (P2R-104,
 /// P2R-252).
 const CHECKED: &str = "a variable that a check against null or a type test binds cannot be assigned until the check's block ends (P2R-104, P2R-252)";
@@ -110,14 +114,14 @@ enum Pending {
         /// `{`, or `{}` for an empty body.
         open: &'static str,
     },
-    /// The opening line of `if ($v === null)`: `let Some(v) = v else {` when its body
-    /// always leaves and `binding` is read after it, otherwise `if v.is_none() {`
-    /// (P2R-104).
+    /// The opening line of `if ($v === null)` or `if (!is_T($v))`: `let Some(v) = v else {`
+    /// or `let U::T(v) = &v else {` when its body always leaves and `binding` is read after
+    /// it, otherwise `if v.is_none() {` or `if !matches!(..) {` (P2R-104, P2R-252).
     Guard {
         binding: Option<Var>,
-        /// `let Some(v) = v`.
+        /// `let Some(v) = v`, or `let U::T(v) = &v`.
         pattern: String,
-        /// `v.is_none()`.
+        /// `v.is_none()`, or `!matches!(v, U::T(_))`.
         test: String,
         /// `let v = v.as_str()` after the let-else of a string member of a union, so the
         /// binding reads as a `&str` (P2R-252).
@@ -671,7 +675,7 @@ impl Converter<'_> {
         {
             self.refuse(
                 variable,
-                "a for step cannot read a variable that a let-else in the loop body checks against null (P2R-104)",
+                "a for step cannot read a variable that a let-else in the loop body binds by a check against null or a type test (P2R-104, P2R-252)",
             );
             return None;
         }
@@ -1313,6 +1317,16 @@ impl Converter<'_> {
             {
                 Ok(value.clone())
             }
+            // A map value gives a new variable its map type where Mago types the write more
+            // narrowly, as a union value does (P2R-250).
+            (_, Some(value))
+                if matches!(value.inner(), RustType::Map(..))
+                    && self
+                        .expression_type(node)
+                        .is_some_and(|site| types::fits_type(site, value, &self.type_names)) =>
+            {
+                Ok(value.clone())
+            }
             (found, _) => found,
         };
         let (var, declared) = self.record_write(variable);
@@ -1501,17 +1515,17 @@ impl Converter<'_> {
                 (var, Some(named))
             }
         };
+        // A refused write still counts below; the binding's value then counts as read, so
+        // no false P2R-35 line follows the refusal (P2R-03).
         if self
             .variables
             .step_guards
             .contains(&self.variables.entries[var].php_name)
         {
-            self.fail(
-                var,
-                variable,
-                "a for step cannot write a variable that a let-else in the loop body checks against null (P2R-104)".to_owned(),
-            );
+            self.variables.read(var, variable.span);
+            self.fail(var, variable, STEP_WRITE.to_owned());
         } else if self.checked(var) {
+            self.variables.read(var, variable.span);
             self.fail(var, variable, CHECKED.to_owned());
         }
         if let Some(binding) = &mut self.variables.entries[var].binding {
@@ -1720,12 +1734,13 @@ impl Converter<'_> {
         if matches!(known, RustType::Vec(_) | RustType::Map(..)) && self.empty_list(node) {
             return Ok(known.clone());
         }
-        // A map keeps its type where Mago names the keys that writes by literal keys gave
-        // it (P2R-240).
-        if matches!(known, RustType::Map(..))
+        // A map, or a map that may be null, keeps its type where Mago names the keys that
+        // writes by literal keys gave it or types its values more narrowly (P2R-240,
+        // P2R-250).
+        if matches!(known.inner(), RustType::Map(..))
             && self
                 .expression_type(node)
-                .is_some_and(|union| types::fits_map(union, known, &self.type_names))
+                .is_some_and(|union| types::fits_type(union, known, &self.type_names))
         {
             return Ok(known.clone());
         }

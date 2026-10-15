@@ -182,7 +182,8 @@ impl Converter<'_> {
         }
         self.variables.flow.enter(join);
         self.join(arriving, "an if whose every branch leaves");
-        // The statements after a let-else in its block read the binding (P2R-104).
+        // The statements after a let-else in its block read the binding (P2R-104,
+        // P2R-252).
         if let (Some((variable, _, inner, _)), Some(at), true) = (guarded, guard, body_leaves) {
             let binding = self.bind_null(variable, inner);
             self.variables.guard(binding);

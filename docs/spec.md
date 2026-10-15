@@ -2310,10 +2310,14 @@ key order, which Mago does not keep (P2R-200).
   inside a body keeps P2R-22, as P2R-230 keeps an inferred union. A value
   goes into such a map, by a literal of P2R-241 or by `$m[k] = v;`, as into
   a place of type `U` (P2R-231), and a read gives a value of type `U`
-  (P2R-232). The type Mago gives the variable or parameter that holds such
-  a map keeps the map type when each of its value types fits a member of
-  `U` (`array<string, int>` after `$m[$k] = 5`), as P2R-240 keeps a map
-  type. These stop the conversion: a union as a list element type or a
+  (P2R-232). A value of such a map type keeps that type where Mago types
+  it more narrowly, each of its value types fitting a member of `U`
+  (`array<string, int>` after `$m[$k] = 5`), as P2R-240 keeps a map type:
+  in a variable or parameter that holds it, also when it may be null, in a
+  new variable that a copy (`$x = $m;`) or a call of a declared return type
+  starts, and as the value of another map, a `foreach` value included.
+  Only a map type with no declared origin, such as the type of an array
+  literal or of a `@var` docblock, keeps P2R-22. These stop the conversion: a union as a list element type or a
   shape field type, and a map as a member of a union (P2R-230; a later
   slice); a value of the union type that is not a member value (P2R-231).
 - **P2R-251** `is_int($v)`, `is_float($v)`, `is_bool($v)` and `is_string($v)`

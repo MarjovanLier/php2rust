@@ -68,7 +68,45 @@ function nulls(array $m): int
     return $n;
 }
 
+/**
+ * The declared map type holds where Mago types the map more narrowly: a map that may be
+ * null, a copy, a call result and a map inside a map.
+ *
+ * @param ?array<string, int|string> $m
+ */
+function nullable(?array $m): int
+{
+    if ($m === null) {
+        return -1;
+    }
+    $x = $m;
+    return count($x);
+}
+
+function fromCall(): int
+{
+    $m = build('z');
+    return count($m);
+}
+
+/**
+ * @param array<string, array<string, int|string>> $outer
+ */
+function nested(array $outer): int
+{
+    $n = 0;
+    foreach ($outer as $inner) {
+        foreach ($inner as $v) {
+            if (is_int($v)) {
+                $n += $v;
+            }
+        }
+    }
+    return $n;
+}
+
 $r = batch(['8001015009087', 5, 'abc', true, 1.5]);
 echo count($r), isset($r['abc']) ? ' set' : ' unset', array_key_exists('abc', $r) ? ' has' : ' not', "\n";
 echo describe(build('a')), ' ', describe(['a' => 4, 'n' => 'q', 'c' => 'xyz']), "\n";
 echo nulls(['a' => 'abc', 'b' => null, 'c' => 1]), "\n";
+echo nullable(null), nullable(['a' => 1]), fromCall(), nested(['o' => ['a' => 2, 'b' => 'x'], 'p' => ['c' => 3]]), "\n";

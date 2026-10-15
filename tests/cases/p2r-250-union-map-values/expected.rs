@@ -75,6 +75,31 @@ pub fn nulls(m: &IndexMap<String, Option<IntOrString>>) -> i64 {
     return n;
 }
 
+pub fn nullable(m: Option<&IndexMap<String, IntOrString>>) -> i64 {
+    let Some(m) = m else {
+        return -1;
+    };
+    let x = m.clone();
+    return x.len() as i64;
+}
+
+pub fn from_call() -> i64 {
+    let m = build("z");
+    return m.len() as i64;
+}
+
+pub fn nested(outer: &IndexMap<String, IndexMap<String, IntOrString>>) -> i64 {
+    let mut n: i64 = 0;
+    for inner in outer.values().cloned() {
+        for v in inner.values().cloned() {
+            if let IntOrString::Int(v) = v {
+                n += v;
+            }
+        }
+    }
+    return n;
+}
+
 fn main() {
     let r = batch(&IndexMap::from([
         (
@@ -127,6 +152,32 @@ fn main() {
             ),
             (String::from("b"), None),
             (String::from("c"), Some(IntOrString::Int(1)))
+        ]))
+    );
+    print!("\n");
+    print!("{}", nullable(None));
+    print!(
+        "{}",
+        nullable(Some(&IndexMap::from([(
+            String::from("a"),
+            IntOrString::Int(1)
+        )])))
+    );
+    print!("{}", from_call());
+    print!(
+        "{}",
+        nested(&IndexMap::from([
+            (
+                String::from("o"),
+                IndexMap::from([
+                    (String::from("a"), IntOrString::Int(2)),
+                    (String::from("b"), IntOrString::String(String::from("x")))
+                ])
+            ),
+            (
+                String::from("p"),
+                IndexMap::from([(String::from("c"), IntOrString::Int(3))])
+            )
         ]))
     );
     print!("\n");

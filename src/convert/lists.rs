@@ -294,9 +294,30 @@ impl Converter<'_> {
             (Expression::Literal(Literal::Null(_)), Some(ty @ RustType::Option(_))) => {
                 Some((RExpr::None, ty.clone()))
             }
+            // `null` where `T|Optional|null` is due is a value that is there (P2R-361).
+            (Expression::Literal(Literal::Null(_)), Some(ty @ RustType::Optional(inner)))
+                if matches!(**inner, RustType::Option(_)) =>
+            {
+                Some((
+                    RExpr::Call(
+                        format!("{}::Present", crate::types::OPTIONAL),
+                        vec![RExpr::None],
+                    ),
+                    ty.clone(),
+                ))
+            }
+            (other, Some(ty)) if let Some(absent) = self.absent(other, ty) => {
+                Some((absent, ty.clone()))
+            }
             (Expression::Conditional(node), _) => self.conditional(node, expected),
             (other, _) => {
                 let (expr, ty) = self.expression(other)?;
+                // A `PhpOptional` read keeps its type where Mago narrows it, so it goes only
+                // where the same type is due (P2R-360, P2R-362).
+                if matches!(ty, RustType::Optional(_)) && expected.is_some_and(|due| *due != ty) {
+                    self.refuse(other, super::optionals::OPTIONAL_USE);
+                    return None;
+                }
                 match expected.and_then(|wanted| self.map_for_shape(&ty, wanted)) {
                     Some((key, value)) => self.shape_as_map(other, expr, &ty, (&key, &value)),
                     None => Some((expr, ty)),

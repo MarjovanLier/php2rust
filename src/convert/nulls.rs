@@ -39,6 +39,15 @@ pub(super) const NULL_JOINED: &str =
 /// `Some(..)` where an `Option<T>` is needed (P2R-102), and a value of a member of a union
 /// enum `U` becomes `U::V(..)`, or `.map(U::V)` for an `Option` (P2R-231).
 pub(super) fn wrapped(expr: RExpr, ty: &RustType, target: &RustType) -> RExpr {
+    // A value of `T` where `T|Optional` is due is there (P2R-361).
+    if let RustType::Optional(inner) = target
+        && ty != target
+    {
+        return RExpr::Call(
+            format!("{}::Present", crate::types::OPTIONAL),
+            vec![wrapped(expr, ty, inner)],
+        );
+    }
     // `false` where `DateTime|false` is needed is its `None`; Mago lets no other bool in.
     // Any other value is still read, so a call runs and a variable counts as used (P2R-330).
     if date_or_false(target) && *ty == RustType::Bool {
@@ -95,6 +104,11 @@ pub(super) fn is_null(expression: &Expression<'_>) -> bool {
 /// True when a value that may be null goes where a value that cannot be null is needed
 /// (P2R-106).
 pub(super) fn null_for_plain(ty: &RustType, target: &RustType) -> bool {
+    // A value of `?T` goes into `Present` of `T|Optional|null` (P2R-361).
+    let target = match target {
+        RustType::Optional(inner) => inner,
+        other => other,
+    };
     matches!(ty, RustType::Option(_)) && !matches!(target, RustType::Option(_))
 }
 
@@ -158,6 +172,10 @@ impl Converter<'_> {
         let Some((expr, ty)) = self.expression(value) else {
             return Some(None);
         };
+        if matches!(ty, RustType::Optional(_)) {
+            self.refuse(binary, super::optionals::OPTIONAL_USE);
+            return Some(None);
+        }
         if !matches!(ty, RustType::Option(_)) || date_or_false(&ty) {
             self.refuse(
                 binary,

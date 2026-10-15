@@ -1000,6 +1000,8 @@ impl Converter<'_> {
             self.record_refused(value);
             let message = if matches!(ty, RustType::Option(_)) {
                 nulls::NULL_JOINED
+            } else if matches!(ty, RustType::Optional(_)) {
+                super::optionals::OPTIONAL_USE
             } else {
                 "only string and int values can be joined into a string (P2R-45)"
             };

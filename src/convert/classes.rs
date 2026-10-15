@@ -413,7 +413,9 @@ impl Converter<'_> {
             RustType::Class(name) => self
                 .class_named(name)
                 .is_some_and(|index| self.classes[index].changing),
-            RustType::Vec(inner) | RustType::Option(inner) => self.is_changing(inner),
+            RustType::Vec(inner) | RustType::Option(inner) | RustType::Optional(inner) => {
+                self.is_changing(inner)
+            }
             RustType::Union(name) => self
                 .type_names
                 .union(name)
@@ -433,6 +435,11 @@ impl Converter<'_> {
             RustType::Map(_, value) => self.is_changing(value) || self.nullable_changing(value),
             // A union enum holds its member inline, as an `Option` does (P2R-230).
             RustType::Union(_) => self.is_changing(ty),
+            // `PhpOptional` holds its value inline and is cloned where it is stored
+            // (P2R-360).
+            RustType::Optional(inner) => {
+                self.is_changing(inner.inner()) || self.nullable_changing(inner)
+            }
             _ => false,
         }
     }
@@ -1618,12 +1625,14 @@ impl Converter<'_> {
         let mut pending = vec![index];
         let mut problem = None;
         while let Some(at) = pending.pop() {
-            // `?C` and a union enum hold their objects inline too (P2R-204, P2R-230).
+            // `?C`, a union enum and `PhpOptional` hold their objects inline too (P2R-204,
+            // P2R-230, P2R-360).
             let held: Vec<RustType> = self
                 .properties(at)
                 .flat_map(|field| match field.ty.inner() {
                     RustType::Union(name) => self.type_names.union(name).unwrap_or_default(),
                     RustType::Class(_) => vec![field.ty.inner().clone()],
+                    RustType::Optional(inner) => vec![inner.inner().clone()],
                     _ => vec![field.ty.clone()],
                 })
                 .collect();
@@ -2095,7 +2104,7 @@ const NEEDS_DEFAULT: &str = "a declared property needs a type and a default valu
 const DATA_PROPERTIES: [&[u8]; 2] = [b"_additional", b"_dataContext"];
 
 /// The methods PHP calls by itself that laravel-data 4.18's `Data` lacks (P2R-350).
-const IMPLICIT_METHODS: [&str; 8] = [
+pub(super) const IMPLICIT_METHODS: [&str; 8] = [
     "__construct",
     "__destruct",
     "__get",

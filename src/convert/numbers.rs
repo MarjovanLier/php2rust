@@ -24,6 +24,12 @@ impl Converter<'_> {
         ty: &RustType,
         declared: &RustType,
     ) -> Option<RExpr> {
+        // A value of `T` goes into `Present` as it goes where `T` is declared (P2R-361).
+        if let RustType::Optional(inner) = declared
+            && !matches!(ty, RustType::Optional(_))
+        {
+            return self.declared_value(node, expr, ty, inner);
+        }
         // Mago accepts a list or a shape where a map is declared (P2R-240).
         if maps::map_clash(ty, declared) {
             self.refuse(node, maps::MAP_CLASH);

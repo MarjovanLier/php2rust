@@ -390,6 +390,10 @@ impl Converter<'_> {
                 self.refuse(arguments[0], nulls::NULL_BUILT_IN);
                 return None;
             }
+            RustType::Optional(_) => {
+                self.refuse(arguments[0], super::optionals::OPTIONAL_USE);
+                return None;
+            }
             // Converted above.
             RustType::Union(_) => return None,
         };
@@ -559,6 +563,15 @@ impl Converter<'_> {
                 ))),
                 (Mode::Shared, _, _) => RExpr::Ref(Box::new(RExpr::Call(path, vec![owned]))),
                 _ => nulls::wrapped(owned, &ty, declared),
+            });
+        }
+        // A value of `T` goes into `Present` owned, and the enum is lent (P2R-361).
+        if matches!(declared, RustType::Optional(_)) && ty != *declared {
+            let owned = self.stored(value, expr, &ty, node.span())?;
+            let made = nulls::wrapped(owned, &ty, declared);
+            return Some(match parameter.mode {
+                Mode::Shared => RExpr::Ref(Box::new(made)),
+                _ => made,
             });
         }
         let passed = match parameter.mode {

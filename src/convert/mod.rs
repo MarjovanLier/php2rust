@@ -49,6 +49,7 @@ mod modes;
 mod nulls;
 mod nullsafe;
 mod numbers;
+mod optionals;
 mod patterns;
 mod recursion;
 mod shapes;
@@ -257,6 +258,7 @@ fn analyse(
         })
         .collect();
     let mut converter = Converter::new(&codebase, analysed);
+    converter.type_names.optional = converter.included_optional();
     converter.built_in_classes = built_in_classes;
     converter.built_in_functions = built_in_functions;
     converter.library = library;
@@ -908,6 +910,11 @@ impl<'c> Converter<'c> {
             helpers::date_time_lines(),
         );
         shapes.push(date_time.clone());
+        // The enum of Spatie's `Optional`, kept where an item names it (P2R-360).
+        shapes.push((
+            crate::types::OPTIONAL.to_owned(),
+            optionals::optional_lines(),
+        ));
         let mut shapes = shapes::named(shapes, &items, &main);
         if self
             .helpers

@@ -164,6 +164,11 @@ impl Converter<'_> {
         binary: &Binary<'_>,
         negated: bool,
     ) -> Option<(RExpr, RustType)> {
+        if let Expression::Identifier(name) = binary.rhs
+            && self.names_optional(name)
+        {
+            return self.instance_of_optional(binary, negated);
+        }
         let date = RustType::Option(Box::new(RustType::DateTime));
         let value = self.expression(binary.lhs);
         let class = self.names_date_time(binary.rhs);

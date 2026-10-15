@@ -277,6 +277,14 @@ impl Converter<'_> {
                 );
                 return None;
             }
+            // `null` for `T|Optional|null` is a value that is there (P2R-168, P2R-361).
+            Expression::Literal(Literal::Null(_)) if matches!(ty, RustType::Optional(_)) => (
+                RExpr::Call(
+                    format!("{}::Present", crate::types::OPTIONAL),
+                    vec![RExpr::None],
+                ),
+                ty.clone(),
+            ),
             Expression::Literal(Literal::Null(_)) => (RExpr::None, ty.clone()),
             Expression::Array(_) if matches!(inner, RustType::Vec(_)) => {
                 (RExpr::List(Vec::new()), inner.clone())

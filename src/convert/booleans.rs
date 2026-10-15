@@ -149,6 +149,7 @@ pub(super) fn refusal(
         RustType::Vec(_) => Some("a comparison of lists is not supported in version 1 (P2R-07)"),
         // Only nulls.rs compares `Option` values, by their inner types.
         RustType::Option(_) => Some("only === and !== compare values that may be null (P2R-103)"),
+        RustType::Optional(_) => Some(super::optionals::OPTIONAL_USE),
         // PHP compares enum cases by identity with ==, != and their strict forms.
         RustType::Enum(_) if ordering => {
             Some("<, >, <= and >= on enums are not supported (P2R-112)")

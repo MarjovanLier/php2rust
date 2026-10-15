@@ -28,6 +28,8 @@ const TAKEN: &[&str] = &[
     "IndexMap",
     // The struct of `DateTime` (P2R-330).
     "PhpDateTime",
+    // The enum of Spatie's `Optional` (P2R-360).
+    "PhpOptional",
 ];
 
 /// Names PHP reserves, its keywords and type names, which no enum may take; each one fails

@@ -491,5 +491,7 @@ fn php_type(member: &RustType) -> &'static str {
             "object"
         }
         RustType::Option(inner) => php_type(inner),
+        // No union holds a `PhpOptional` (P2R-360).
+        RustType::Optional(_) => "object",
     }
 }

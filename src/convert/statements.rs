@@ -256,6 +256,10 @@ impl Converter<'_> {
                 self.refuse(value, "echo of a DateTime is not supported (P2R-330)");
                 None
             }
+            _ if matches!(ty, RustType::Optional(_)) => {
+                self.refuse(value, super::optionals::OPTIONAL_USE);
+                None
+            }
             _ => {
                 self.refuse(value, "echo of a float or bool is not supported (P2R-46)");
                 None

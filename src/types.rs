@@ -32,6 +32,9 @@ pub struct TypeNames {
     unions: RefCell<BTreeMap<String, Vec<RustType>>>,
     /// The Rust names of the enums without cases, which no shape may hold (P2R-200).
     empty: HashSet<String>,
+    /// True when an included file declares Spatie's `Optional` with the shape of
+    /// laravel-data 4.18 (P2R-360).
+    pub optional: bool,
 }
 
 impl TypeNames {
@@ -134,6 +137,8 @@ pub enum RustType {
     Map(Box<RustType>, Box<RustType>),
     /// PHP's `DateTime`, as the helper struct `PhpDateTime` (P2R-330).
     DateTime,
+    /// `T|Optional`, Spatie's marker of a value left out, as `PhpOptional<T>` (P2R-360).
+    Optional(Box<RustType>),
 }
 
 impl RustType {
@@ -151,6 +156,7 @@ impl RustType {
             }
             Self::Map(key, value) => format!("IndexMap<{}, {}>", key.owned(), value.owned()),
             Self::DateTime => DATE_TIME.into(),
+            Self::Optional(inner) => format!("{OPTIONAL}<{}>", inner.owned()),
         }
     }
 
@@ -161,18 +167,19 @@ impl RustType {
             Self::String => "&str".into(),
             Self::Vec(element) => format!("&[{}]", element.owned()),
             Self::Class(name) | Self::Shape(name) | Self::Union(name) => format!("&{name}"),
-            Self::Map(..) => format!("&{}", self.owned()),
+            Self::Map(..) | Self::Optional(_) => format!("&{}", self.owned()),
             Self::Option(inner) => format!("Option<{}>", inner.parameter()),
             other => other.owned(),
         }
     }
 
-    /// True for a struct: a class, an array shape, a union enum or a map, which copies
-    /// with `.clone()` and is borrowed as `&S` (P2R-132, P2R-201, P2R-232, P2R-240).
+    /// True for a struct: a class, an array shape, a union enum, a map or a `PhpOptional`,
+    /// which copies with `.clone()` and is borrowed as `&S` (P2R-132, P2R-201, P2R-232,
+    /// P2R-240, P2R-360).
     pub fn is_struct(&self) -> bool {
         matches!(
             self,
-            Self::Class(_) | Self::Shape(_) | Self::Union(_) | Self::Map(..)
+            Self::Class(_) | Self::Shape(_) | Self::Union(_) | Self::Map(..) | Self::Optional(_)
         )
     }
 
@@ -201,7 +208,7 @@ impl RustType {
         match self {
             Self::I64 | Self::F64 | Self::Bool | Self::Enum(_) | Self::DateTime => true,
             Self::String | Self::Vec(_) | Self::Class(_) | Self::Shape(_) | Self::Union(_) => false,
-            Self::Map(..) => false,
+            Self::Map(..) | Self::Optional(_) => false,
             Self::Option(inner) => inner.is_copy(),
         }
     }
@@ -210,7 +217,10 @@ impl RustType {
     fn holds_class(&self) -> bool {
         match self {
             Self::Class(_) => true,
-            Self::Vec(inner) | Self::Option(inner) | Self::Map(_, inner) => inner.holds_class(),
+            Self::Vec(inner)
+            | Self::Option(inner)
+            | Self::Map(_, inner)
+            | Self::Optional(inner) => inner.holds_class(),
             _ => false,
         }
     }
@@ -224,7 +234,11 @@ pub fn built(ty: &RustType) -> bool {
         RustType::I64 | RustType::F64 | RustType::Bool | RustType::String => true,
         RustType::Enum(_) | RustType::Class(_) | RustType::Shape(_) | RustType::Union(_) => true,
         RustType::DateTime => true,
-        RustType::Vec(element) | RustType::Map(_, element) => built(element),
+        RustType::Optional(inner) => built(inner),
+        // A list or map of `PhpOptional` waits for a later slice (P2R-360).
+        RustType::Vec(element) | RustType::Map(_, element) => {
+            built(element) && !matches!(**element, RustType::Optional(_))
+        }
         RustType::Option(inner) => !matches!(**inner, RustType::Option(_)) && built(inner),
     }
 }
@@ -252,9 +266,14 @@ pub fn rust_type(union: &TUnion, enums: &TypeNames) -> Result<RustType, String> 
     let mut found: Option<RustType> = None;
     let mut nullable = false;
     let mut falsy = false;
+    let mut optional = false;
     for atomic in union.types.iter() {
         if matches!(atomic, TAtomic::Null) {
             nullable = true;
+            continue;
+        }
+        if is_optional(atomic, enums) {
+            optional = true;
             continue;
         }
         if matches!(
@@ -273,6 +292,26 @@ pub fn rust_type(union: &TUnion, enums: &TypeNames) -> Result<RustType, String> 
             return Err(unknown());
         }
         found = Some(this);
+    }
+    // `T|Optional` and `T|Optional|null` (P2R-360). `Option<PhpDateTime>` is
+    // `DateTime|false`, so a nullable `DateTime` stops here as everywhere. `true` or
+    // `false` alone would widen to a bool that PHP's type does not take whole.
+    if optional {
+        let truthy = union.types.iter().any(|atomic| {
+            matches!(
+                atomic,
+                TAtomic::Scalar(TScalar::Bool(TBool { value: Some(true) }))
+            )
+        });
+        return match found {
+            _ if falsy || truthy => Err(unknown()),
+            Some(RustType::DateTime) if nullable => Err(unknown()),
+            Some(ty) if nullable => {
+                Ok(RustType::Optional(Box::new(RustType::Option(Box::new(ty)))))
+            }
+            Some(ty) => Ok(RustType::Optional(Box::new(ty))),
+            None => Err(unknown()),
+        };
     }
     if falsy {
         // `DateTime|false`, what `DateTime::createFromFormat()` gives (P2R-330).
@@ -407,11 +446,25 @@ pub fn variant(ty: &RustType) -> String {
         | RustType::Union(name) => name.clone(),
         RustType::Option(inner) => variant(inner),
         RustType::DateTime => "DateTime".to_owned(),
+        RustType::Optional(_) => "Optional".to_owned(),
     }
 }
 
 /// The Rust name of the helper struct of PHP's `DateTime` (P2R-330).
 pub const DATE_TIME: &str = "PhpDateTime";
+
+/// The Rust name of the helper enum of Spatie's `Optional` (P2R-360).
+pub const OPTIONAL: &str = "PhpOptional";
+
+/// True for Spatie's `Optional` from an included file, which no class of the input
+/// shadows (P2R-360).
+pub fn is_optional(atomic: &TAtomic, enums: &TypeNames) -> bool {
+    let TAtomic::Object(TObject::Named(named)) = atomic else {
+        return false;
+    };
+    let key = named.name.as_bytes().to_ascii_lowercase();
+    enums.optional && key == b"spatie\\laraveldata\\optional" && !enums.contains_key(&key)
+}
 
 /// True for an array with known keys and no other elements, such as
 /// `array{year: string}`; `array{}`, whose `[]` widens to a list (P2R-21), has none.
@@ -577,6 +630,10 @@ fn map_with(
         _ => return Err(unknown()),
     };
     let value = value(&TUnion::from_vec(values))?;
+    // A map of `PhpOptional` waits for a later slice (P2R-360).
+    if matches!(value, RustType::Optional(_)) {
+        return Err("a map of Spatie's Optional is not supported yet (P2R-360)".into());
+    }
     Ok(RustType::Map(Box::new(key), Box::new(value)))
 }
 
@@ -626,6 +683,11 @@ fn shape_type(keyed: &TKeyedArray, enums: &TypeNames) -> Result<RustType, String
         if ty.holds_class() {
             return Err(
                 "an array shape that holds an object is not supported yet (P2R-200)".into(),
+            );
+        }
+        if matches!(ty, RustType::Optional(_)) {
+            return Err(
+                "an array shape that holds Spatie's Optional is not supported yet (P2R-360)".into(),
             );
         }
         // No value of such a shape could exist, so rustc rejects the code after it.
@@ -732,6 +794,10 @@ fn list_type(list: &TList, enums: &TypeNames) -> Option<RustType> {
         return None;
     }
     let element = rust_type(&TUnion::from_vec(members), enums).ok()?;
+    // A list of `PhpOptional` waits for a later slice (P2R-360).
+    if matches!(element, RustType::Optional(_)) {
+        return None;
+    }
     Some(RustType::Vec(Box::new(element)))
 }
 

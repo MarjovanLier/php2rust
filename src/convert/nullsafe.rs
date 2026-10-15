@@ -82,6 +82,10 @@ impl Converter<'_> {
                 );
             }
         };
+        // Mago types the read as `T|Optional|null`, which has no Rust form here (P2R-362).
+        if matches!(member_type, RustType::Optional(_)) {
+            return refused(self, super::optionals::OPTIONAL_USE);
+        }
         // An owned `Option` lends its value; a parameter already holds a reference, and a
         // Copy enum is passed by value.
         let lent = inner.is_copy()

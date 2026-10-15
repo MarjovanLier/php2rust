@@ -44,6 +44,9 @@ Output that holds a map uses the `indexmap` crate (`use indexmap::IndexMap;`). T
 `Cargo.toml` that builds it needs `indexmap = "2"` under `[dependencies]`; php2rust writes
 no `Cargo.toml`. With plain `rustc`, pass the built crate:
 `--extern indexmap=<path to libindexmap.rlib> -L dependency=<its deps directory>`.
+Output that calls `preg_replace()` or `preg_match()` uses the `regex` crate through
+`::regex::` paths, and needs `regex = "1"` in the same way (`--extern regex=<path to
+libregex.rlib>` with plain `rustc`).
 
 | Exit code | Meaning |
 |---|---|
@@ -52,7 +55,7 @@ no `Cargo.toml`. With plain `rustc`, pass the built crate:
 | 2 | The arguments are wrong, the file cannot be read, is not UTF-8 or is not valid PHP, rustfmt cannot be run, fails on the output or changes its own layout when run again, or the output cannot be written. For a directory: no `-o`, an `-o` directory that exists or sits inside the input, or no `.php` file. Nothing is written. |
 
 The output compiles with no warnings under `rustc --edition 2024 -D warnings` (given the
-`indexmap` crate for map output), and
+`indexmap` crate for map output and the `regex` crate for pattern output), and
 `rustfmt --edition 2024 --check` with the default configuration leaves it unchanged. Its
 layout is that of the rustfmt on `PATH`, so another rustfmt version may lay out the same
 code differently; the tests use the rustfmt of the pinned toolchain. Its first line is a
@@ -193,6 +196,15 @@ converts:
   element or none (keys 0, 1, 2), `$m = []`, `$m[k]`, `$m[k] = v`, `unset($m[k])`,
   `isset($m[k])`, `array_key_exists()`, `$m[k] ?? $d`, `count()` and `foreach` convert.
   A declared map may hold a union (`array<int|string, scalar>`).
+- `preg_replace(P, R, S) ?? 'literal'` and `preg_match(P, S)` read as a bool (a
+  condition, `!`, `&&`, `||`, or `=== 1`, `!== 0`, `=== 0` and `!== 1`), where `P` is a
+  string literal or class constant without the `u` flag, such as `'#\D#'` or
+  `'# {2,}#'`. The pattern becomes a `regex::bytes` pattern in `(?-u)` mode, which
+  matches bytes with ASCII classes as PCRE does without `u`, and the output holds the
+  helper `php_preg_replace` or `php_preg_match`. The pattern may use literals, `.`,
+  `\d \w \s \b` and their capitals, `\t \n \r \f \xhh`, classes with ranges and POSIX
+  names, `( )`, `(?: )`, `|`, the quantifiers and their lazy forms, `^`, `\A`, `\z`,
+  and `$` with the `m` flag; the flags `i`, `m` and `s`.
 
 ## What stops the conversion
 
@@ -217,6 +229,12 @@ the others are findings of the Mago analyser. In short:
   one of them, `explode()` with a limit or an empty separator, and any
   `sprintf()` format other than text, `%s`, `%d` and `%%`, or with an argument count
   that does not match.
+- For patterns: a pattern that is not a literal or a class constant, the `u` flag and
+  every flag other than `i`, `m` and `s`, `$` without `m`, `^` with `m`, look-around,
+  backreferences, `\v`, `\Z` and every form not listed above. `preg_replace()` without
+  `??`, with a default that is not a string literal, with a limit, with a pattern that
+  can match the empty string, or with `$` or `\` in the replacement. `preg_match()` with
+  matches, or with its result used any other way (`=== false`, `== 1`, stored).
 - A `?:` without its middle part (`$a ?: $b`), inside another `?:`, of lists, of a
   nullable string or list, or with a string arm that is a call, a joined string, or a
   property read or list element on a call or `new`.
@@ -400,7 +418,11 @@ php2rust refuses some valid PHP that version 1 converts in other forms:
   panics.
 - `substr()` or a string offset that cuts a character of more than one byte: PHP gives
   the raw bytes, Rust gives U+FFFD (three bytes) in their place, so later lengths,
-  comparisons and joins of that value differ too.
+  comparisons and joins of that value differ too. The same holds for a
+  `preg_replace()` that removes part of such a character.
+- A pattern that runs past PCRE's backtrack, recursion or JIT stack limit: PHP's
+  `preg_replace()` gives `null`, so `??` gives the default, and `preg_match()` gives
+  `false`. Rust's `regex` has no such limit and gives the full result.
 - `Suit::from()` with a value that no case has: PHP throws a `ValueError` (exit code 255
   when uncaught), Rust panics (exit code 101).
 - An `int` property that overflows in `+=`, `-=`, `*=`, `++` or `--`: PHP throws a

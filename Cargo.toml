@@ -23,3 +23,7 @@ mago-prelude = { version = "=1.55.0", features = ["build"] }
 mago-reporting = "=1.55.0"
 mago-span = "=1.55.0"
 mago-syntax = "=1.55.0"
+# The version the output's patterns are checked against when they convert (P2R-260); both
+# were already in the lockfile through Mago.
+regex = "=1.13.1"
+regex-syntax = "=0.8.11"

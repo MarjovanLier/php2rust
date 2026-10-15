@@ -121,6 +121,24 @@ impl Converter<'_> {
             Expression::Call(Call::Function(call)) if self.calls_built_in(call, b"in_array") => {
                 self.in_array(call, expression)
             }
+            Expression::Call(Call::Function(call))
+                if self.calls_built_in(call, b"preg_replace") =>
+            {
+                self.record_refused(expression);
+                self.refuse(
+                    expression,
+                    "preg_replace() converts only as preg_replace(P, R, S) ?? 'default' (P2R-261)",
+                );
+                None
+            }
+            Expression::Call(Call::Function(call)) if self.calls_built_in(call, b"preg_match") => {
+                self.record_refused(expression);
+                self.refuse(
+                    expression,
+                    "preg_match() converts only as a condition, or compared with === or !== to 0 or 1 (P2R-262)",
+                );
+                None
+            }
             Expression::Call(Call::Function(call)) if self.string_function_name(call).is_some() => {
                 self.string_function(call, expression)
             }

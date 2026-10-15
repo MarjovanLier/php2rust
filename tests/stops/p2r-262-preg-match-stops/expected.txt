@@ -1,0 +1,8 @@
+input.php:9:16: preg_match() converts only as a condition, or compared with === or !== to 0 or 1 (P2R-262)
+input.php:14:18: preg_match() converts only as a condition, or compared with === or !== to 0 or 1 (P2R-262)
+input.php:20:16: preg_match() converts with two arguments only (P2R-262)
+input.php:25:16: a named or spread argument of a built-in function is not supported (P2R-169)
+input.php:30:16: preg_match() converts only as a condition, or compared with === or !== to 0 or 1 (P2R-262)
+input.php:35:16: preg_match() converts only as a condition, or compared with === or !== to 0 or 1 (P2R-262)
+input.php:40:16: preg_match() converts only as a condition, or compared with === or !== to 0 or 1 (P2R-262)
+input.php:45:34: preg_match() converts on a string subject only (P2R-262)

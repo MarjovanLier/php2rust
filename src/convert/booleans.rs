@@ -10,6 +10,9 @@ impl Converter<'_> {
     /// A condition of `if`, `while` or `for`, or an operand of `&&`, `||` or `!`. PHP
     /// truthiness has no Rust form, so the value must be a bool (P2R-42).
     pub(super) fn condition(&mut self, expression: &Expression<'_>) -> Option<RExpr> {
+        if let Some(call) = self.preg_match_call(expression) {
+            return self.preg_match(call, expression);
+        }
         let (expr, ty) = self.expression(expression)?;
         if matches!(ty, RustType::Option(_)) {
             self.refuse(
@@ -57,6 +60,9 @@ impl Converter<'_> {
             BinaryOperator::Identical(_) | BinaryOperator::NotIdentical(_)
         );
         if let Some(converted) = self.null_comparison(binary, op, strict) {
+            return converted;
+        }
+        if strict && let Some(converted) = self.preg_match_comparison(binary, op) {
             return converted;
         }
         let left = self.expression(binary.lhs);

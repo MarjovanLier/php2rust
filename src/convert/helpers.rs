@@ -18,10 +18,12 @@ pub(super) enum Helper {
     PhpLcfirst,
     PhpReplace,
     PhpExplode,
+    PhpPregReplace,
+    PhpPregMatch,
 }
 
 impl Helper {
-    const ALL: [Helper; 11] = [
+    const ALL: [Helper; 13] = [
         Helper::CtypeDigit,
         Helper::PhpInt,
         Helper::PhpOffset,
@@ -33,6 +35,8 @@ impl Helper {
         Helper::PhpLcfirst,
         Helper::PhpReplace,
         Helper::PhpExplode,
+        Helper::PhpPregReplace,
+        Helper::PhpPregMatch,
     ];
 
     fn name(self) -> &'static str {
@@ -48,6 +52,8 @@ impl Helper {
             Helper::PhpLcfirst => "php_lcfirst",
             Helper::PhpReplace => "php_replace",
             Helper::PhpExplode => "php_explode",
+            Helper::PhpPregReplace => "php_preg_replace",
+            Helper::PhpPregMatch => "php_preg_match",
         }
     }
 
@@ -65,6 +71,8 @@ impl Helper {
             Helper::PhpLcfirst => PHP_LCFIRST,
             Helper::PhpReplace => PHP_REPLACE,
             Helper::PhpExplode => PHP_EXPLODE,
+            Helper::PhpPregReplace => PHP_PREG_REPLACE,
+            Helper::PhpPregMatch => PHP_PREG_MATCH,
         }
     }
 
@@ -220,4 +228,20 @@ const PHP_EXPLODE: &str = r#"fn php_explode(separator: &str, text: &str) -> Vec<
         "explode(): separator must not be empty"
     );
     text.split(separator).map(str::to_owned).collect()
+}"#;
+
+/// `preg_replace()` of a pattern without `u`, which PCRE matches on bytes with ASCII
+/// classes, as `regex::bytes` does in `(?-u)` mode; the replacement holds no group
+/// reference (P2R-261).
+const PHP_PREG_REPLACE: &str = r#"fn php_preg_replace(pattern: &str, replacement: &str, subject: &str) -> String {
+    let regex = ::regex::bytes::Regex::new(pattern).expect("php2rust checked this pattern");
+    let replacement = ::regex::bytes::NoExpand(replacement.as_bytes());
+    String::from_utf8_lossy(&regex.replace_all(subject.as_bytes(), replacement)).into_owned()
+}"#;
+
+/// `preg_match()` of such a pattern where its result is read as a bool (P2R-262).
+const PHP_PREG_MATCH: &str = r#"fn php_preg_match(pattern: &str, subject: &str) -> bool {
+    ::regex::bytes::Regex::new(pattern)
+        .expect("php2rust checked this pattern")
+        .is_match(subject.as_bytes())
 }"#;

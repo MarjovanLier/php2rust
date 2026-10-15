@@ -55,13 +55,14 @@ fn tool(args: &[&str], dir: &Path) -> Output {
     run(env!("CARGO_BIN_EXE_php2rust"), args, dir)
 }
 
-/// The rustc arguments that give output naming `IndexMap` its crate, built once from the
-/// support project, pinned to indexmap 2.14.2 (P2R-243). An unused `--extern` loads nothing.
-fn indexmap_args() -> &'static [String] {
+/// The rustc arguments that give output its crates, indexmap 2.14.2 for maps and regex
+/// 1.13.1 for patterns, built once from the support project (P2R-243, P2R-263). An unused
+/// `--extern` loads nothing.
+fn crate_args() -> &'static [String] {
     static ARGS: OnceLock<Vec<String>> = OnceLock::new();
     ARGS.get_or_init(|| {
-        let target = root().join("target").join("indexmap-support");
-        let manifest = root().join("tests/support/indexmap/Cargo.toml");
+        let target = root().join("target").join("output-crates");
+        let manifest = root().join("tests/support/crates/Cargo.toml");
         let build = run(
             "cargo",
             &[
@@ -77,30 +78,29 @@ fn indexmap_args() -> &'static [String] {
         );
         assert!(
             build.status.success(),
-            "cannot build indexmap for the map cases (P2R-243): {}",
+            "cannot build the crates of the map and pattern cases (P2R-243, P2R-263): {}",
             text(&build.stderr)
         );
         let deps = target.join("release").join("deps");
-        let rlibs: Vec<PathBuf> = fs::read_dir(&deps)
-            .expect("readable deps folder")
-            .map(|entry| entry.expect("readable deps entry").path())
-            .filter(|path| {
-                path.file_name()
-                    .and_then(|name| name.to_str())
-                    .is_some_and(|name| name.starts_with("libindexmap-") && name.ends_with(".rlib"))
-            })
-            .collect();
-        assert_eq!(
-            rlibs.len(),
-            1,
-            "expected one indexmap rlib, found {rlibs:?}"
-        );
-        vec![
-            "--extern".to_owned(),
-            format!("indexmap={}", rlibs[0].display()),
-            "-L".to_owned(),
-            format!("dependency={}", deps.display()),
-        ]
+        let mut args = Vec::new();
+        for name in ["indexmap", "regex"] {
+            let prefix = format!("lib{name}-");
+            let rlibs: Vec<PathBuf> = fs::read_dir(&deps)
+                .expect("readable deps folder")
+                .map(|entry| entry.expect("readable deps entry").path())
+                .filter(|path| {
+                    path.file_name()
+                        .and_then(|file| file.to_str())
+                        .is_some_and(|file| file.starts_with(&prefix) && file.ends_with(".rlib"))
+                })
+                .collect();
+            assert_eq!(rlibs.len(), 1, "expected one {name} rlib, found {rlibs:?}");
+            args.push("--extern".to_owned());
+            args.push(format!("{name}={}", rlibs[0].display()));
+        }
+        args.push("-L".to_owned());
+        args.push(format!("dependency={}", deps.display()));
+        args
     })
 }
 
@@ -272,7 +272,7 @@ fn case(dir: &Path, scratch: &Path) -> Result<(), String> {
     if !program {
         args.extend(["--crate-type", "lib"]);
     }
-    args.extend(indexmap_args().iter().map(String::as_str));
+    args.extend(crate_args().iter().map(String::as_str));
     args.push("expected.rs");
     let build = run("rustc", &args, dir);
     if !build.status.success() {
@@ -395,7 +395,7 @@ fn crate_case(dir: &Path, scratch: &Path) -> Result<(), String> {
         "-o",
         target,
     ];
-    args.extend(indexmap_args().iter().map(String::as_str));
+    args.extend(crate_args().iter().map(String::as_str));
     args.push("expected/lib.rs");
     let build = run("rustc", &args, dir);
     if !build.status.success() {

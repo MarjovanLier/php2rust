@@ -1,12 +1,14 @@
-# Builds the indexmap crate that map output names, so the folder tests can compile it with
-# plain rustc and --extern (P2R-243). Not part of the php2rust package.
+# Builds the crates that output names, indexmap for maps and regex for patterns, so the
+# folder tests can compile it with plain rustc and --extern (P2R-243, P2R-263). Not part
+# of the php2rust package.
 [package]
-name = "indexmap-support"
+name = "output-crates"
 version = "0.1.0"
 edition = "2024"
 publish = false
 
 [dependencies]
 indexmap = "=2.14.2"
+regex = "=1.13.1"
 
 [workspace]

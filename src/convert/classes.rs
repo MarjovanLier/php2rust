@@ -101,6 +101,8 @@ pub(super) struct ConstantInfo {
     line: String,
     /// The value of an int constant, which P2R-50 knows as it knows a literal.
     known: Option<i64>,
+    /// The value of a string constant, which a pattern reads (P2R-260).
+    text: Option<String>,
 }
 
 impl Converter<'_> {
@@ -1128,12 +1130,17 @@ impl Converter<'_> {
                 RustType::I64 => printer::literal_value(&value),
                 _ => None,
             };
+            let text = match value {
+                RExpr::Str(text) => Some(text),
+                _ => None,
+            };
             constants.push(ConstantInfo {
                 php_name: item.name.value.to_vec(),
                 rust_name,
                 ty,
                 line,
                 known,
+                text,
             });
         }
         let refused: Vec<Vec<u8>> = members
@@ -1241,6 +1248,18 @@ impl Converter<'_> {
             None => RExpr::Path(path),
         };
         Some((read, constant.ty.clone()))
+    }
+
+    /// The value of the string constant that `access` reads, taken from its declaration,
+    /// where Mago's literal type would follow a docblock `@var` (P2R-260).
+    pub(super) fn constant_text(&self, access: &ClassConstantAccess<'_>) -> Option<String> {
+        let ClassLikeConstantSelector::Identifier(name) = &access.constant else {
+            return None;
+        };
+        let key = self.class_key(access.class)?;
+        let class = self.classes.iter().find(|c| c.key == key)?;
+        let constant = class.constants.iter().find(|c| c.php_name == name.value)?;
+        constant.text.clone()
     }
 
     /// The type of `Name` read through the class or enum at `class`: a case gives the enum,

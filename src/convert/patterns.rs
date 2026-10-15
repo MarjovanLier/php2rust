@@ -212,6 +212,13 @@ pub(super) fn rust_pattern(php: &[u8]) -> Result<Pattern, String> {
     if !php.iter().all(|byte| (0x20..=0x7e).contains(byte)) {
         return Err(problem("only printable ASCII bytes"));
     }
+    // A two-letter class of 4 bytes compiles to 33 in PCRE, which rejects a pattern over
+    // 64 KiB: 1990 copies of `[ab]` fail in PHP.
+    if php.len() > 4096 {
+        return Err(problem(
+            "4096 bytes at most, because PCRE rejects a pattern whose compiled form passes 64 KiB",
+        ));
+    }
     let (body, flags) = split(php)?;
     if !flags.iter().all(|flag| b"ims".contains(flag)) {
         return Err(problem("the flags i, m and s only"));
@@ -607,6 +614,8 @@ mod tests {
         ] {
             assert!(text(php).is_err(), "{php} converted");
         }
+        assert!(text(&format!("/{}/", "[ab]".repeat(1990))).is_err());
+        assert!(text(&format!("/{}/", "[ab]".repeat(1000))).is_ok());
     }
 
     #[test]

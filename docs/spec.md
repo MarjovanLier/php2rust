@@ -109,7 +109,7 @@ is in both engines. Section 28 (maps as union members, and shapes as
 maps) was written on 15 Oct 2026; it changes P2R-07, P2R-60, P2R-233,
 P2R-240, P2R-250 and the roadmap of section 10. Section 29 (traits with
 constants, string map constants and `strtr`) was written on 15 Oct 2026;
-it changes P2R-07, P2R-110, P2R-140, P2R-156, P2R-173, P2R-175, P2R-188
+it changes P2R-07, P2R-110, P2R-130, P2R-156, P2R-173, P2R-175, P2R-188
 and the roadmap of section 10.
 
 php2rust converts typed PHP source into normal, readable Rust (`Vec`,
@@ -2625,8 +2625,8 @@ forms unblock `searchWords`, `utf8Ansi` and `removeAccents`.
   int, float or constant key, or with a key or value that is not a
   single- or double-quoted string literal (heredoc and nowdoc included);
   an empty key, which `strtr` ignores with a warning; a key that
-  appears twice, compared by its string value, which Mago also reports
-  (P2R-11); and an empty array.
+  appears twice, compared by its string value (Mago reports a repeated key
+  only in a literal inside a body); and an empty array.
 - **P2R-282** `strtr($s, C)`, where `$s` is a string and `C` reads a
   constant of P2R-281 (`self::C`, `static::C` or `Name::C`, `Name` a class
   or enum, never a trait, whose trait constant PHP does not let be read

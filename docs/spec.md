@@ -1663,8 +1663,9 @@ string}`), and keeps an object that may be missing in a nullable property
   `lib.rs` after its `use` lines (P2R-172). The empty array `array{}` keeps
   P2R-21. These stop the conversion, with a problem at a place whose type
   maps to the shape: a shape with an integer key (PHP casts the key `'1'`
-  to an int), a key that names a class constant, an empty key, an optional
-  key or a general type; a key whose snake_case name has no Rust form
+  to an int), a key that names a class constant, an empty key or an
+  optional key; a general key and value type beside the keys makes the
+  type a map (P2R-240); a key whose snake_case name has no Rust form
   (P2R-30); two keys of one shape that give one field name; a value type
   that does not convert (P2R-22); a value type that is or holds a class (a
   later slice); a value of an enum without cases, because no value of the
@@ -2162,7 +2163,10 @@ application's `array<string, mixed>` values keep P2R-22.
   keys (`array<K, V>`, `non-empty-array<K, V>`) MUST map to a map type:
   `IndexMap<i64, V>` when `K` is `int`, and `IndexMap<String, V>` when `K`
   is `string`, `int|string` or `array-key`, where `V` is the Rust type of
-  the value type (P2R-20). A map behaves as a value of a shape type for
+  the value type (P2R-20). The type Mago gives a map after a write by a
+  literal key, which names that key beside the key and value types
+  (`array{'z': int, ...<string, int>}`), maps the same way, with the
+  named keys and their values counted in. A map behaves as a value of a shape type for
   copying and lending (P2R-201, P2R-204): a parameter becomes
   `&IndexMap<K, V>`, or `Option<&IndexMap<K, V>>` for a nullable map lent
   with `.as_ref()`, an owned map is returned, and P2R-26 copies a map with
@@ -2187,7 +2191,10 @@ application's `array<string, mixed>` values keep P2R-22.
   `IndexMap::from([(key, value), ..])` in source order, so a key that
   repeats at run time (`[$a => 1, $b => 2]` with `$a` equal to `$b`)
   keeps its first position and its last value, as in PHP; `[]` there
-  converts to `IndexMap::new()`. Each key and each value converts as a
+  converts to `IndexMap::new()`. `$m = []` on a variable takes its map
+  type from the other reads and writes of the variable and the declared
+  types it flows into, as P2R-21 gives a list type, and converts to
+  `IndexMap::new()`. Each key and each value converts as a
   value assigned to a variable of `K` or `V` (P2R-25, P2R-26, P2R-102), so
   a key is owned: a string literal as `String::from("k")`, a `&str`
   parameter as `p.to_string()`. An int key of an `IndexMap<String, V>`
@@ -2203,8 +2210,10 @@ application's `array<string, mixed>` values keep P2R-22.
   int (P2R-202); and a literal key that appears twice, which Mago reports
   (P2R-11). An array literal whose type Mago gives as a shape where no map
   type is needed stays a shape (P2R-202).
-- **P2R-242** These forms MUST convert on a map `$m`, a variable,
-  parameter or property. A lookup takes the key `&k` borrowed: a string
+- **P2R-242** These forms MUST convert on a map `$m`: the reads on a
+  variable, parameter or property, and the writes (`$m[k] = v;` and
+  `unset`) on a variable or parameter. A lookup takes the key `&k`
+  borrowed: a string
   literal as it is (`"k"`), a `&str` parameter as it is, a `String`
   variable as `&s`, an int key of an `IndexMap<String, V>` as
   `&(n).to_string()` (a literal by P2R-241: `"16"`), and an int key of an
@@ -2240,8 +2249,10 @@ application's `array<string, mixed>` values keep P2R-22.
   the keys; a compound assignment, `++`, `--` or `??=` on an element
   (`$m[k] += 1`); a comparison of two maps; a key of another type, a
   string key of an `IndexMap<i64, V>` and a key of a union type (P2R-241);
-  an element read or write on a map that may be null (P2R-106); and a
-  `foreach` over a map whose body changes the map.
+  an element read or write on a map that may be null (P2R-106); a write
+  or `unset` of an element of a map property (a later slice); `unset` of
+  anything but a map element; and a `foreach` over a map whose body
+  changes the map.
 - **P2R-243** A map case MUST build with plain `rustc` given the
   `indexmap` crate (`--extern indexmap=<rlib>` and
   `-L dependency=<deps folder>`), and the tests MUST build that crate,

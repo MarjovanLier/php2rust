@@ -705,7 +705,11 @@ Sections 3 to 9 apply to nullable values unless this section says otherwise.
   (`Exception`, `Countable`), which PHP rejects, compared by the fully
   qualified name (P2R-151); the other name checks here compare the short
   name, in any namespace. Mago's parser accepts a
-  keyword there, so the tool checks the name itself.
+  keyword there, so the tool checks the name itself. The built-in names
+  are those of Mago 1.55's stubs, which lack some class-likes PHP 8.5 has
+  (`ClosedGeneratorException`, `Dom\DOMException`, `Pdo\Odbc` and others,
+  some only with an extension loaded); a name of those converts, where PHP
+  stops with "Cannot redeclare". That is a known limit.
 - **P2R-112** An enum type `E` MUST map to the Rust enum `E` (P2R-20), passed
   and returned by value; `?E` maps to `Option<E>` (P2R-100) and `list<E>` to
   `Vec<E>`. A case `E::Name` MUST convert to `E::Name`. An enum value is
@@ -1248,8 +1252,10 @@ file. Converting several files together is a later slice.
   class or enum with the same Rust name (`X` and `x`); a constant whose
   Rust name equals the Rust name of a case of its enum (`case X` and
   `const x`), or whose PHP name is the name of a case (PHP rejects it, and
-  Mago does not report it); a constant named `class` in any letter case,
-  and a constant that is `final` and `private`, which PHP rejects and Mago
+  Mago does not report it); a constant named `class` in any letter case, a
+  constant that is `final` and `private`, and a constant with modifiers
+  other than one visibility and one `final` (`static`, `readonly`,
+  `abstract`, two visibilities, `final final`), which PHP rejects and Mago
   does not report; `C::class`; `$o::NAME`; and a
   constant declared at the
   top level or with `define()` (P2R-07). A constant is never a `match`
@@ -2590,10 +2596,10 @@ forms unblock `searchWords`, `utf8Ansi` and `removeAccents`.
   names a class) MUST hold each constant of the trait as if its body
   declared it there, by P2R-156 and P2R-281, in the order of the `use`
   statements and then the trait's own order, before the constants the
-  body declares. The trait itself writes nothing, and a trait that no
-  class or enum uses writes nothing either: its constants are converted,
-  and checked by the tool, only where a class or enum uses it (Mago still
-  checks them, P2R-11). For P2R-33, P2R-110, P2R-172 and P2R-175 a trait
+  body declares. The trait itself writes nothing. A trait that no class
+  or enum of the input uses stops, because the tool checks a trait's
+  constants only where it copies them, while PHP checks them when it reads
+  the file. For P2R-33, P2R-110, P2R-172 and P2R-175 a trait
   declaration counts as a declaration, not a statement, so a file with a
   trait may still be a library, and a namespace that declares only traits
   gets no module. These stop the conversion: a trait with a method, a
@@ -2606,7 +2612,8 @@ forms unblock `searchWords`, `utf8Ansi` and `removeAccents`.
   that order (the class's own constant after a trait's); a trait whose
   fully qualified name equals, ignoring letter case, that of another
   trait, class or enum of the input (P2R-173), or of a class-like PHP has
-  built in (P2R-111); a class that uses a trait after a statement outside
+  built in, and a trait with a name PHP reserves (`Never`, `Mixed`, a
+  keyword) (P2R-111); a class that uses a trait after a statement outside
   functions, because PHP declares it only when execution reaches it
   (P2R-130); and a trait declared inside a function or block.
 - **P2R-281** A class, enum or trait constant whose value is an array

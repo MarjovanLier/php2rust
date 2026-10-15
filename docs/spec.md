@@ -1665,8 +1665,9 @@ converts those forms.
   `php_lcfirst`, `php_replace`, `php_explode`, `php_preg_replace`,
   `php_preg_match` (P2R-261, P2R-262), `php_strtr` (P2R-282), `php_charmask`,
   `php_trim_chars`, `php_ltrim_chars`, `php_rtrim_chars` (P2R-291),
-  `php_checkdate` (P2R-292), `php_ucwords` (P2R-303) and
-  `php_preg_replace_callback` (P2R-302), `php_str_replace` (P2R-310), each written only when the
+  `php_checkdate` (P2R-292), `php_ucwords` (P2R-303),
+  `php_preg_replace_callback` (P2R-302) and `php_str_replace` (P2R-310),
+  each written only when the
   output calls it, and P2R-31 covers their names. A case folder runs each of
   them on many values against PHP (P2R-72).
 
@@ -2170,7 +2171,8 @@ inside a list or a shape field waits for a later slice.
   P2R-233, P2R-251 and P2R-310. Every other use stops the conversion: `echo`, interpolation and
   joining, arithmetic, every comparison other than with the literal
   `null`, a condition, a cast other than `(string)`, the argument of a
-  built-in function other than those of P2R-233 and P2R-251, `??` with a default of
+  built-in function other than those of P2R-233 and P2R-251 and the
+  search and replacement of P2R-310, `??` with a default of
   another type, a `foreach`, an element read, a property read or method
   call, and the subject of a `match`.
 - **P2R-233** `is_scalar($v)`, `gettype($v)` and `(string) $v`, where `$v`
@@ -2894,9 +2896,11 @@ array replacement.
   (`Vec<String>`) gives `&xs.iter().map(String::as_str).collect::<Vec<_>>()`
   and `false`; a map of strings (P2R-240) gives its values in order,
   `&m.values().map(String::as_str).collect::<Vec<_>>()`, and `false`; and
-  a value of a union of P2R-230 whose members are a string and one list
-  or map of strings gives a `match` with one arm per member and
-  `matches!(v, U::String(_))`. A union argument is read twice, so it must
+  a value `v` of a union `U` of P2R-230 whose members are a string and
+  one list or map of strings gives `&match &v { U::String(text) =>
+  vec![text.as_str()], U::List(list) => list.iter().map(String::as_str)
+  .collect() }`, with `U::Map(map) => map.values()` in the second arm for
+  a map, and `matches!(&v, U::String(_))`. A union argument is read twice, so it must
   be a literal, a constant, a variable, a parameter or a chain of property
   reads on one of them or on `$this` (P2R-186), and this is an exception
   to P2R-232. Three strings still convert by P2R-185. The helper panics,
@@ -2909,17 +2913,20 @@ array replacement.
   `TypeError`; a subject that is not a string; an element that is not a
   string or a spread in a list literal; an array literal with keys, which
   P2R-202 stops (passing its values in order would differ where two keys
-  are equal at run time); a union with other members; and a fourth
-  argument. P2R-188 places `php_str_replace` after
+  are equal at run time); a legacy `array(..)` literal, which P2R-07
+  stops; a union with other members; a union argument of any other form;
+  and a fourth argument. P2R-188 places `php_str_replace` after
   `php_preg_replace_callback`, and P2R-31 covers its name.
 - **P2R-311** `strtr($s, [k1 => v1, ..])`, with an array literal whose
   every element has a key and a value of type string, MUST convert to
   `php_strtr(s, &[(k1, v1), ..])` with each key and value lent as a
-  `&str`, a call of the helper of P2R-282. A key that repeats at run time
+  `&str`, a call of the helper of P2R-282. `strtr($s, [])` converts to
+  `php_strtr(s, &[])` and gives the text unchanged. A key that repeats at run time
   keeps its last value, as in PHP, because the helper takes the last of
   equal longest keys. These stop the conversion: an element without a
   key, a key of type int (a literal or not), a key or value of another
-  type, a literal empty key (for P2R-281's reason), and a spread. A key
+  type, a literal empty key (for P2R-281's reason), a spread, and a
+  legacy `array(..)` literal, which P2R-282 stops. A key
   that is empty at run time, with a text that is not empty: PHP warns and
   ignores it, Rust ignores it without the warning (P2R-60).
 

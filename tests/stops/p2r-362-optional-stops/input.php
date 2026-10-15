@@ -82,3 +82,42 @@ function plain(string $text): bool
 {
     return $text instanceof Optional;
 }
+
+// A property read that instanceof narrows keeps its PhpOptional type.
+function prefixed(Named $n): string
+{
+    if ($n->name instanceof Optional) {
+        return '';
+    }
+    return '<' . $n->name;
+}
+
+function appended(Named $n): string
+{
+    $text = '<';
+    if (!$n->name instanceof Optional) {
+        $text .= $n->name;
+    }
+    return $text;
+}
+
+function listed(Named $n): string
+{
+    if ($n->name instanceof Optional) {
+        return '';
+    }
+    return implode(',', [$n->name]);
+}
+
+function fallback(Named $n): string
+{
+    $name = $n->name;
+    return $name ?? 'none';
+}
+
+// A T|Optional parameter is lent, so it cannot be assigned.
+function cleared(string|Optional $value): bool
+{
+    $value = new Optional();
+    return $value instanceof Optional;
+}

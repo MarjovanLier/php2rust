@@ -46,3 +46,23 @@ function other(): string|Optional
 {
     return \Illuminate\Support\Optional::create();
 }
+
+// A variable keeps one type, so a later null does not go into it.
+function blanked(string|Optional|null $email, bool $wipe): string|Optional|null
+{
+    $copy = $email;
+    if ($wipe) {
+        $copy = null;
+    }
+    return $copy;
+}
+
+// The first write of a variable gives a match no type for new Optional.
+function chosen(int $k): bool
+{
+    $v = match ($k) {
+        1 => Optional::create(),
+        default => 'a',
+    };
+    return $v instanceof Optional;
+}

@@ -1,0 +1,1 @@
+input.php:10:16: the type Spatie\LaravelData\Optional|string has no Rust type (P2R-22)

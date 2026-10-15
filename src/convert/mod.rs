@@ -181,6 +181,7 @@ fn analyse(
     }
     // Each included file enters the codebase as vendored code, which never replaces a
     // built-in or an input symbol; its own arena goes once it is scanned (P2R-340).
+    let mut included_ids: HashSet<FileId> = HashSet::new();
     for included in included {
         let file = File::new(
             Cow::Owned(included.name.into_bytes()),
@@ -188,6 +189,7 @@ fn analyse(
             None,
             Cow::Owned(included.source),
         );
+        included_ids.insert(file.id);
         let arena = LocalArena::new();
         let program = parse_file(&arena, &file);
         if !program.errors.is_empty() {
@@ -237,7 +239,7 @@ fn analyse(
                 .filter(|issue| reported(issue))
                 .filter(|issue| !library || issue.code.as_deref() != Some("duplicate-definition"))
                 .filter_map(mago_problem)
-                .filter(|problem| files.iter().any(|input| input.id == problem.file)),
+                .filter(|problem| !included_ids.contains(&problem.file)),
         );
         analysed.push(Analysed {
             file: file.id,

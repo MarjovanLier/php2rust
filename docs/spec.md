@@ -184,7 +184,9 @@ call `uuid()` without a name and write `: void` on their closures, that
 an accessor, a `casts()` method or an observer changes what an attribute
 read gives, that PHP reads a boolean or decimal column differently per
 database driver, and that `foreignIdFor` takes its column from the
-parent's key.
+parent's key. Section 42 (creating and finding models) was written on 16
+Oct 2026; it changes P2R-07, P2R-75, P2R-401, P2R-404, the checklist
+and the roadmap of section 10.
 
 php2rust converts typed PHP source into normal, readable Rust (`Vec`,
 `String`, `i64`), without AI. It reads PHP with the Mago crates, uses Mago's
@@ -234,7 +236,7 @@ requirement IDs.
   the same stdout bytes, the same output file bytes and the same stderr
   bytes.
 - **P2R-07** Only the constructs that sections 3 to 5, 11 to 19 and 21 to
-  41 list as converting may convert. Any other construct MUST stop the conversion,
+  42 list as converting may convert. Any other construct MUST stop the conversion,
   which means it is reported as a problem under P2R-03. Examples that stop
   in version 1 (section 16 converts `namespace`, `use` and class
   constants, and section 17 two casts):
@@ -612,7 +614,7 @@ requirement IDs.
   stderr MUST equal `expected.txt`, its stdout MUST be empty, no output file
   may be created, and every file in the folder MUST be unchanged.
 - **P2R-75** Every requirement ID from P2R-07 to P2R-49 and from P2R-100 to
-  P2R-409 MUST appear in the name of at least one case or stop folder. A
+  P2R-414 MUST appear in the name of at least one case or stop folder. A
   test MUST check this from the folder names.
 - **P2R-76** One command named in the README MUST rewrite every `expected.rs`
   and `expected.txt` from the current tool output; CI MUST NOT run it. A
@@ -697,9 +699,10 @@ Each milestone gets its own requirements in this file when its work starts.
   own interfaces as traits (section 38); the input's own exception
   classes (section 40); Eloquent models as structs of the columns the
   migrations declare (section 41), then, on 16 Oct 2026 decided under the
-  same direction, their `create`, `query()->where(..)->sole()` and
-  `find()` on a store that the output holds in memory, checked against a
-  PHP stand-in of the same behaviour, with a database behind it later;
+  same direction, their `create`, `find()` and `where(..)->first()` on a
+  store that the output holds in memory, checked against a PHP stand-in
+  of the same behaviour (section 42), then `sole()` with its exceptions,
+  with a database behind it later;
   unions as list values; values
   of interface types, interface inheritance and class inheritance;
   closures.
@@ -3980,7 +3983,8 @@ and its gain is typed attribute reads.
   migrations create both names, and Laravel then reads the other table.
   A model
   MUST convert to `#[derive(Clone, Debug)] pub struct <Name> { pub
-  <field>: <type>, .. }`, with no `impl` block, `final` or not: one field
+  <field>: <type>, .. }`, with no `impl` block other than the store of
+  P2R-410, `final` or not: one field
   per column of its table in the order of P2R-400, named by P2R-30 from
   the column name, of the column's Rust type after P2R-402, inside
   `Option` when the column is nullable. Left out of the struct are a
@@ -4063,7 +4067,85 @@ and its gain is typed attribute reads.
   compound assignment, `++` or `--`, `$m->c[] = ..`); `new` of a model,
   which creates no model in this section; and every method call on a
   model or static call of a model class (`$m->save()`, `M::create(..)`,
-  `M::query()`), by P2R-135 and P2R-153.
+  `M::query()`), by P2R-135 and P2R-153, other than the forms of section
+  42.
+
+## 42. Creating and finding models (milestone 2, slice 32)
+
+After section 41, 14 files of the app stop on one call only: an action's
+`M::create([..])` or a query's `find($id)`, `where(..)->first()` or
+`where(..)->sole()`. This section converts `create`, `find` and
+`where(..)->first()` against a store that the output keeps in memory: one
+list of rows per model and thread, empty when the thread starts, as a
+database that holds no rows yet. The output connects to no database. The
+store answers as an empty SQLite table without constraints would, and
+these are stated limits, not checked against a real database: it holds
+no row that a migration or another process inserts (P2R-400 skips seed
+rows); it enforces no unique, foreign key or other constraint, where a
+database would refuse the row; it compares strings byte for byte, where
+MySQL's default collation compares them without case; and it keeps rows
+in creation order, which SQL does not promise without `orderBy`. The
+converted code makes the same calls with the same values as the PHP
+code. `sole()`, `update()`, `save()`, `delete()`, relations and every
+other query method still stop.
+
+- **P2R-410** A model with a struct (P2R-401) whose rows the input creates
+  or finds MUST convert with an `impl` block after its struct. The block
+  holds the model's store, a `thread_local!` list of rows inside a private
+  function `store_rows`, and the public functions `store_create`,
+  `store_find` and `store_first`, which the forms below call; it
+  appears only for a model whose rows the input creates or finds. The
+  store of a thread is empty when the thread starts.
+- **P2R-411** `M::create([..])` and `M::query()->create([..])`, where `M`
+  is a model with a struct and `query()` has no arguments, with a literal
+  map, MUST convert to `M::store_create(M { .. })`, which adds the row and
+  gives back its struct, when all of these hold:
+  - Each key is a string literal that names a field of the struct other
+    than `id`, at most once.
+  - Each value has the field's PHP type (`int` for `i64`, `string` for
+    `String`, `bool` for `bool`; for a nullable field also `null` or the
+    nullable type), because Laravel keeps a created model's attribute as
+    given and casts it only on a read (a string given for an int column
+    reads as a string).
+  - Each field other than `id` is named, except a nullable field whose
+    column has no default (`default(..)`, `useCurrent()`), which gets
+    null: for a column with a default the database stores the default
+    while the created model reads null.
+  - The table has no column that is neither nullable nor has a default
+    and is not a field (a date or decimal column), other than `id`, and
+    `created_at` and `updated_at` while the model keeps its timestamps,
+    because the database would refuse the row.
+  - Each key is fillable: the model declares `$fillable` with a literal
+    list that holds the key, or `$guarded = []`. Laravel throws
+    `MassAssignmentException` for a fully guarded model, and for a key
+    outside `$fillable` in strict mode (`Model::shouldBeStrict()`, which
+    the app sets), and drops that key otherwise.
+
+  The values are computed in the order the map gives them. The new row's
+  `id` is one more than the number of rows the store holds, as an empty
+  table's auto-increment gives.
+- **P2R-412** `M::find($id)` and `M::query()->find($id)`, with one argument
+  of type `int`, MUST convert to `M::store_find(<id>)`, which gives a
+  copy of the row with that `id` as `Option<M>`, or `None` when the
+  store holds none.
+- **P2R-413** `M::query()`, followed by one or more `->where('<c>', $v)`
+  and then `->first()`, MUST convert to a block that computes each value
+  once, in order, and then calls `M::store_first(..)` with a closure that
+  compares a row's fields with them, which gives a copy of the first row
+  in creation order that matches every `where`, as `Option<M>`. Each
+  `where` has two arguments: a string literal that names a field of the
+  struct, and a value of the field's PHP type; for a nullable field the
+  value may also be `null` or of the nullable type, and null matches a
+  row whose field is null, as Laravel turns `where('c', null)` into
+  `whereNull('c')`.
+- **P2R-414** These stop, by P2R-135 and P2R-153: any other call on a
+  model, a model class or a query (`sole()`, `get()`, `firstOrFail()`,
+  `orderBy(..)`, `where` with an operator or a closure, `update(..)`,
+  `save()`); these forms on a model without a struct; `find` with an
+  argument of another type (`find('2')`, which Laravel accepts as well);
+  a `create` or `where` that P2R-411 or P2R-413 refuses, with a message
+  that names the condition; and a query held in a variable (`$q =
+  M::query();`), because each form is one whole chain.
 
 ## Spec checklist
 
@@ -4073,7 +4155,7 @@ and its gain is typed attribute reads.
   takes its element type from the same variable or the declared type it
   flows into (P2R-21); a file of only functions becomes a library (P2R-33).
 - [x] Every requirement is testable: P2R-07 to P2R-49 and P2R-100 to
-  P2R-409 by case and stop folders (P2R-75 enforces this), P2R-01 to P2R-06
+  P2R-414 by case and stop folders (P2R-75 enforces this), P2R-01 to P2R-06
   by error folders and tests, P2R-50 to P2R-52 by P2R-71, the rest by CI or
   a file in the
   repository. Stated review concerns (P2R-05 partial write, P2R-72 case

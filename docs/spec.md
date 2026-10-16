@@ -3636,8 +3636,8 @@ forms of those attributes that the app uses.
   Other forms that PHP accepts, such as `callable` or `?self`, stop
   too. These stop with their own rules: a return by
   reference (P2R-135), a parameter named `$this` (P2R-135), `static` in
-  a parameter (P2R-154), a promoted parameter (P2R-130), any other
-  modifier on a parameter (`abstract`, `final`), a parameter
+  a parameter (P2R-154), a promoted parameter, which for Mago is any
+  parameter with a modifier (`abstract` and `final` too) (P2R-130), a parameter
   named like a superglobal (`$_GET`, `$GLOBALS` and the others) and a
   second parameter of one name. In its body these stop, because PHP
   rejects, deprecates or warns about them when it compiles the file and

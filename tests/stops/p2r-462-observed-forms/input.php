@@ -91,3 +91,19 @@ final class Extension extends Model
 final class BuiltinParent extends Model
 {
 }
+
+// A trait and an enum as the observer, and an observer whose interface nobody declares.
+#[ObservedBy(\App\Observers\WatchesTrait::class)]
+final class ByTrait extends Model
+{
+}
+
+#[ObservedBy(\App\Observers\Kind::class)]
+final class ByEnum extends Model
+{
+}
+
+#[ObservedBy(\App\Observers\NoInterface::class)]
+final class ByNoInterface extends Model
+{
+}

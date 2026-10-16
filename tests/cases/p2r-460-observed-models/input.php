@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App;
 
+use App\Observers\ChildObserver;
 use App\Observers\CodeObserver;
 use Illuminate\Database\Eloquent\Attributes\ObservedBy;
 use Illuminate\Database\Eloquent\Model;
@@ -19,7 +20,9 @@ final class Code extends Model
     public $timestamps = false;
 }
 
-#[ObservedBy(CodeObserver::class)]
+// Two attributes in one group: a fully qualified name with ::CLASS, and a list with a
+// trailing comma naming an observer with a parent and an interface.
+#[ObservedBy(\App\Observers\CodeObserver::CLASS), ObservedBy([ChildObserver::class,])]
 final class Tag extends Model
 {
     protected $fillable = ['label'];

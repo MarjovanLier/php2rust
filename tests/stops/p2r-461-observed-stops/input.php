@@ -27,6 +27,11 @@ function made(): Code
     return Code::create(['name' => 'a']);
 }
 
+function madeThroughQuery(): Code
+{
+    return Code::query()->create(['name' => 'a']);
+}
+
 // Reads of models whose observer has retrieved: its own, in another letter case,
 // inherited, from a trait and private, as method_exists finds each (P2R-461).
 #[ObservedBy([OwnObserver::class])]
@@ -71,6 +76,14 @@ final class PrivateParented extends Model
 final class Tagged extends Model
 {
     public $timestamps = false;
+}
+
+// The other read forms of sections 42 and 43 on the same model (P2R-461).
+function otherReads(): string
+{
+    return Upper::query()->where('name', 'a')->sole()->name
+        . Upper::query()->where('name', 'a')->firstOrFail()->name
+        . Upper::findOrFail(1)->name;
 }
 
 function overStops(): bool

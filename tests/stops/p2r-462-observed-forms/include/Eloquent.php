@@ -40,6 +40,19 @@ final class Orphan extends MissingBase
 {
 }
 
+trait WatchesTrait
+{
+}
+
+enum Kind
+{
+}
+
+// Its interface is declared nowhere.
+final class NoInterface implements MissingInterface
+{
+}
+
 // Its parent is built into PHP, which Mago's stubs cannot tell from a class of an extension
 // that PHP may not load.
 final class BuiltinChild extends \ArrayObject

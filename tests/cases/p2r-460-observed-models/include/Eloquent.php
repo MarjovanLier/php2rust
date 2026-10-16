@@ -166,3 +166,16 @@ final class CodeObserver
     {
     }
 }
+
+interface Watches
+{
+}
+
+class BaseObserver
+{
+}
+
+// An observer with a parent and an interface, each declared here (P2R-460).
+final class ChildObserver extends BaseObserver implements Watches
+{
+}

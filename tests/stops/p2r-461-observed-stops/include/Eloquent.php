@@ -34,6 +34,11 @@ abstract class Model
 {
     use HasEvents;
 
+    public function __get(string $key): mixed
+    {
+        return null;
+    }
+
     /**
      * @return Builder<static>
      */
@@ -78,6 +83,30 @@ final class Builder
     public function find(int $id): ?Model
     {
         return null;
+    }
+
+    /**
+     * @return TModel
+     */
+    public function sole(): Model
+    {
+        throw new \LogicException('not used');
+    }
+
+    /**
+     * @return TModel
+     */
+    public function firstOrFail(): Model
+    {
+        throw new \LogicException('not used');
+    }
+
+    /**
+     * @return TModel
+     */
+    public function findOrFail(int $id): Model
+    {
+        throw new \LogicException('not used');
     }
 
     /**

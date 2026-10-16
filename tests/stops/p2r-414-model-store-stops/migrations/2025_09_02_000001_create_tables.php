@@ -54,6 +54,19 @@ return new class extends Migration
             $table->id();
             $table->string('name');
         });
+        Schema::create('mappeds', function (Blueprint $table) {
+            $table->id();
+            $table->string('name');
+        });
+        Schema::create('measures', function (Blueprint $table) {
+            $table->id();
+            $table->double('size');
+        });
+        Schema::create('flaggeds', function (Blueprint $table) {
+            $table->id();
+            $table->string('name');
+            $table->boolean('active')->useCurrent();
+        });
         Schema::create('seededs', function (Blueprint $table) {
             $table->id();
             $table->string('name');

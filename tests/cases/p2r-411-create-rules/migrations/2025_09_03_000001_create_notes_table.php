@@ -18,5 +18,11 @@ return new class extends Migration
             $table->string('status')->nullable()->default('new');
             $table->timestamps();
         });
+        Schema::create('stamps', function (Blueprint $table) {
+            $table->id();
+            $table->string('label');
+            $table->timestamp('created_at');
+            $table->timestamp('updated_at');
+        });
     }
 };

@@ -26,6 +26,29 @@ impl Note {
     }
 }
 
+#[derive(Clone, Debug)]
+pub struct Stamp {
+    pub id: i64,
+    pub label: String,
+}
+
+impl Stamp {
+    fn store_rows() -> &'static std::thread::LocalKey<std::cell::RefCell<Vec<Stamp>>> {
+        thread_local! {
+            static ROWS: std::cell::RefCell<Vec<Stamp>> = const { std::cell::RefCell::new(Vec::new()) };
+        }
+        &ROWS
+    }
+
+    pub fn store_create(mut row: Stamp) -> Stamp {
+        Stamp::store_rows().with_borrow_mut(|rows| {
+            row.id = rows.len() as i64 + 1;
+            rows.push(row.clone());
+            row
+        })
+    }
+}
+
 pub fn note(title: &str, body: Option<&str>, rank: i64) -> Note {
     return Note::store_create(Note {
         rank: rank,
@@ -78,4 +101,12 @@ fn main() {
         print!("{}", body);
         print!("\n");
     }
+    let stamp = Stamp::store_create(Stamp {
+        label: String::from("p"),
+        id: 0,
+    });
+    print!("{}", stamp.id);
+    print!(" ");
+    print!("{}", stamp.label);
+    print!("\n");
 }

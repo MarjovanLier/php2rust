@@ -62,6 +62,32 @@ final class Amount extends Model
     public $timestamps = false;
 }
 
+// Laravel reads the values of $fillable, so a keyed list stops.
+final class Mapped extends Model
+{
+    protected $fillable = ['a' => 'name'];
+
+    public $timestamps = false;
+}
+
+// SQLite stores a double as REAL, which rounds an int above 2^53.
+final class Measure extends Model
+{
+    protected $fillable = ['size'];
+
+    protected $casts = ['size' => 'integer'];
+
+    public $timestamps = false;
+}
+
+// useCurrent() gives a default only to a date or time column.
+final class Flagged extends Model
+{
+    protected $fillable = ['name'];
+
+    public $timestamps = false;
+}
+
 final class Seeded extends Model
 {
 }
@@ -115,6 +141,21 @@ function leftOut(): Dated
 function stamped(): Stamped
 {
     return Stamped::create(['name' => 'a']);
+}
+
+function flagged(): Flagged
+{
+    return Flagged::create(['name' => 'a']);
+}
+
+function mapped(): Mapped
+{
+    return Mapped::create(['name' => 'a']);
+}
+
+function realInt(): Measure
+{
+    return Measure::create(['size' => 9007199254740993]);
 }
 
 function twice(): Tag
@@ -192,6 +233,11 @@ function nullForPlain(): ?Tag
 function numericWhere(): ?Amount
 {
     return Amount::query()->where('amount', '1')->first();
+}
+
+function realWhere(): ?Measure
+{
+    return Measure::query()->where('size', 9007199254740993)->first();
 }
 
 function named(string $name): ?Tag

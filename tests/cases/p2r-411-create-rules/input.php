@@ -14,6 +14,12 @@ final class Note extends Model
     protected $guarded = [];
 }
 
+// Laravel writes created_at and updated_at on create, so they need no default.
+final class Stamp extends Model
+{
+    protected $fillable = ['label'];
+}
+
 function note(string $title, ?string $body, int $rank): Note
 {
     return Note::create(['rank' => $rank, 'title' => $title, 'body' => $body, 'status' => 'new']);
@@ -36,3 +42,5 @@ $body = $first->body;
 if ($body !== null) {
     echo $body, "\n";
 }
+$stamp = Stamp::create(['label' => 'p']);
+echo $stamp->id, ' ', $stamp->label, "\n";

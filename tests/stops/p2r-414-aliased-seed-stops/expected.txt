@@ -1,0 +1,1 @@
+input.php:16:12: a migration writes rows into the table roles, which the store, empty when it starts, does not hold (P2R-410)

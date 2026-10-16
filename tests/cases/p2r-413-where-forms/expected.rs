@@ -25,6 +25,10 @@ impl Book {
         })
     }
 
+    pub fn store_find(id: i64) -> Option<Book> {
+        Book::store_rows().with_borrow(|rows| rows.iter().find(|row| row.id == id).cloned())
+    }
+
     pub fn store_first(matches: impl Fn(&Book) -> bool) -> Option<Book> {
         Book::store_rows().with_borrow(|rows| rows.iter().find(|row| matches(row)).cloned())
     }
@@ -56,6 +60,26 @@ pub fn on_shelf(shelf: i64, rank: Option<i64>) -> String {
     } else {
         Book::store_first(|row: &Book| row.shelf == shelf && row.rank.is_none())
     };
+    return (if let Some(book) = book.as_ref() {
+        book.title.as_str()
+    } else {
+        "none"
+    })
+    .to_string();
+}
+
+pub fn same_title(row: &Book) -> i64 {
+    let book = Book::store_first(|row_1: &Book| row_1.title == row.title && row_1.shelf == 2);
+    return if let Some(book) = book.as_ref() {
+        book.id
+    } else {
+        0
+    };
+}
+
+pub fn noted_as(text: &str) -> String {
+    let book =
+        Book::store_first(|row: &Book| row.note.as_ref().is_some_and(|text_1| *text_1 == text));
     return (if let Some(book) = book.as_ref() {
         book.title.as_str()
     } else {
@@ -99,6 +123,23 @@ fn main() {
     print!("{}", on_shelf(1, Some(2)));
     print!(" ");
     print!("{}", on_shelf(2, Some(2)));
+    print!("\n");
+    let first = Book::store_find(1);
+    if let Some(first) = first.as_ref() {
+        print!("{}", same_title(first));
+        print!(" ");
+        print!("{}", noted_as("sand"));
+        print!("\n");
+    }
+    let below = Book::store_first(|row: &Book| row.shelf == -1);
+    print!(
+        "{}",
+        if let Some(below) = below.as_ref() {
+            below.title.as_str()
+        } else {
+            "none"
+        }
+    );
     print!("\n");
     let wanted = String::from("Emma");
     let book = Book::store_first(|row: &Book| row.title == wanted && row.note.is_none());

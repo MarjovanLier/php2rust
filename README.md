@@ -52,7 +52,9 @@ left out. A model with an accessor, a `casts()` method that is not a literal map
 attribute or another member that may change what a read gives gets no struct. A model with
 Laravel's `#[ObservedBy(X::class)]` or `#[ObservedBy([X::class, ..])]` keeps its struct:
 its reads convert unless an observer has a `retrieved` method, and `create` on it stops,
-because Laravel runs the observers there and the store does not.
+because Laravel runs the observers there and the store does not. `ObservedBy` must come from
+`--include`, and each observer must be a class that the input or `--include` declares, with
+its parents, interfaces and traits, none of them built into PHP.
 `M::create([..])`, `M::find($id)` and `M::query()->where('c', $v)->first()` convert against a
 store the output keeps in memory, one list of rows per model and thread that starts empty:
 a table that a migration seeds stops, and the store holds no row that a seeder or another

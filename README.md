@@ -64,8 +64,12 @@ base class) whose elements have a Rust type and are neither nullable nor objects
 that changes them. A collection converts only where it is read in
 order: a `foreach` without a key, `count()`, and the methods `count()`, `isEmpty()`,
 `isNotEmpty()` and `first()` without arguments; any other use stops, because a collection
-is an object that a caller and a callee share. Other queries and saving models still stop
-the conversion. Migrations are never converted.
+is an object that a caller and a callee share. In these chains,
+`->when($value, function (Builder $query, $value): void { $query->where('c', $value); })`
+(or the same as an arrow function) converts to a condition that skips the filter when
+`$value` is falsy by PHP's rules, as Laravel does; php2rust tells the analyser that
+`when()` returns the builder for such a callback. Other queries and saving models still
+stop the conversion. Migrations are never converted.
 
 With a directory, php2rust analyses all its `.php` files together, so a class of one file
 is known in the others, and writes one Rust module for each PHP namespace below the
@@ -631,7 +635,7 @@ php2rust refuses some valid PHP that version 1 converts in other forms:
 The tests need PHP 8.5 on `PATH` and the Rust toolchain pinned in
 `rust-toolchain.toml` (`rustup toolchain install` installs it). Each folder under
 `tests/cases`, `tests/stops` and `tests/errors` is one test, and `cargo test` also checks
-that each requirement from P2R-07 to P2R-49 and from P2R-100 to P2R-443 starts the name of
+that each requirement from P2R-07 to P2R-49 and from P2R-100 to P2R-453 starts the name of
 a case or stop folder.
 To rewrite every
 `expected.rs` and `expected.txt` from the current output:

@@ -82,7 +82,10 @@ impl Converter<'_> {
             None if expected == Some(RustType::F64) => Some((RExpr::Float(1.0), RustType::F64)),
             None => Some((RExpr::Int(1), RustType::I64)),
         };
-        let target = self.expression(chain);
+        let target = match chain {
+            Expression::Access(Access::Property(access)) => self.property_target(access, chain),
+            other => self.expression(other),
+        };
         let ((expr, value_type), (target, target_type)) = (converted?, target?);
         if !self.change_root(expression, &target) {
             return None;

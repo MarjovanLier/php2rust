@@ -312,8 +312,7 @@ impl Converter<'_> {
             (Expression::Conditional(node), _) => self.conditional(node, expected),
             (other, _) => {
                 let (expr, ty) = self.expression(other)?;
-                // A `PhpOptional` read keeps its type where Mago narrows it, so it goes only
-                // where the same type is due (P2R-360, P2R-362).
+                // A `PhpOptional` value goes only where the same type is due (P2R-362).
                 if matches!(ty, RustType::Optional(_)) && expected.is_some_and(|due| *due != ty) {
                     self.refuse(other, super::optionals::OPTIONAL_USE);
                     return None;
@@ -417,11 +416,6 @@ impl Converter<'_> {
             .into_iter()
             .map(|value| {
                 let (expr, element) = self.value(value, wanted.as_ref())?;
-                // A `PhpOptional` read keeps its type where Mago narrows it (P2R-360).
-                if matches!(element, RustType::Optional(_)) {
-                    self.refuse(value, super::optionals::OPTIONAL_USE);
-                    return None;
-                }
                 // Mago may type the element as `T` where it knows more (P2R-104).
                 if let RustType::Vec(target) = &ty
                     && nulls::null_for_plain(&element, target)

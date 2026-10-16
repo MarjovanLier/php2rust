@@ -253,6 +253,8 @@ pub fn nullable_object(ty: &RustType) -> bool {
             matches!(&**element, RustType::Option(inner) if inner.is_struct())
                 || nullable_object(element)
         }
+        // `list<?C>|Optional` holds the same list (P2R-360).
+        RustType::Optional(inner) => nullable_object(inner),
         _ => false,
     }
 }

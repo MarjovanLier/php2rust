@@ -1889,6 +1889,27 @@ impl Converter<'_> {
         access: &PropertyAccess<'_>,
         node: &Expression<'_>,
     ) -> Option<(RExpr, RustType)> {
+        let (expr, ty) = self.property_target(access, node)?;
+        // Mago narrows a read after `instanceof Optional`, a null check or a write, and
+        // PHP's type there is not the field's `PhpOptional` (P2R-360).
+        if matches!(ty, RustType::Optional(_))
+            && !self.expression_type(node).is_some_and(|union| {
+                types::rust_type(union, &self.type_names).is_ok_and(|found| found == ty)
+            })
+        {
+            self.refuse(node, super::optionals::OPTIONAL_USE);
+            return None;
+        }
+        Some((expr, ty))
+    }
+
+    /// `$o->p` as `property` gives it, also where it is the target of a write, which Mago's
+    /// narrowed type of the read does not limit.
+    pub(super) fn property_target(
+        &mut self,
+        access: &PropertyAccess<'_>,
+        node: &Expression<'_>,
+    ) -> Option<(RExpr, RustType)> {
         let object = self.expression(access.object)?;
         if matches!(object.1.inner(), RustType::Union(_)) {
             self.refuse(node, UNION_MEMBER);

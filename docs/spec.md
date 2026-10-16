@@ -238,7 +238,7 @@ requirement IDs.
   the same stdout bytes, the same output file bytes and the same stderr
   bytes.
 - **P2R-07** Only the constructs that sections 3 to 5, 11 to 19 and 21 to
-  47 list as converting may convert. Any other construct MUST stop the conversion,
+  48 list as converting may convert. Any other construct MUST stop the conversion,
   which means it is reported as a problem under P2R-03. Examples that stop
   in version 1 (section 16 converts `namespace`, `use` and class
   constants, and section 17 two casts):
@@ -619,7 +619,7 @@ requirement IDs.
   stderr MUST equal `expected.txt`, its stdout MUST be empty, no output file
   may be created, and every file in the folder MUST be unchanged.
 - **P2R-75** Every requirement ID from P2R-07 to P2R-49 and from P2R-100 to
-  P2R-462 MUST appear in the name of at least one case or stop folder. A
+  P2R-472 MUST appear in the name of at least one case or stop folder. A
   test MUST check this from the folder names.
 - **P2R-76** One command named in the README MUST rewrite every `expected.rs`
   and `expected.txt` from the current tool output; CI MUST NOT run it. A
@@ -4677,8 +4677,10 @@ leaves out `casts()`, while every use of the relation keeps stopping.
   struct (no `get..Attribute` or `set..Attribute` name, no `boot` or
   `initialize` prefix, no override of a method of `Model` or of a trait
   it uses) MAY be a relation method and MUST then be left out of the
-  output: it is public, not static and not abstract, has no parameters
-  and no attribute, its name equals no column of the model's table in
+  output: its only modifier is `public` (PHP rejects `readonly`, a set
+  visibility or a doubled modifier on a method, and Mago does not report
+  them), it has no parameters and no attribute (`#[\Override]`
+  included), it does not return by reference, its name equals no column of the model's table in
   any letter case, it declares a return type that PHP resolves to a
   class of `\Illuminate\Database\Eloquent\Relations` declared in a file
   that `--include` reads (P2R-340), not nullable and no union, and its
@@ -4687,7 +4689,8 @@ leaves out `casts()`, while every use of the relation keeps stopping.
   `hasOne` for `HasOne`, `belongsToMany` for `BelongsToMany`,
   `hasManyThrough` for `HasManyThrough`, `hasOneThrough` for
   `HasOneThrough`, `morphTo` for `MorphTo`, `morphMany` for `MorphMany`
-  or `morphOne` for `MorphOne`. Its arguments are positional, each a
+  or `morphOne` for `MorphOne`, written in exactly that letter case.
+  Its arguments are positional, each a
   string literal or `X::class` naming a class (`self::class`,
   `static::class` and `parent::class` stop).
 - **P2R-471** A call of a relation method (`$m->journalLines()`), a read
@@ -4697,7 +4700,8 @@ leaves out `casts()`, while every use of the relation keeps stopping.
 - **P2R-472** These stop, with a message that names the form: a relation
   method named like a column of its table in any letter case (after
   `create` Laravel reads the relation in place of a column the map left
-  out), with a parameter, another visibility, `static`, an attribute, a
+  out), with a parameter, any modifier other than `public`, an attribute
+  (`#[\Override]` too), a return by reference, a
   return type of another class (a relation class the input declares,
   `MorphToMany`, `PendingHasThroughRelationship`), a nullable or union
   return type, a helper that does not match the return type
@@ -4713,7 +4717,7 @@ leaves out `casts()`, while every use of the relation keeps stopping.
   takes its element type from the same variable or the declared type it
   flows into (P2R-21); a file of only functions becomes a library (P2R-33).
 - [x] Every requirement is testable: P2R-07 to P2R-49 and P2R-100 to
-  P2R-462 by case and stop folders (P2R-75 enforces this), P2R-01 to P2R-06
+  P2R-472 by case and stop folders (P2R-75 enforces this), P2R-01 to P2R-06
   by error folders and tests, P2R-50 to P2R-52 by P2R-71, the rest by CI or
   a file in the
   repository. Stated review concerns (P2R-05 partial write, P2R-72 case

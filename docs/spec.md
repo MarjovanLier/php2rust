@@ -3378,7 +3378,8 @@ parent to a later section.
   the parent's methods and Laravel's resolving of the class do that,
   which never run in the converted code. Each argument of such an
   attribute must be a string or int literal or `Name::class` (not a
-  string with an escape that PHP rejects, such as `\u{110000}`), with
+  string with an escape that PHP rejects, such as `\u{110000}`, or warns
+  about, such as an octal escape above `\377`), with
   named arguments after the positional ones and each name once: PHP
   compiles the arguments as constant expressions and rejects other
   forms, such as a call or `static::class`, when it compiles the file,
@@ -3582,17 +3583,30 @@ forms of those attributes that the app uses.
   `public` and one `final` (no visibility means public), it has a body
   and no attribute, no interface of the class declares a method of that
   name, and neither `Data`, as Mago knows it, nor a trait or interface
-  of it has a real method of that name, also one that `Data` renames to
-  that name in a `use` block, only an `@method` tag or nothing (Mago
-  takes a tag of `Data` over a real method of its trait or interface). Nothing of it enters the Rust output; its docblock is not
-  part of it. The tool still checks what PHP rejects in it when it
-  compiles the file and Mago reports nothing or a code that is dropped
-  here, and these stop: a parameter named `$this` (P2R-135), `static`
-  in a parameter (P2R-154), a promoted parameter (P2R-130), a second
-  parameter of one name, a type written twice or `true|false`
-  (P2R-230), a function declared inside it, and `self`, `parent` or
-  `static` after a backslash (`new \self`). Of Mago's findings inside
-  it (P2R-11), these are not reported: a
+  of it has a real method of that name, also one that `Data` or one of
+  its traits renames to that name in a `use` block, only an `@method`
+  tag or nothing (Mago
+  takes a tag of `Data` over a real method of its trait or interface).
+  Nothing of it enters the Rust output; its docblock is not part of it.
+  Its signature must keep to forms that PHP always compiles: each
+  parameter or return type is one name, with or without `?`, or `mixed`
+  alone, and a return type may also be `void`, `never`, `static` or
+  `self` alone; a default is a string, int or float literal, `true`,
+  `false`, or `null` on a type with `?` or no type, and defaults come
+  last (P2R-168); no parameter is variadic or by reference. These stop
+  too, with their own rules: a parameter named `$this` (P2R-135),
+  `static` in a parameter (P2R-154), a promoted parameter (P2R-130) and
+  a second parameter of one name. In its body these stop, because PHP
+  rejects, deprecates or warns about them when it compiles the file and
+  Mago reports nothing or a code that is dropped here: a function
+  declared inside it, in which `self` names no class; `self`, `parent`
+  or `static` after a backslash (`new \self`); a cast that PHP removed
+  or deprecates (`(real)`, `(unset)`, `(integer)`, `(boolean)`,
+  `(double)`, `(binary)`); `${...}`; `case 1;` with a semicolon;
+  backticks; and an octal escape above `\377`. PHP accepts the function
+  itself, `Foo\self` and `${'x'}` outside a string, so this stops more
+  than PHP rejects. Of Mago's findings inside it (P2R-11), these are
+  not reported: a
   class or method that does not exist, or a call on a mixed value
   (`non-existent-class`, `non-existent-method`, `mixed-method-access`),
   which PHP checks only when the line runs, and a parameter count that
@@ -3657,8 +3671,10 @@ forms of those attributes that the app uses.
   `create()` returns a new `Optional` and does nothing else, as 4.18.0's
   does, which Mago's metadata does not show, and in P2R-380 a PHP
   compile-time error in the body of a left-out method that Mago does not
-  report, such as `unset($this)`, a static variable declared twice,
-  `declare` in the body or an attribute that PHP rejects there, because
-  the tool does not read that body) are the only parts not checked
-  mechanically.
+  report, such as `yield` in a method that returns `array`,
+  `unset($this)`, a closure parameter named `$this` or with a default
+  that names `static`, a static variable
+  declared twice, `declare` in the body or an attribute that PHP
+  rejects there, because the tool does not read that body) are the only
+  parts not checked mechanically.
 - [x] No speculative features: later milestones carry no requirements yet.

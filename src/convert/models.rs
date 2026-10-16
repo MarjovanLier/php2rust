@@ -878,6 +878,20 @@ impl Reader<'_> {
             .statements
             .iter()
             .rfind(|statement| !matches!(statement, Statement::Noop(_)))?;
+        // Laravel runs code before the return when it requires the file.
+        let code = program.statements.iter().filter(|statement| {
+            !matches!(
+                statement,
+                Statement::OpeningTag(_)
+                    | Statement::ClosingTag(_)
+                    | Statement::Declare(_)
+                    | Statement::Use(_)
+                    | Statement::Noop(_)
+            )
+        });
+        if code.count() != 1 {
+            return None;
+        }
         let Statement::Return(Return {
             value: Some(Expression::AnonymousClass(class)),
             ..
@@ -896,22 +910,51 @@ impl Reader<'_> {
             matches!(member, ClassLikeMember::Method(method)
                 if method.name.value.eq_ignore_ascii_case(b"shouldRun"))
         });
-        // PHP rejects a second method, property or constant of one name, so Laravel stops
-        // there; a property name starts with `$`, and a constant's gets `::`.
+        // PHP rejects a second method, property or constant of one name and a modifier
+        // written twice, so Laravel stops there; a property name starts with `$`, and a
+        // constant's gets `::`.
         let mut seen: HashSet<Vec<u8>> = HashSet::new();
         let doubled = class.members.iter().any(|member| match member {
-            ClassLikeMember::Method(method) => !seen.insert(method.name.value.to_ascii_lowercase()),
-            ClassLikeMember::Property(Property::Plain(plain)) => plain
-                .items
-                .iter()
-                .any(|item| !seen.insert(item.variable().name.to_vec())),
-            ClassLikeMember::Constant(constant) => constant
-                .items
-                .iter()
-                .any(|item| !seen.insert([b"::", item.name.value].concat())),
+            ClassLikeMember::Method(method) => {
+                !seen.insert(method.name.value.to_ascii_lowercase())
+                    || classes::doubled_modifier(&method.modifiers).is_some()
+            }
+            ClassLikeMember::Property(Property::Plain(plain)) => {
+                plain
+                    .items
+                    .iter()
+                    .any(|item| !seen.insert(item.variable().name.to_vec()))
+                    || classes::doubled_modifier(&plain.modifiers).is_some()
+            }
+            ClassLikeMember::Constant(constant) => {
+                constant
+                    .items
+                    .iter()
+                    .any(|item| !seen.insert([b"::", item.name.value].concat()))
+                    || classes::doubled_modifier(&constant.modifiers).is_some()
+            }
             _ => false,
         });
-        if should_run || doubled {
+        // PHP 8.5 allows a closure in a constant expression, and a hook runs on a property
+        // read: either may hold code that a property or constant read in up() runs.
+        let mut hidden = false;
+        for member in class.members.iter() {
+            match member {
+                ClassLikeMember::Property(Property::Hooked(_)) => hidden = true,
+                ClassLikeMember::Property(property) => {
+                    HasClosure.walk_property(property, &mut hidden)
+                }
+                ClassLikeMember::Constant(constant) => {
+                    HasClosure.walk_class_like_constant(constant, &mut hidden);
+                }
+                ClassLikeMember::Method(method) => {
+                    HasClosure
+                        .walk_function_like_parameter_list(&method.parameter_list, &mut hidden);
+                }
+                _ => {}
+            }
+        }
+        if should_run || doubled || hidden {
             return None;
         }
         let up = class.members.iter().find_map(|member| match member {
@@ -922,7 +965,6 @@ impl Reader<'_> {
                         .modifiers
                         .iter()
                         .all(|m| matches!(m, Modifier::Public(_)))
-                    && classes::doubled_modifier(&method.modifiers).is_none()
                     && method
                         .return_type_hint
                         .as_ref()
@@ -1203,26 +1245,19 @@ impl Reader<'_> {
         let (method, arguments) = chain[0];
         let modifiers = &chain[1..];
         let unknown = |what: &str| Err(self.reason(statement, what));
-        // A named argument (`id(column: 'code_id')`) can bind what the tool reads by
-        // position: the column name, foreignIdFor's second argument, and nullable()'s.
-        let plain = |list: &ArgumentList<'_>, read: usize| {
-            list.arguments
-                .iter()
-                .enumerate()
-                .all(|(at, argument)| match argument {
-                    Argument::Positional(positional) => positional.ellipsis.is_none(),
-                    Argument::Named(_) => at >= read,
-                })
-        };
-        let read = if method.eq_ignore_ascii_case(b"foreignIdFor") {
-            2
-        } else {
-            1
+        // A named argument binds what the tool reads by position when it names a
+        // Blueprint method's `$column`, `$columns` or `$model` (`id(column: 'code_id')`);
+        // nullable() goes through Fluent::__call, which takes its first value by any name.
+        let plain = |list: &ArgumentList<'_>, read: &[&[u8]]| {
+            list.arguments.iter().all(|argument| match argument {
+                Argument::Positional(positional) => positional.ellipsis.is_none(),
+                Argument::Named(named) => !read.is_empty() && !read.contains(&named.name.value),
+            })
         };
         let nullable_named = modifiers
             .iter()
-            .any(|(name, list)| name.eq_ignore_ascii_case(b"nullable") && !plain(list, usize::MAX));
-        if !plain(arguments, read) || nullable_named {
+            .any(|(name, list)| name.eq_ignore_ascii_case(b"nullable") && !plain(list, &[]));
+        if !plain(arguments, &[b"column", b"columns", b"model"]) || nullable_named {
             return unknown("a named or unpacked argument in a Blueprint call");
         }
         let lower = method.to_ascii_lowercase();
@@ -1476,6 +1511,19 @@ fn runs_any_statement(method: &ClassLikeMemberSelector<'_>) -> bool {
                 || method.value.eq_ignore_ascii_case(b"getProcessor")
         }
         _ => true,
+    }
+}
+
+/// Finds a closure or arrow function, which PHP 8.5 allows in a constant expression.
+struct HasClosure;
+
+impl<'ast, 'arena> Walker<'ast, 'arena, bool> for HasClosure {
+    fn walk_in_closure(&self, _: &'ast Closure<'arena>, found: &mut bool) {
+        *found = true;
+    }
+
+    fn walk_in_arrow_function(&self, _: &'ast ArrowFunction<'arena>, found: &mut bool) {
+        *found = true;
     }
 }
 

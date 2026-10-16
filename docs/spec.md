@@ -238,7 +238,7 @@ requirement IDs.
   the same stdout bytes, the same output file bytes and the same stderr
   bytes.
 - **P2R-07** Only the constructs that sections 3 to 5, 11 to 19 and 21 to
-  44 list as converting may convert. Any other construct MUST stop the conversion,
+  45 list as converting may convert. Any other construct MUST stop the conversion,
   which means it is reported as a problem under P2R-03. Examples that stop
   in version 1 (section 16 converts `namespace`, `use` and class
   constants, and section 17 two casts):
@@ -616,7 +616,7 @@ requirement IDs.
   stderr MUST equal `expected.txt`, its stdout MUST be empty, no output file
   may be created, and every file in the folder MUST be unchanged.
 - **P2R-75** Every requirement ID from P2R-07 to P2R-49 and from P2R-100 to
-  P2R-431 MUST appear in the name of at least one case or stop folder. A
+  P2R-443 MUST appear in the name of at least one case or stop folder. A
   test MUST check this from the folder names.
 - **P2R-76** One command named in the README MUST rewrite every `expected.rs`
   and `expected.txt` from the current tool output; CI MUST NOT run it. A
@@ -706,7 +706,9 @@ Each milestone gets its own requirements in this file when its work starts.
   of the same behaviour (section 42), then `sole()`, `firstOrFail()` and
   `findOrFail()` with Laravel's exceptions (section 43), with a database
   behind it later;
-  unions as shape fields (section 44); unions as list values; values
+  unions as shape fields (section 44); Laravel's collections as lists,
+  read in order, with `get()` and `all()` on the store (section 45);
+  unions as list values; values
   of interface types, interface inheritance and class inheritance;
   closures.
   `SouthAfricanIDValidator` calls `StringManipulation::isValidDate`, which
@@ -4117,8 +4119,8 @@ relations and every other query method still stop.
   function `store_rows`, and those of the public functions `store_create`,
   `store_find` and `store_first` that the forms below call, as decided
   over the whole input (a directory input included), and those of
-  P2R-422; it appears only for a model whose rows the input creates or
-  finds, a form of section 43 included. The store of a thread is
+  P2R-422 and P2R-441; it appears only for a model whose rows the input
+  creates or finds, a form of section 43 or 45 included. The store of a thread is
   empty when the thread starts. The forms of P2R-411 to P2R-413 stop on a
   model, with the reason, unless all of these hold:
   - The struct has a field `id` of type `i64`, not nullable, whose column
@@ -4221,7 +4223,7 @@ relations and every other query method still stop.
   A `String` field of a column that is not text, and an `i64` field of a
   REAL column, stop, as in P2R-411.
 - **P2R-414** These stop, by P2R-135 and P2R-153: any other call on a
-  model, a model class or a query (`get()`, `firstOrCreate(..)`,
+  model, a model class or a query (`firstOrCreate(..)`,
   `orderBy(..)`, `where` with an operator or a closure, `update(..)`,
   `save()`); these forms on a model without a struct; `find` with an
   argument of another type (`find('2')`, which Laravel accepts as well);
@@ -4230,7 +4232,8 @@ relations and every other query method still stop.
   P2R-413 refuses, with a message that names the condition at the call,
   key or value it concerns; and a query held in a variable (`$q =
   M::query();`), because each form is one whole chain. Section 43 adds
-  `sole()`, `firstOrFail()` and `findOrFail()`.
+  `sole()`, `firstOrFail()` and `findOrFail()`, and section 45 `get()`
+  and `all()`.
 
 ## 43. A missing or doubled row as Laravel's exceptions (milestone 2, slice 33)
 
@@ -4376,6 +4379,67 @@ member of another union, still stops.
   calls of P2R-233, which stop on the read itself as on a property read.
   Every other use stops by P2R-232, as for any union value.
 
+## 45. Laravel's collections as lists (milestone 2, slice 35)
+
+42 files of the app import `Illuminate\Support\Collection` or
+`Illuminate\Database\Eloquent\Collection`, and 29 call a query's
+`get()`, which gives an Eloquent collection of models. Parameters,
+returns and interface methods carry such types, and each stops by P2R-22
+today. This section maps a collection to a Rust `Vec` of its elements,
+gives `get()` and `M::all()` the store of section 42, and converts the
+uses that read the elements in order and nothing else. A collection is an
+object that a caller and a callee share, which a `Vec` copy is not, so
+every use that could change it stops, and so does every use that reads
+its keys or treats it as a PHP array, because PHP reads an object
+otherwise than an array (`empty($c)` is false for an empty collection).
+
+- **P2R-440** `Illuminate\Support\Collection<K, T>` and
+  `Illuminate\Database\Eloquent\Collection<K, T>`, as a declared type
+  or as the type Mago gives a value, where the class is the vendored one
+  (P2R-340), MUST map to `Vec<T>` when `list<T>` has a Rust type
+  (P2R-21) and `T` is no changing type (P2R-140), whatever `K` is,
+  because no use below reads a key. Such a type is a collection type
+  below, and a value of it a collection value. A parameter of a
+  collection type becomes `&[T]`, as a list parameter does (P2R-24), and
+  an assignment, a return, an argument and a property copy or lend a
+  collection value as they do a list (P2R-26). These stop by P2R-22: a
+  collection type with another element type, without its type arguments
+  (Mago then gives `mixed` elements), nullable or in a union, and either
+  class without the vendored class.
+- **P2R-441** `M::query()` without arguments, followed by zero or more
+  `->where('<c>', $v)` and then `->get()` without arguments, and
+  `M::all()` without arguments, where `M` is a model whose store applies
+  (P2R-410), MUST convert to `M::store_get(|row: &M| ..)`, with the
+  closure and the conditions of P2R-413 for each `where`, or to
+  `M::store_all()` when no `where` comes before `get()`. Both give copies
+  of every matching row in creation order, as `Vec<M>`, and the `impl`
+  block of P2R-410 holds each only when a form calls it. `get([..])` and
+  `all([..])` with a list of columns stop, because Laravel then loads only
+  those columns, and so does a `where` that P2R-413 refuses.
+- **P2R-442** On a collection value `$c`, these MUST convert, in the
+  collection's order:
+  - `foreach ($c as $x)` without a key, as a `foreach` over a list
+    (P2R-41);
+  - `count($c)` and `$c->count()` as `c.len() as i64`, the forms of
+    `count()` on a list (P2R-48);
+  - `$c->isEmpty()` as `c.is_empty()`, and `$c->isNotEmpty()` as
+    `!c.is_empty()`;
+  - `$c->first()` without arguments as a copy of the first element, or
+    `None` for an empty collection, of type `Option<T>`
+    (`c.first().cloned()`), as Laravel's `first()` gives `null` then.
+- **P2R-443** Every other use of a collection value stops, by P2R-135,
+  P2R-153 or the rule that names it: any other method (`map`, `filter`,
+  `pluck`, `push`, `each`, `toArray`, `all`, `keys`, `where`, `first`
+  with a callback or a default), `foreach` with a key (Laravel keeps the
+  keys a collection had) or by reference, a condition on it and `empty()`
+  (PHP reads an object as true), a comparison, `$c[..]` and `$c[] = ..`
+  (Laravel's `ArrayAccess`), a property read, a collection value where a
+  PHP array is needed and an array where a collection is needed (Mago
+  reports most of these), and the forms that make a collection other than
+  P2R-441: `collect(..)`, `new Collection(..)` and the static methods of
+  both classes. A collection value therefore comes only from P2R-441, a
+  parameter, a property, or a call of the input that returns one.
+
 ## Spec checklist
 
 - [x] No `[NEEDS CLARIFICATION]` markers left. Decided in review: problems
@@ -4384,7 +4448,7 @@ member of another union, still stops.
   takes its element type from the same variable or the declared type it
   flows into (P2R-21); a file of only functions becomes a library (P2R-33).
 - [x] Every requirement is testable: P2R-07 to P2R-49 and P2R-100 to
-  P2R-431 by case and stop folders (P2R-75 enforces this), P2R-01 to P2R-06
+  P2R-443 by case and stop folders (P2R-75 enforces this), P2R-01 to P2R-06
   by error folders and tests, P2R-50 to P2R-52 by P2R-71, the rest by CI or
   a file in the
   repository. Stated review concerns (P2R-05 partial write, P2R-72 case

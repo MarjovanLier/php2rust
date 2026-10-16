@@ -1020,8 +1020,12 @@ impl Converter<'_> {
             self.refuse(hint, HOOK_SIGNATURE);
             refused = true;
         }
+        // The walk visits the signature too, so it runs only when the checks above found
+        // nothing there, and one problem prints one line.
         let mut unchecked = false;
-        Unchecked.walk_method(method, &mut unchecked);
+        if !refused {
+            Unchecked.walk_method(method, &mut unchecked);
+        }
         if unchecked {
             self.refuse(
                 &method.name,

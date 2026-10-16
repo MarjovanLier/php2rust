@@ -58,8 +58,16 @@ function priced(?string $label): Price
     return $price;
 }
 
+// A ?: or ?? of plain values goes in as one value.
+function chosen(bool $short, ?string $label): Price
+{
+    return new Price($short ? 1.5 : 2.5, $label ?? 'plain');
+}
+
 $price = priced(null);
 echo $price->amount instanceof Optional ? 'free' : 'paid', ' ', $price->label instanceof Optional ? 'unlabelled' : 'labelled', "\n";
+$picked = chosen(true, null);
+echo $picked->amount instanceof Optional ? 'free' : 'paid', ' ', $picked->label instanceof Optional ? 'unlabelled' : 'labelled', "\n";
 $full = new Contact('Ann', 'a@b.c', 3, 'hi');
 $bare = new Contact(name: 'Bob', email: new Optional, visits: new Optional(), note: new Optional());
 $nulled = new Contact('Cy', blank(), given());

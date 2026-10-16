@@ -61,3 +61,17 @@ function nothing(?Optional $marker): int
 {
     return 1;
 }
+
+final readonly class Tag
+{
+    public function __construct(public string $label)
+    {
+    }
+}
+
+// A list of a nullable class type stops inside PhpOptional too.
+/** @param list<?Tag>|Optional $tags */
+function tagged(array|Optional $tags): int
+{
+    return 1;
+}

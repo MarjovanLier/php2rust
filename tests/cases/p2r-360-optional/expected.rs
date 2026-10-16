@@ -85,6 +85,13 @@ pub fn priced(label: Option<&str>) -> Price {
     return price;
 }
 
+pub fn chosen(short: bool, label: Option<&str>) -> Price {
+    return Price::new(
+        &PhpOptional::Present(if short { 1.5 } else { 2.5 }),
+        &PhpOptional::Present(Some(label.unwrap_or("plain").to_string())),
+    );
+}
+
 fn main() {
     let price = priced(None);
     print!(
@@ -99,6 +106,25 @@ fn main() {
     print!(
         "{}",
         if matches!(price.label, PhpOptional::Absent) {
+            "unlabelled"
+        } else {
+            "labelled"
+        }
+    );
+    print!("\n");
+    let picked = chosen(true, None);
+    print!(
+        "{}",
+        if matches!(picked.amount, PhpOptional::Absent) {
+            "free"
+        } else {
+            "paid"
+        }
+    );
+    print!(" ");
+    print!(
+        "{}",
+        if matches!(picked.label, PhpOptional::Absent) {
             "unlabelled"
         } else {
             "labelled"

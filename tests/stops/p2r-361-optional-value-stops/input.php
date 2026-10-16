@@ -47,6 +47,13 @@ function other(): string|Optional
     return \Illuminate\Support\Optional::create();
 }
 
+// A declared property of that type has no default that converts.
+final class Draft
+{
+    public string|Optional $title = 'none';
+    public string|Optional|null $note = null;
+}
+
 // A variable keeps one type, so a later null does not go into it.
 function blanked(string|Optional|null $email, bool $wipe): string|Optional|null
 {

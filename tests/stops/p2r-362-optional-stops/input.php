@@ -115,6 +115,25 @@ function fallback(Named $n): string
     return $name ?? 'none';
 }
 
+function halved(Contact $c): int
+{
+    if ($c->visits instanceof Optional) {
+        return 0;
+    }
+    return intdiv($c->visits, 2);
+}
+
+/** @param list<string> $into */
+function pushed(Named $n, array $into): int
+{
+    $local = ['a'];
+    if (!$n->name instanceof Optional) {
+        $local[] = $n->name;
+        $into[] = $n->name;
+    }
+    return count($local) + count($into);
+}
+
 // A T|Optional parameter is lent, so it cannot be assigned.
 function cleared(string|Optional $value): bool
 {

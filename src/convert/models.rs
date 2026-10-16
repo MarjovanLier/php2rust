@@ -1119,21 +1119,23 @@ pub(super) fn find(
         .iter()
         .map(|(key, class, names)| {
             // Laravel throws when it boots a model whose observer class does not exist.
-            let observers = if class.attribute_lists.is_empty() {
-                Some(Vec::new())
-            } else if observed_included {
-                observed_by(class, names).filter(|observers| {
-                    observers.iter().all(|name| {
+            let observers = match class.attribute_lists.first() {
+                None => Ok(Vec::new()),
+                Some(first) if !observed_included => Err(first.span()),
+                Some(_) => observed_by(class, names).and_then(|groups| {
+                    let loads = |name: &Vec<u8>| {
                         codebase.class_exists(name)
                             && declared_tree(codebase, name, &mut HashSet::new())
-                    })
-                })
-            } else {
-                None
+                    };
+                    match groups.iter().find(|(_, names)| !names.iter().all(loads)) {
+                        Some((span, _)) => Err(*span),
+                        None => Ok(groups.into_iter().flat_map(|(_, names)| names).collect()),
+                    }
+                }),
             };
-            let admitted = observers.is_some();
+            let refused = observers.as_ref().err().copied();
             let (fields, store) =
-                match model_fields(class, names, tables, &public, &overridden, admitted) {
+                match model_fields(class, names, tables, &public, &overridden, refused) {
                     Ok((fields, store)) => (Ok(fields), store),
                     Err(reason) => (Err(reason), Err(String::new())),
                 };
@@ -1228,10 +1230,26 @@ fn tell_when(codebase: &mut CodebaseMetadata, included: &HashSet<FileId>) {
 /// Laravel's attribute that names a model's observers, lowercase.
 const OBSERVED_BY: &[u8] = b"illuminate\\database\\eloquent\\attributes\\observedby";
 
-/// The lowercase names of the classes that a model's attributes name as observers, or `None`
-/// when an attribute is no `#[ObservedBy]` of one positional `X::class` or `[..]` of them
+/// The span of each attribute group of a model with the lowercase names of the classes its
+/// `#[ObservedBy]` attributes name as observers, or the span of the first group that holds
+/// an attribute other than an `#[ObservedBy]` of one positional `X::class` or `[..]` of them
 /// (P2R-460).
-fn observed_by(class: &Class<'_>, names: &ResolvedNames<'_>) -> Option<Vec<Vec<u8>>> {
+#[allow(clippy::type_complexity)]
+fn observed_by(
+    class: &Class<'_>,
+    names: &ResolvedNames<'_>,
+) -> Result<Vec<(Span, Vec<Vec<u8>>)>, Span> {
+    let mut groups = Vec::new();
+    for list in class.attribute_lists.iter() {
+        let observers = list_observers(list, names).ok_or(list.span())?;
+        groups.push((list.span(), observers));
+    }
+    Ok(groups)
+}
+
+/// The observers that one attribute group names, or `None` when it holds another attribute
+/// or form (P2R-460).
+fn list_observers(list: &AttributeList<'_>, names: &ResolvedNames<'_>) -> Option<Vec<Vec<u8>>> {
     let named = |expression: &Expression<'_>| match expression {
         Expression::Access(Access::ClassConstant(access))
             if matches!(&access.constant, ClassLikeConstantSelector::Identifier(constant)
@@ -1247,11 +1265,7 @@ fn observed_by(class: &Class<'_>, names: &ResolvedNames<'_>) -> Option<Vec<Vec<u
         _ => None,
     };
     let mut observers = Vec::new();
-    for attribute in class
-        .attribute_lists
-        .iter()
-        .flat_map(|list| list.attributes.iter())
-    {
+    for attribute in list.attributes.iter() {
         if resolved(names, &attribute.name, attribute.name.value()) != OBSERVED_BY {
             return None;
         }
@@ -1362,11 +1376,12 @@ fn model_fields(
     tables: Option<&Tables>,
     public: &HashSet<String>,
     overridden: &HashSet<Vec<u8>>,
-    observed: bool,
+    refused: Option<Span>,
 ) -> Result<FieldsAndStore, (Span, String)> {
-    if !observed && let Some(attributes) = class.attribute_lists.first() {
+    // The attribute group that takes the struct away (P2R-401, P2R-460).
+    if let Some(span) = refused {
         return Err((
-            attributes.span(),
+            span,
             "an attribute on a model is supported only as Laravel's #[ObservedBy(X::class)] or #[ObservedBy([X::class, ..])] naming classes (not interfaces, traits or enums) that the input or an included file declares with their parents, interfaces and traits, none built into PHP, because another attribute may change what an attribute read gives and Laravel throws when it cannot load an observer, so the model takes no struct (P2R-401, P2R-460)".to_owned(),
         ));
     }

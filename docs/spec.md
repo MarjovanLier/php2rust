@@ -238,7 +238,7 @@ requirement IDs.
   the same stdout bytes, the same output file bytes and the same stderr
   bytes.
 - **P2R-07** Only the constructs that sections 3 to 5, 11 to 19 and 21 to
-  42 list as converting may convert. Any other construct MUST stop the conversion,
+  43 list as converting may convert. Any other construct MUST stop the conversion,
   which means it is reported as a problem under P2R-03. Examples that stop
   in version 1 (section 16 converts `namespace`, `use` and class
   constants, and section 17 two casts):
@@ -616,7 +616,7 @@ requirement IDs.
   stderr MUST equal `expected.txt`, its stdout MUST be empty, no output file
   may be created, and every file in the folder MUST be unchanged.
 - **P2R-75** Every requirement ID from P2R-07 to P2R-49 and from P2R-100 to
-  P2R-414 MUST appear in the name of at least one case or stop folder. A
+  P2R-423 MUST appear in the name of at least one case or stop folder. A
   test MUST check this from the folder names.
 - **P2R-76** One command named in the README MUST rewrite every `expected.rs`
   and `expected.txt` from the current tool output; CI MUST NOT run it. A
@@ -703,8 +703,9 @@ Each milestone gets its own requirements in this file when its work starts.
   migrations declare (section 41), then, on 16 Oct 2026 decided under the
   same direction, their `create`, `find()` and `where(..)->first()` on a
   store that the output holds in memory, checked against a PHP stand-in
-  of the same behaviour (section 42), then `sole()` with its exceptions,
-  with a database behind it later;
+  of the same behaviour (section 42), then `sole()`, `firstOrFail()` and
+  `findOrFail()` with Laravel's exceptions (section 43), with a database
+  behind it later;
   unions as list values; values
   of interface types, interface inheritance and class inheritance;
   closures.
@@ -4207,7 +4208,7 @@ relations and every other query method still stop.
   A `String` field of a column that is not text, and an `i64` field of a
   REAL column, stop, as in P2R-411.
 - **P2R-414** These stop, by P2R-135 and P2R-153: any other call on a
-  model, a model class or a query (`sole()`, `get()`, `firstOrFail()`,
+  model, a model class or a query (`get()`, `firstOrCreate(..)`,
   `orderBy(..)`, `where` with an operator or a closure, `update(..)`,
   `save()`); these forms on a model without a struct; `find` with an
   argument of another type (`find('2')`, which Laravel accepts as well);
@@ -4215,7 +4216,83 @@ relations and every other query method still stop.
   reads as `whereNull('c')`); a `create` or `where` that P2R-411 or
   P2R-413 refuses, with a message that names the condition at the call,
   key or value it concerns; and a query held in a variable (`$q =
-  M::query();`), because each form is one whole chain.
+  M::query();`), because each form is one whole chain. Section 43 adds
+  `sole()`, `firstOrFail()` and `findOrFail()`.
+
+## 43. A missing or doubled row as Laravel's exceptions (milestone 2, slice 33)
+
+After section 42, two files of the app (`GetDimensionCodeByCodeQuery`
+and `GetDimensionCodeByNameQuery`) stop only on `where(..)->sole()`, and
+the app calls `sole()` 8 times, `firstOrFail()` 11 times and
+`findOrFail()` 12 times.
+Laravel 12.35.1 answers these from the rows it reads: Eloquent's `sole()`
+reads at most two matching rows and throws `ModelNotFoundException` for
+none and `MultipleRecordsFoundException` for two, and `firstOrFail()` and
+`findOrFail()` throw `ModelNotFoundException` for none. This section
+converts the three forms against the store of section 42 and throws
+these exceptions as section 22 throws its own (P2R-211 to P2R-214), so a
+function that calls one throws, and a `catch` of those classes catches
+them.
+
+- **P2R-420** The output's exception struct (P2R-210) MUST hold three of
+  Laravel's classes in the class tree of `is_a` when a form of P2R-421
+  converts or a `catch` clause names one of them, and not otherwise:
+  `Illuminate\Database\RecordsNotFoundException` under
+  `RuntimeException`, `Illuminate\Database\Eloquent\ModelNotFoundException`
+  under `Illuminate\Database\RecordsNotFoundException`, and
+  `Illuminate\Database\MultipleRecordsFoundException` under
+  `RuntimeException`, each written by its fully qualified name as P2R-390
+  writes the name of an exception class of the input, after the classes
+  of P2R-210 and the input's own under the same parent. A `catch` clause
+  whose class PHP resolves to one of the three MUST test
+  `e.is_a("<name>")` (P2R-214), and `$e->getMessage()` and
+  `$e->getCode()` read its message and code (`0`). `throw new` of one of
+  the three stops, as `new` of another class does (P2R-212), because
+  their constructors take other arguments than a message and a code.
+- **P2R-421** These forms on a model whose store applies (P2R-410) MUST
+  convert to a call of the store that throws (P2R-211), converted by
+  P2R-213 (`?` in a function that throws, `unwrap_or_else(|e|
+  e.uncaught())` in `fn main()`, a `break 'throw` in a `try` body):
+  - The `where` chain of P2R-413 ended by `->sole()` without arguments
+    converts to `M::store_sole(|row: &M| ..)`, with the closure of
+    P2R-413, which gives a copy of the one matching row as `M`. With no
+    matching row it throws `ModelNotFoundException` with the message
+    `No query results for model [<M>].`, and with two or more it throws
+    `MultipleRecordsFoundException` with the message
+    `2 records were found.`, because Laravel reads at most two rows.
+  - The same chain ended by `->firstOrFail()` without arguments converts
+    to `M::store_first_or_fail(|row: &M| ..)`, which gives a copy of the
+    first matching row in creation order as `M`, and with none throws
+    `ModelNotFoundException` with the message
+    `No query results for model [<M>].`.
+  - `M::findOrFail($id)` and `M::query()->findOrFail($id)`, where
+    `query()` has no arguments, with one positional argument of type
+    `int`, convert to `M::store_find_or_fail(<id>)`, which gives a copy of
+    the row with that `id` as `M`, and with none throws
+    `ModelNotFoundException` with the message
+    `No query results for model [<M>] <id>`, the `id` in decimal and with
+    no full stop.
+
+  `<M>` is the model's fully qualified PHP name as declared, in that
+  letter case and without the leading backslash, as Laravel's
+  `get_class()` gives it; every exception's code is `0`. The rules of
+  P2R-413 on the `where` values, and of P2R-412 on the `id`, apply
+  unchanged. Laravel's `Model` declares no `findOrFail`, so the patch of
+  P2R-410 MUST also give it `findOrFail(int $id): static`, as a
+  `@method static` tag declares it, when the included `Model` declares
+  neither it nor `create` and `find`.
+- **P2R-422** The `impl` block of P2R-410 MUST hold `store_sole`,
+  `store_first_or_fail` and `store_find_or_fail` only when the input's
+  code calls them, each returning `Result<M, PhpException>` and reading
+  the store as `store_first` and `store_find` do; a model's store whose
+  only uses are these forms holds no other public function.
+- **P2R-423** These stop, by P2R-135 and P2R-153: `sole()` or
+  `firstOrFail()` with an argument (a list of columns, which Laravel
+  loads alone); `findOrFail` with an argument of another type, a second
+  argument, or a named or unpacked argument; `sole()` or `firstOrFail()`
+  after `query()` without a `where`; these forms on a model whose store
+  does not apply, with the reason of P2R-410; and these forms where a
+  call that throws cannot stand (P2R-213), such as the default of `??`.
 
 ## Spec checklist
 
@@ -4225,7 +4302,7 @@ relations and every other query method still stop.
   takes its element type from the same variable or the declared type it
   flows into (P2R-21); a file of only functions becomes a library (P2R-33).
 - [x] Every requirement is testable: P2R-07 to P2R-49 and P2R-100 to
-  P2R-414 by case and stop folders (P2R-75 enforces this), P2R-01 to P2R-06
+  P2R-423 by case and stop folders (P2R-75 enforces this), P2R-01 to P2R-06
   by error folders and tests, P2R-50 to P2R-52 by P2R-71, the rest by CI or
   a file in the
   repository. Stated review concerns (P2R-05 partial write, P2R-72 case

@@ -607,6 +607,9 @@ struct Converter<'c> {
     trying: usize,
     /// True once a `throw` converts, so the output holds the exception struct (P2R-210).
     uses_exceptions: bool,
+    /// True once a store form throws or a `catch` names one of Laravel's classes, so the
+    /// class tree holds them (P2R-420).
+    laravel_exceptions: bool,
     /// The variables of the open `catch` clauses: PHP name with `$`, Rust name, and
     /// whether a handler read it (P2R-214).
     caught: Vec<(Vec<u8>, String, bool)>,
@@ -663,6 +666,7 @@ impl<'c> Converter<'c> {
             throwing: false,
             trying: 0,
             uses_exceptions: false,
+            laravel_exceptions: false,
             caught: Vec::new(),
             scalar_guard: None,
             shape_orders: BTreeMap::new(),

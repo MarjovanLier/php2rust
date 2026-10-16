@@ -23,9 +23,9 @@ use mago_syntax::parser::parse_file;
 use mago_syntax::walker::Walker;
 
 use super::lists::unparenthesized;
-use super::{Converter, Mode, ParameterSignature, classes, nulls};
+use super::{Converter, Mode, ParameterSignature, classes, nulls, throws};
 use crate::names;
-use crate::printer::{BinOp, RExpr};
+use crate::printer::{self, BinOp, RExpr};
 use crate::types::{self, RustType};
 
 impl Converter<'_> {
@@ -126,7 +126,12 @@ impl Converter<'_> {
             lines.push("}".to_owned());
         }
         if let Some(uses) = self.store_uses.get(&index) {
-            lines.extend(store_lines(name, *uses));
+            let php_name = self
+                .models
+                .iter()
+                .find(|model| model.key == class.key)
+                .map_or("", |model| model.name.as_str());
+            lines.extend(store_lines(name, php_name, *uses));
         }
         lines
     }
@@ -138,7 +143,10 @@ impl Converter<'_> {
         &mut self,
         node: &Expression<'_>,
     ) -> Option<Option<(RExpr, RustType)>> {
-        let (index, op, arguments, wheres) = self.store_form(node)?;
+        let Expression::Call(call) = node else {
+            return None;
+        };
+        let (index, op, arguments, wheres) = self.store_form(call)?;
         let key = &self.classes[index].key;
         let store = self
             .models
@@ -153,9 +161,20 @@ impl Converter<'_> {
             }
             Ok(store) => match op {
                 StoreOp::Create => self.store_create(node, index, arguments, &store),
-                StoreOp::Find => self.store_find(node, index, arguments),
-                StoreOp::First => self.store_first(node, index, &wheres, &store),
+                StoreOp::Find | StoreOp::FindOrFail => self.store_find(node, index, arguments, op),
+                StoreOp::First | StoreOp::Sole | StoreOp::FirstOrFail => {
+                    self.store_first(node, index, &wheres, &store, op)
+                }
             },
+        };
+        // A form that throws converts as a call that throws (P2R-213, P2R-421).
+        let converted = match converted {
+            Some((call, ty)) if op.throws() => {
+                self.uses_exceptions = true;
+                self.laravel_exceptions = true;
+                self.raised(node, call, true).map(|call| (call, ty))
+            }
+            other => other,
         };
         if converted.is_none() {
             self.record_refused(node);
@@ -163,12 +182,18 @@ impl Converter<'_> {
         Some(converted)
     }
 
+    /// True when `call` is a whole chain of section 43, which throws (P2R-211, P2R-421).
+    pub(super) fn store_throws(&self, call: &Call<'_>) -> bool {
+        self.store_form(call)
+            .is_some_and(|(_, op, _, _)| op.throws())
+    }
+
     /// The model's class index, the operation, its argument list, and the argument lists of
-    /// the `where` calls in source order, when `node` is one whole chain of section 42.
+    /// the `where` calls in source order, when `node` is one whole chain of section 42 or 43.
     #[allow(clippy::type_complexity)]
     fn store_form<'n, 'a>(
         &self,
-        node: &'n Expression<'a>,
+        node: &'n Call<'a>,
     ) -> Option<(
         usize,
         StoreOp,
@@ -180,23 +205,21 @@ impl Converter<'_> {
                 if method.value.eq_ignore_ascii_case(name))
         };
         let (method, arguments, class, object) = match node {
-            Expression::Call(Call::StaticMethod(call)) => {
-                (&call.method, &call.argument_list, Some(call.class), None)
-            }
-            Expression::Call(Call::Method(call)) => {
-                (&call.method, &call.argument_list, None, Some(call.object))
-            }
+            Call::StaticMethod(call) => (&call.method, &call.argument_list, Some(call.class), None),
+            Call::Method(call) => (&call.method, &call.argument_list, None, Some(call.object)),
             _ => return None,
         };
-        let op = if named(method, b"create") {
-            StoreOp::Create
-        } else if named(method, b"find") {
-            StoreOp::Find
-        } else if named(method, b"first") {
-            StoreOp::First
-        } else {
-            return None;
-        };
+        let op = [
+            (&b"create"[..], StoreOp::Create),
+            (b"find", StoreOp::Find),
+            (b"first", StoreOp::First),
+            (b"sole", StoreOp::Sole),
+            (b"firstorfail", StoreOp::FirstOrFail),
+            (b"findorfail", StoreOp::FindOrFail),
+        ]
+        .into_iter()
+        .find(|(name, _)| named(method, name))
+        .map(|(_, op)| op)?;
         let mut wheres = Vec::new();
         let class = match (class, object) {
             (Some(class), _) => class,
@@ -218,13 +241,13 @@ impl Converter<'_> {
             (None, None) => return None,
         };
         wheres.reverse();
-        // `first` follows one `where` or more; `create` and `find` follow none.
-        if matches!(op, StoreOp::First) == wheres.is_empty() {
+        // `first`, `sole` and `firstOrFail` follow one `where` or more; the others none.
+        if op.filters() == wheres.is_empty() {
             return None;
         }
         // `M::first()` is no form; `first` comes only through `query()`, and without the
         // columns to load, which would leave the others unread.
-        if matches!(op, StoreOp::First) && (object.is_none() || !arguments.arguments.is_empty()) {
+        if op.filters() && (object.is_none() || !arguments.arguments.is_empty()) {
             return None;
         }
         let key = self.class_key(class)?;
@@ -359,40 +382,55 @@ impl Converter<'_> {
         Some(nulls::wrapped(expr, &found, ty))
     }
 
-    /// `M::find($id)` as `M::store_find(id)` (P2R-412).
+    /// `M::find($id)` as `M::store_find(id)`, and `findOrFail` as `M::store_find_or_fail(id)`
+    /// (P2R-412, P2R-421).
     fn store_find(
         &mut self,
         node: &Expression<'_>,
         index: usize,
         arguments: &ArgumentList<'_>,
+        op: StoreOp,
     ) -> Option<(RExpr, RustType)> {
         let Some(id) = sole_argument(arguments) else {
-            self.refuse(node, "find converts only with one argument (P2R-412)");
+            self.refuse(
+                node,
+                "find and findOrFail convert only with one argument (P2R-412, P2R-421)",
+            );
             return None;
         };
         let (expr, ty) = self.expression(id)?;
         if ty != RustType::I64 {
             self.refuse(
                 id,
-                "find converts only with an int id, which the store compares with the row's id (P2R-412)",
+                "find and findOrFail convert only with an int id, which the store compares with the row's id (P2R-412, P2R-421)",
             );
             return None;
         }
         let name = self.classes[index].rust_name.clone();
-        self.store_uses.entry(index).or_default().find = true;
-        Some((
-            RExpr::Call(format!("{name}::store_find"), vec![expr]),
-            RustType::Option(Box::new(RustType::Class(name))),
-        ))
+        let uses = self.store_uses.entry(index).or_default();
+        let (function, ty) = if op.throws() {
+            uses.find_or_fail = true;
+            ("store_find_or_fail", RustType::Class(name.clone()))
+        } else {
+            uses.find = true;
+            (
+                "store_find",
+                RustType::Option(Box::new(RustType::Class(name.clone()))),
+            )
+        };
+        Some((RExpr::Call(format!("{name}::{function}"), vec![expr]), ty))
     }
 
-    /// `M::query()->where('c', $v)..->first()` as `M::store_first(|row: &M| ..)` (P2R-413).
+    /// `M::query()->where('c', $v)..->first()` as `M::store_first(|row: &M| ..)`, and the
+    /// chain ended by `sole()` or `firstOrFail()` as `M::store_sole(..)` or
+    /// `M::store_first_or_fail(..)` (P2R-413, P2R-421).
     fn store_first(
         &mut self,
         node: &Expression<'_>,
         index: usize,
         wheres: &[&ArgumentList<'_>],
         store: &StoreRules,
+        op: StoreOp,
     ) -> Option<(RExpr, RustType)> {
         let name = self.classes[index].rust_name.clone();
         let fields = self.classes[index].fields.clone();
@@ -459,16 +497,33 @@ impl Converter<'_> {
             .into_iter()
             .map(|test| test.rendered(&row, &text))
             .reduce(|earlier, test| RExpr::Binary(Box::new(earlier), BinOp::And, Box::new(test)))?;
-        self.store_uses.entry(index).or_default().first = true;
+        let uses = self.store_uses.entry(index).or_default();
+        let (function, ty) = match op {
+            StoreOp::Sole => {
+                uses.sole = true;
+                ("store_sole", RustType::Class(name.clone()))
+            }
+            StoreOp::FirstOrFail => {
+                uses.first_or_fail = true;
+                ("store_first_or_fail", RustType::Class(name.clone()))
+            }
+            _ => {
+                uses.first = true;
+                (
+                    "store_first",
+                    RustType::Option(Box::new(RustType::Class(name.clone()))),
+                )
+            }
+        };
         Some((
             RExpr::Call(
-                format!("{name}::store_first"),
+                format!("{name}::{function}"),
                 vec![RExpr::Closure(
                     vec![format!("{row}: &{name}")],
                     Box::new(condition),
                 )],
             ),
-            RustType::Option(Box::new(RustType::Class(name))),
+            ty,
         ))
     }
 
@@ -587,12 +642,30 @@ fn variables_read(expr: &RExpr) -> Vec<String> {
         .collect()
 }
 
-/// The operation of a form of section 42.
+/// The operation of a form of section 42 or 43.
 #[derive(Clone, Copy, Debug)]
 enum StoreOp {
     Create,
     Find,
     First,
+    Sole,
+    FirstOrFail,
+    FindOrFail,
+}
+
+impl StoreOp {
+    /// True for a form that throws one of Laravel's exceptions (P2R-421).
+    fn throws(self) -> bool {
+        matches!(
+            self,
+            StoreOp::Sole | StoreOp::FirstOrFail | StoreOp::FindOrFail
+        )
+    }
+
+    /// True for a form that ends a chain of `where` calls (P2R-413, P2R-421).
+    fn filters(self) -> bool {
+        matches!(self, StoreOp::First | StoreOp::Sole | StoreOp::FirstOrFail)
+    }
 }
 
 /// The one positional argument of `list`.
@@ -641,12 +714,15 @@ pub(super) struct StoreUse {
     pub(super) create: bool,
     pub(super) find: bool,
     pub(super) first: bool,
+    pub(super) sole: bool,
+    pub(super) first_or_fail: bool,
+    pub(super) find_or_fail: bool,
 }
 
 /// The `impl` block of a model's store, with only the functions its code calls, because
 /// rustc warns about the others (P2R-50, P2R-410). The paths start with `::std`, because a
 /// namespace `Std` gives the crate a module `std`.
-fn store_lines(name: &str, uses: StoreUse) -> Vec<String> {
+fn store_lines(name: &str, php_name: &str, uses: StoreUse) -> Vec<String> {
     let mut lines = vec![
         String::new(),
         format!("impl {name} {{"),
@@ -686,6 +762,49 @@ fn store_lines(name: &str, uses: StoreUse) -> Vec<String> {
             String::new(),
             format!("    pub fn store_first(matches: impl Fn(&{name}) -> bool) -> Option<{name}> {{"),
             format!("        {name}::store_rows().with_borrow(|rows| rows.iter().find(|row| matches(row)).cloned())"),
+            "    }".to_owned(),
+        ]);
+    }
+    // Laravel's messages name the model as `get_class()` gives it (P2R-421).
+    let missing = printer::quote(throws::MODEL_NOT_FOUND);
+    let doubled = printer::quote(throws::MULTIPLE_RECORDS);
+    let none = printer::quote(&format!("No query results for model [{php_name}]."));
+    if uses.sole {
+        lines.extend([
+            String::new(),
+            format!("    pub fn store_sole(matches: impl Fn(&{name}) -> bool) -> Result<{name}, PhpException> {{"),
+            format!("        {name}::store_rows().with_borrow(|rows| {{"),
+            "            let mut found = rows.iter().filter(|row| matches(row));".to_owned(),
+            "            match (found.next(), found.next()) {".to_owned(),
+            "                (Some(row), None) => Ok(row.clone()),".to_owned(),
+            format!("                (None, _) => Err(PhpException::new({missing}, {none}, 0)),"),
+            format!("                (Some(_), Some(_)) => Err(PhpException::new({doubled}, \"2 records were found.\", 0)),"),
+            "            }".to_owned(),
+            "        })".to_owned(),
+            "    }".to_owned(),
+        ]);
+    }
+    if uses.first_or_fail {
+        lines.extend([
+            String::new(),
+            format!("    pub fn store_first_or_fail(matches: impl Fn(&{name}) -> bool) -> Result<{name}, PhpException> {{"),
+            format!("        {name}::store_rows()"),
+            "            .with_borrow(|rows| rows.iter().find(|row| matches(row)).cloned())".to_owned(),
+            format!("            .ok_or_else(|| PhpException::new({missing}, {none}, 0))"),
+            "    }".to_owned(),
+        ]);
+    }
+    if uses.find_or_fail {
+        let with_id = printer::quote(&format!("No query results for model [{php_name}] {{id}}"));
+        lines.extend([
+            String::new(),
+            format!("    pub fn store_find_or_fail(id: i64) -> Result<{name}, PhpException> {{"),
+            format!("        {name}::store_rows()"),
+            "            .with_borrow(|rows| rows.iter().find(|row| row.id == id).cloned())"
+                .to_owned(),
+            format!(
+                "            .ok_or_else(|| PhpException::new({missing}, &format!({with_id}), 0))"
+            ),
             "    }".to_owned(),
         ]);
     }
@@ -731,6 +850,8 @@ const MODEL_PROPERTIES: [&[u8]; 5] = [b"$table", b"$fillable", b"$guarded", b"$h
 /// problem points and why it has no struct (P2R-401).
 pub(super) struct Model {
     pub(super) key: Vec<u8>,
+    /// The fully qualified PHP name as declared, which Laravel's messages name (P2R-421).
+    pub(super) name: String,
     pub(super) fields: Result<Vec<Field>, (Span, String)>,
     /// What the store of the model needs, or why its forms stop (P2R-410).
     pub(super) store: Result<StoreRules, String>,
@@ -799,8 +920,13 @@ pub(super) fn find(
                 Ok((fields, store)) => (Ok(fields), store),
                 Err(reason) => (Err(reason), Err(String::new())),
             };
+            let full = names
+                .resolve(&class.name.span().start)
+                .unwrap_or(class.name.value);
             Model {
                 key: key.clone(),
+                name: String::from_utf8_lossy(full.strip_prefix(b"\\").unwrap_or(full))
+                    .into_owned(),
                 fields,
                 store,
             }
@@ -1447,10 +1573,10 @@ fn plain_literal(expression: &Expression<'_>) -> bool {
 
 /// Tells Mago each field of the model as a property PHP reads through `__get`, as a
 /// `@property` tag would, replacing a tag of the same name (P2R-403).
-/// Laravel forwards `M::create(..)` and `M::find(..)` through `__callStatic`, which Mago types
-/// as mixed. A patch of Eloquent's model gives them to Mago as `@method static`, typed as the
-/// forms of section 42 convert them; a model of an include that declares either for real
-/// keeps its own (P2R-411, P2R-412).
+/// Laravel forwards `M::create(..)`, `M::find(..)` and `M::findOrFail(..)` through
+/// `__callStatic`, which Mago types as mixed. A patch of Eloquent's model gives them to Mago
+/// as `@method static`, typed as the forms of sections 42 and 43 convert them; a model of an
+/// include that declares one of them for real keeps its own (P2R-411, P2R-412, P2R-421).
 fn tell_static_forms(codebase: &mut CodebaseMetadata) {
     let Some(model) = codebase.get_class_like(MODEL) else {
         return;
@@ -1461,10 +1587,10 @@ fn tell_static_forms(codebase: &mut CodebaseMetadata) {
             .iter()
             .any(|method| method.as_bytes().eq_ignore_ascii_case(name))
     };
-    if declares(b"create") || declares(b"find") {
+    if declares(b"create") || declares(b"find") || declares(b"findorfail") {
         return;
     }
-    let source = "<?php\n\nnamespace Illuminate\\Database\\Eloquent;\n\n/**\n * @method static static create(array<string, mixed> $attributes = [])\n * @method static static|null find(int $id)\n */\nabstract class Model\n{\n}\n";
+    let source = "<?php\n\nnamespace Illuminate\\Database\\Eloquent;\n\n/**\n * @method static static create(array<string, mixed> $attributes = [])\n * @method static static|null find(int $id)\n * @method static static findOrFail(int $id)\n */\nabstract class Model\n{\n}\n";
     let file = File::new(
         Cow::Borrowed(b"php2rust://eloquent-model-patch.php"),
         FileType::Patch,

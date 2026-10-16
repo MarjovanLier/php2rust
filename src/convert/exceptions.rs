@@ -43,6 +43,8 @@ const EXCEPTION_PROPERTIES: [&[u8]; 6] =
 pub(super) enum Thrown<'s> {
     BuiltIn(&'static str),
     Input(&'s ExceptionClass),
+    /// One of Laravel's classes of a missing or doubled row, which a `catch` names (P2R-420).
+    Laravel(&'static str),
 }
 
 impl Converter<'_> {
@@ -63,7 +65,12 @@ impl Converter<'_> {
                     return None;
                 };
                 let key = self.name_key(&declaration.name, declaration.name.value);
-                Some((key, self.identifier_key(parent), declaration))
+                // A class named as one of Laravel's would be that class twice in `is_a`, so
+                // it stops as a class that extends another (P2R-420).
+                let laravel = throws::LARAVEL
+                    .iter()
+                    .any(|(name, _)| name.as_bytes().eq_ignore_ascii_case(&key));
+                (!laravel).then(|| (key, self.identifier_key(parent), declaration))
             })
             .collect();
         loop {
@@ -109,13 +116,19 @@ impl Converter<'_> {
         }
     }
 
-    /// The name and parent of each exception class, in source order (P2R-390).
+    /// The name and parent of each exception class, in source order (P2R-390), then
+    /// Laravel's classes when the output throws or catches them (P2R-420).
     pub(super) fn exception_pairs(&self) -> Vec<(String, String)> {
         let mut classes: Vec<&ExceptionClass> = self.exceptions.iter().collect();
         classes.sort_by_key(|class| class.order);
+        let laravel = throws::LARAVEL
+            .iter()
+            .filter(|_| self.laravel_exceptions)
+            .map(|&(class, parent)| (class.to_owned(), parent.to_owned()));
         classes
             .iter()
             .map(|class| (class.name.clone(), class.parent.clone()))
+            .chain(laravel)
             .collect()
     }
 
@@ -152,6 +165,12 @@ impl Converter<'_> {
     pub(super) fn thrown_class(&self, key: &[u8]) -> Option<Thrown<'_>> {
         if let Some(name) = throws::built_in(key) {
             return Some(Thrown::BuiltIn(name));
+        }
+        if let Some(&(name, _)) = throws::LARAVEL
+            .iter()
+            .find(|(name, _)| name.as_bytes().eq_ignore_ascii_case(key))
+        {
+            return Some(Thrown::Laravel(name));
         }
         self.exceptions
             .iter()

@@ -33,6 +33,17 @@ const CLASSES: &[(&str, &str)] = &[
     ("UnexpectedValueException", "RuntimeException"),
 ];
 
+const RECORDS_NOT_FOUND: &str = "Illuminate\\Database\\RecordsNotFoundException";
+pub(super) const MODEL_NOT_FOUND: &str = "Illuminate\\Database\\Eloquent\\ModelNotFoundException";
+pub(super) const MULTIPLE_RECORDS: &str = "Illuminate\\Database\\MultipleRecordsFoundException";
+
+/// Laravel's exception classes of a missing or doubled row, each with its parent (P2R-420).
+pub(super) const LARAVEL: &[(&str, &str)] = &[
+    (RECORDS_NOT_FOUND, "RuntimeException"),
+    (MODEL_NOT_FOUND, RECORDS_NOT_FOUND),
+    (MULTIPLE_RECORDS, "RuntimeException"),
+];
+
 /// The class of P2R-210 that the resolved, lowercase name `key` names.
 pub(super) fn built_in(key: &[u8]) -> Option<&'static str> {
     CLASSES
@@ -109,9 +120,9 @@ pub(super) fn exception_lines(input: &[(String, String)]) -> Vec<String> {
             "    }",
             "",
             "    pub fn uncaught(self) -> ! {",
-            "        let _ = std::io::Write::flush(&mut std::io::stdout());",
+            "        let _ = ::std::io::Write::flush(&mut ::std::io::stdout());",
             "        eprintln!(\"PHP Fatal error:  Uncaught {}: {}\", self.class, self.message);",
-            "        std::process::exit(255)",
+            "        ::std::process::exit(255)",
             "    }",
             "}",
         ]
@@ -217,6 +228,11 @@ impl Found<'_, '_> {
 impl<'ast, 'arena> Walker<'ast, 'arena, Found<'_, '_>> for Throwing {
     fn walk_in_throw(&self, _: &'ast Throw<'arena>, found: &mut Found<'_, '_>) {
         found.throws |= found.protected == 0;
+    }
+
+    /// `sole()`, `firstOrFail()` and `findOrFail()` on a model's store throw (P2R-421).
+    fn walk_in_call(&self, call: &'ast Call<'arena>, found: &mut Found<'_, '_>) {
+        found.throws |= found.protected == 0 && found.converter.store_throws(call);
     }
 
     fn walk_in_function_call(&self, call: &'ast FunctionCall<'arena>, found: &mut Found<'_, '_>) {
@@ -528,7 +544,8 @@ impl Converter<'_> {
                                 class.function.clone(),
                                 class.constructor,
                             )),
-                            None => None,
+                            // Their constructors take other arguments (P2R-420).
+                            Some(Thrown::Laravel(_)) | None => None,
                         }
                     }
                     _ => None,
@@ -903,10 +920,14 @@ impl Converter<'_> {
                     Some(key) => match self.thrown_class(&key) {
                         Some(Thrown::BuiltIn(class)) => classes.push(class.to_owned()),
                         Some(Thrown::Input(class)) => classes.push(class.name.clone()),
+                        Some(Thrown::Laravel(class)) => {
+                            classes.push(class.to_owned());
+                            self.laravel_exceptions = true;
+                        }
                         None => {
                             self.refuse(
                                 hint,
-                                "a catch converts only for PHP's built-in exception classes, Exception, Throwable and the exception classes of the input (P2R-214, P2R-392)",
+                                "a catch converts only for PHP's built-in exception classes, Exception, Throwable, the exception classes of the input and Laravel's classes of a missing or doubled row (P2R-214, P2R-392, P2R-420)",
                             );
                             fine = false;
                         }

@@ -45,3 +45,11 @@ final class Hinge extends Model
 final class Axle extends Model
 {
 }
+
+final class Cam extends Model
+{
+}
+
+final class Wheel extends Model
+{
+}

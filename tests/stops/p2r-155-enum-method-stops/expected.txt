@@ -3,5 +3,5 @@ input.php:15:21: an enum method may not take the name of name, value, from, tryF
 input.php:25:21: foobar is already the name of another method (P2R-131)
 input.php:30:28: a private method cannot be final, and PHP warns about it (P2R-135)
 input.php:35:21: a method whose name starts with __ is not supported (P2R-155)
-input.php:40:27: a nullable, union or map type that holds objects whose class changes them is not supported (P2R-141, P2R-240)
+input.php:40:27: a nullable, union, map or collection type that holds objects whose class changes them is not supported (P2R-141, P2R-240, P2R-440)
 input.php:53:12: a method call on a value that may be null is not supported (P2R-106)

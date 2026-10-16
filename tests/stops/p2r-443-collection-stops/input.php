@@ -183,6 +183,44 @@ function nested(\Illuminate\Support\Collection $groups): int
     return 0;
 }
 
+// get() on the model class, through __callStatic (P2R-441).
+function staticGet(): int
+{
+    return Code::get()->count();
+}
+
+function staticWhere(): int
+{
+    return Code::where('name', 'a')->get()->count();
+}
+
+// A collection of objects whose class changes them, also in an interface (P2R-440).
+final class Counter
+{
+    public int $n = 0;
+
+    public function bump(): void
+    {
+        $this->n++;
+    }
+}
+
+/**
+ * @param \Illuminate\Support\Collection<int, Counter> $list
+ */
+function counters(\Illuminate\Support\Collection $list): int
+{
+    return 0;
+}
+
+interface Counts
+{
+    /**
+     * @param \Illuminate\Support\Collection<int, Counter> $counters
+     */
+    public function counted(\Illuminate\Support\Collection $counters): int;
+}
+
 // A collection made other than by the store (P2R-443).
 /**
  * @return Collection<int, Code>

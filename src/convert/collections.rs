@@ -11,19 +11,22 @@ pub(super) const COLLECTION_USE: &str = "a collection converts only in a foreach
 
 impl Converter<'_> {
     /// The lowercase names of Laravel's collection classes that an included file, never
-    /// the input, declares (P2R-340, P2R-440).
+    /// the input, declares. Eloquent's counts only beside the base class it inherits its
+    /// methods from, which the input may otherwise declare itself (P2R-340, P2R-440).
     pub(super) fn included_collections(&self) -> Vec<&'static [u8]> {
-        COLLECTIONS
-            .into_iter()
-            .filter(|name| {
-                self.codebase.get_class_like(name).is_some_and(|class| {
-                    !self
-                        .files
-                        .iter()
-                        .any(|analysed| analysed.file == class.span.file_id)
-                })
+        let included = |name: &[u8]| {
+            self.codebase.get_class_like(name).is_some_and(|class| {
+                !self
+                    .files
+                    .iter()
+                    .any(|analysed| analysed.file == class.span.file_id)
             })
-            .collect()
+        };
+        match (included(COLLECTIONS[0]), included(COLLECTIONS[1])) {
+            (true, true) => COLLECTIONS.to_vec(),
+            (true, false) => vec![COLLECTIONS[0]],
+            (false, _) => Vec::new(),
+        }
     }
 
     /// True when `call` is `isEmpty()`, `isNotEmpty()` or `first()` on a collection value,

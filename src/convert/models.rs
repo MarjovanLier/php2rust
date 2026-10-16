@@ -26,7 +26,7 @@ use super::lists::unparenthesized;
 use super::{Converter, Mode, ParameterSignature, classes, nulls, throws};
 use crate::names;
 use crate::printer::{self, BinOp, RExpr};
-use crate::types::{self, RustType};
+use crate::types::{self, COLLECTIONS, RustType};
 
 impl Converter<'_> {
     /// The properties of the model `key`: its fields, or none when it has no struct; `None`
@@ -157,6 +157,18 @@ impl Converter<'_> {
         let converted = match store {
             Err(reason) => {
                 self.refuse(node, reason);
+                None
+            }
+            // `get()` and `all()` give Eloquent's collection, which must be Laravel's
+            // (P2R-440, P2R-441).
+            Ok(_)
+                if matches!(op, StoreOp::Get | StoreOp::All)
+                    && !self.type_names.collections.contains(&COLLECTIONS[1]) =>
+            {
+                self.refuse(
+                    node,
+                    "get() and all() convert only with Laravel's Eloquent collection and its base class read by --include (P2R-441)",
+                );
                 None
             }
             Ok(_)

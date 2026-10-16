@@ -1695,7 +1695,7 @@ impl Converter<'_> {
         let named = match &rust_name {
             None => false,
             Some(name)
-                if self.functions.values().any(|f| f.rust_name == *name)
+                if self.is_function_name(name)
                     || self
                         .variables
                         .entries

@@ -123,6 +123,10 @@ impl Converter<'_> {
             let Statement::Class(declaration) = statement else {
                 continue;
             };
+            // An exception class of the input takes no struct (P2R-390).
+            if self.exception_index(declaration).is_some() {
+                continue;
+            }
             let Some(rust_name) = self.declared_type_name(&declaration.name, "class") else {
                 continue;
             };
@@ -147,10 +151,12 @@ impl Converter<'_> {
     /// Checks every registered class and reads its properties and method signatures,
     /// once the functions are known (P2R-130, P2R-131, P2R-135).
     pub(super) fn register_class_members(&mut self, program: &Program<'_>) {
+        // A parameter may not hide a function, of PHP or of an exception constructor (P2R-391).
         let taken: HashSet<String> = self
             .functions
             .values()
             .map(|f| f.rust_name.clone())
+            .chain(self.exceptions.iter().filter_map(|c| c.rust_name.clone()))
             .collect();
         for statement in program.statements.iter() {
             let (name, members) = match statement {
@@ -928,6 +934,19 @@ impl Converter<'_> {
                 &method.name,
                 "a method that returns by reference is not supported (P2R-135)",
             );
+        }
+        // PHP rejects these when it compiles the file; Mago does not report them.
+        if is_constructor(method) {
+            if let Some(hint) = &method.return_type_hint {
+                self.refuse(hint, "PHP rejects a return type on a constructor (P2R-130)");
+            }
+            if let Some(modifier) = method
+                .modifiers
+                .iter()
+                .find(|m| matches!(m, Modifier::Static(_)))
+            {
+                self.refuse(modifier, "PHP rejects a static constructor (P2R-130)");
+            }
         }
         if !is_constructor(method) && method.name.value.starts_with(b"__") {
             self.refuse(
@@ -2439,7 +2458,7 @@ fn named_like_hook(method: &Method<'_>) -> bool {
 }
 
 /// The variables PHP declares in every scope, which a parameter may not take as its name.
-const SUPERGLOBALS: [&[u8]; 9] = [
+pub(super) const SUPERGLOBALS: [&[u8]; 9] = [
     b"$GLOBALS",
     b"$_SERVER",
     b"$_GET",

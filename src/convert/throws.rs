@@ -6,6 +6,7 @@ use mago_syntax::cst::*;
 use mago_syntax::walker::Walker;
 
 use super::control::emit;
+use super::exceptions::Thrown;
 use super::lists::unparenthesized;
 use super::{Context, Converter, Mode, ParameterSignature};
 use crate::names;
@@ -33,7 +34,7 @@ const CLASSES: &[(&str, &str)] = &[
 ];
 
 /// The class of P2R-210 that the resolved, lowercase name `key` names.
-fn built_in(key: &[u8]) -> Option<&'static str> {
+pub(super) fn built_in(key: &[u8]) -> Option<&'static str> {
     CLASSES
         .iter()
         .map(|&(class, _)| class)
@@ -45,10 +46,20 @@ fn catches_all(key: &[u8]) -> bool {
     key == b"exception" || key == b"throwable"
 }
 
-/// The lines of the exception struct (P2R-210).
-pub(super) fn exception_lines() -> Vec<String> {
+/// The lines of the exception struct (P2R-210), whose class tree holds the exception
+/// classes of the input too, each with its parent (P2R-390).
+pub(super) fn exception_lines(input: &[(String, String)]) -> Vec<String> {
     let mut parents: Vec<(&str, Vec<&str>)> = Vec::new();
-    for &(class, parent) in CLASSES.iter().filter(|(_, parent)| !parent.is_empty()) {
+    let pairs = CLASSES
+        .iter()
+        .filter(|(_, parent)| !parent.is_empty())
+        .copied()
+        .chain(
+            input
+                .iter()
+                .map(|(class, parent)| (class.as_str(), parent.as_str())),
+        );
+    for (class, parent) in pairs {
         match parents.iter_mut().find(|(known, _)| *known == parent) {
             Some((_, children)) => children.push(class),
             None => parents.push((parent, vec![class])),
@@ -83,10 +94,11 @@ pub(super) fn exception_lines() -> Vec<String> {
     .map(|line| (*line).to_owned())
     .collect();
     for (parent, children) in parents {
-        let pattern: Vec<String> = children.iter().map(|c| format!("\"{c}\"")).collect();
+        let pattern: Vec<String> = children.iter().map(|c| printer::quote(c)).collect();
         lines.push(format!(
-            "                {} => \"{parent}\",",
-            pattern.join(" | ")
+            "                {} => {},",
+            pattern.join(" | "),
+            printer::quote(parent)
         ));
     }
     lines.extend(
@@ -111,7 +123,7 @@ pub(super) fn exception_lines() -> Vec<String> {
 
 /// The parameters of a built-in exception's constructor, as `new` of P2R-133 takes them
 /// (P2R-212).
-fn exception_parameters() -> [ParameterSignature; 2] {
+pub(super) fn exception_parameters() -> [ParameterSignature; 2] {
     let parameter = |name: &str, ty: RustType, default: RExpr| ParameterSignature {
         php_name: name.as_bytes().to_vec(),
         rust_name: name.to_owned(),
@@ -336,7 +348,7 @@ impl<'ast, 'arena> Walker<'ast, 'arena, bool> for Leaving {
 /// A `catch` clause, checked.
 struct Clause<'c, 'arena> {
     /// The classes it tests; empty for a catch-all.
-    classes: Vec<&'static str>,
+    classes: Vec<String>,
     variable: Option<&'c DirectVariable<'arena>>,
     block: &'c Block<'arena>,
 }
@@ -414,7 +426,7 @@ impl Converter<'_> {
     }
 
     /// True when `statements` throw outside a `try` body with a catch-all clause (P2R-211).
-    fn body_throws<'ast, 'arena: 'ast>(
+    pub(super) fn body_throws<'ast, 'arena: 'ast>(
         &self,
         statements: impl IntoIterator<Item = &'ast Statement<'arena>>,
         class: Option<usize>,
@@ -508,43 +520,50 @@ impl Converter<'_> {
             Expression::Instantiation(new) => {
                 let class = match new.class {
                     Expression::Identifier(identifier) => {
-                        built_in(&self.identifier_key(identifier))
+                        let key = self.identifier_key(identifier);
+                        match self.thrown_class(&key) {
+                            Some(Thrown::BuiltIn(name)) => Some((name.to_owned(), None)),
+                            Some(Thrown::Input(class)) => {
+                                Some((class.name.clone(), class.function.clone()))
+                            }
+                            None => None,
+                        }
                     }
                     _ => None,
                 };
-                let Some(class) = class else {
+                let Some((class, function)) = class else {
                     self.record_refused(throw.exception);
                     self.refuse(
                         throw.exception,
-                        "a throw converts only for new of one of PHP's built-in exception classes (P2R-212)",
+                        "a throw converts only for new of one of PHP's built-in exception classes or an exception class of the input (P2R-212, P2R-392)",
                     );
                     return None;
                 };
-                let parameters = exception_parameters();
-                let extra = new.argument_list.as_ref().is_some_and(|list| {
-                    list.arguments.len() > 2
-                        || list.arguments.iter().any(|argument| match argument {
-                            Argument::Named(named) => {
-                                !matches!(named.name.value, b"message" | b"code")
-                            }
-                            Argument::Positional(_) => false,
-                        })
-                });
-                if extra {
-                    self.record_refused(throw.exception);
-                    self.refuse(
-                        throw.exception,
-                        "a throw converts only with the arguments message and code (P2R-212)",
-                    );
-                    return None;
+                // A constructor of the input builds the exception (P2R-392).
+                if let Some(function) = function {
+                    let arguments = match &new.argument_list {
+                        Some(list) => self.arguments(list, &function.parameters, throw.exception),
+                        None => function
+                            .parameters
+                            .iter()
+                            .map(|parameter| {
+                                parameter.default.as_ref().map(|(value, _)| value.clone())
+                            })
+                            .collect(),
+                    };
+                    let Some(arguments) = arguments else {
+                        self.record_refused(throw.exception);
+                        return None;
+                    };
+                    self.uses_exceptions = true;
+                    return Some(RExpr::Call(function.rust_name.clone(), arguments));
                 }
-                let mut arguments = match &new.argument_list {
-                    Some(list) => self.arguments(list, &parameters, throw.exception)?,
-                    None => vec![RExpr::Str(String::new()), RExpr::Int(0)],
-                };
-                arguments.insert(0, RExpr::Str(class.to_owned()));
-                self.uses_exceptions = true;
-                Some(RExpr::Call("PhpException::new".into(), arguments))
+                let exception =
+                    self.new_exception(new.argument_list.as_ref(), throw.exception, &class);
+                if exception.is_none() {
+                    self.record_refused(throw.exception);
+                }
+                exception
             }
             Expression::Variable(Variable::Direct(variable)) => {
                 match self.caught_name(variable.name) {
@@ -757,7 +776,7 @@ impl Converter<'_> {
                     let test: Vec<String> = clause
                         .classes
                         .iter()
-                        .map(|class| format!("{binding}.is_a(\"{class}\")"))
+                        .map(|class| format!("{binding}.is_a({})", printer::quote(class)))
                         .collect();
                     format!("{keyword} {} {{", test.join(" || "))
                 };
@@ -869,12 +888,13 @@ impl Converter<'_> {
                 };
                 match key {
                     Some(key) if catches_all(&key) => all = true,
-                    Some(key) => match built_in(&key) {
-                        Some(class) => classes.push(class),
+                    Some(key) => match self.thrown_class(&key) {
+                        Some(Thrown::BuiltIn(class)) => classes.push(class.to_owned()),
+                        Some(Thrown::Input(class)) => classes.push(class.name.clone()),
                         None => {
                             self.refuse(
                                 hint,
-                                "a catch converts only for PHP's built-in exception classes, Exception and Throwable (P2R-214)",
+                                "a catch converts only for PHP's built-in exception classes, Exception, Throwable and the exception classes of the input (P2R-214, P2R-392)",
                             );
                             fine = false;
                         }
@@ -887,7 +907,7 @@ impl Converter<'_> {
             }
             // A clause whose classes were all refused still tests, so it is no catch-all.
             if classes.is_empty() && !all {
-                classes.push("Exception");
+                classes.push("Exception".to_owned());
             }
             if all {
                 classes.clear();
@@ -898,6 +918,17 @@ impl Converter<'_> {
                 self.refuse(
                     variable,
                     "the variable of a catch must be one the function does not use already, because PHP overwrites it (P2R-214)",
+                );
+                fine = false;
+            }
+            // Its binding would hide a function of that name (P2R-31).
+            if let Some(variable) = &clause.variable
+                && let Some(name) = names::rust_name(&String::from_utf8_lossy(&variable.name[1..]))
+                && self.is_function_name(&name)
+            {
+                self.refuse(
+                    variable,
+                    format!("{name} is already the Rust name of a function or variable (P2R-31)"),
                 );
                 fine = false;
             }

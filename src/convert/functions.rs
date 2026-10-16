@@ -64,8 +64,14 @@ impl Converter<'_> {
             }
             named.push((function, rust_name));
         }
+        // A parameter may not hide the function of an exception constructor either (P2R-391).
+        let hidden: HashSet<String> = taken
+            .iter()
+            .cloned()
+            .chain(self.exceptions.iter().filter_map(|c| c.rust_name.clone()))
+            .collect();
         for (function, rust_name) in named {
-            if let Some(signature) = self.signature(function, rust_name, &taken) {
+            if let Some(signature) = self.signature(function, rust_name, &hidden) {
                 self.functions
                     .insert(self.function_key(function), signature);
             }
@@ -163,6 +169,13 @@ impl Converter<'_> {
             self.refuse(
                 &parameter.variable,
                 "a parameter cannot be named $this, which PHP rejects (P2R-135)",
+            );
+            return None;
+        }
+        if classes::SUPERGLOBALS.contains(&parameter.variable.name) {
+            self.refuse(
+                &parameter.variable,
+                "PHP rejects a parameter named like a superglobal (P2R-31)",
             );
             return None;
         }
@@ -411,10 +424,23 @@ impl Converter<'_> {
     pub(super) fn function(&mut self, function: &Function<'_>) -> Option<Vec<String>> {
         let key = self.function_key(function);
         let signature = self.functions.get(&key)?.clone();
-        // A function has its own variables; those of `fn main()` wait until it ends.
         let statements: Vec<&Statement<'_>> = function.body.statements.iter().collect();
-        let checks = owned_checks(&statements);
-        let copied = self.copied_parameters(&statements, &signature.parameters, &checks);
+        Some(self.function_lines(key, &function.name, &statements, &signature, |_, _| {}))
+    }
+
+    /// The lines of a function with `signature` and the body `statements`, after which
+    /// `tail` adds its own lines in the same scope (P2R-30, P2R-391).
+    pub(super) fn function_lines(
+        &mut self,
+        key: Vec<u8>,
+        name: &LocalIdentifier<'_>,
+        statements: &[&Statement<'_>],
+        signature: &Signature,
+        tail: impl FnOnce(&mut Self, &mut Vec<String>),
+    ) -> Vec<String> {
+        // A function has its own variables; those of `fn main()` wait until it ends.
+        let checks = owned_checks(statements);
+        let copied = self.copied_parameters(statements, &signature.parameters, &checks);
         let outer = std::mem::replace(
             &mut self.variables,
             Variables::with_parameters(&signature.parameters, &copied),
@@ -422,12 +448,12 @@ impl Converter<'_> {
         self.variables.owned_checks = checks.iter().map(|check| check.span).collect();
         let outer_function = self.current_function.replace(key);
         let outer_calls = std::mem::take(&mut self.self_calls);
-        let sites = self.site_types(function.body.statements.iter(), signature.returns.as_ref());
+        let sites = self.site_types(statements.iter().copied(), signature.returns.as_ref());
         self.variables.list_types = sites.lists;
         self.variables.null_types = sites.nulls;
         let mut body = Vec::new();
         let outer_body = self.begin_body(signature.throws);
-        for statement in function.body.statements.iter() {
+        for statement in statements {
             self.statement(
                 statement,
                 1,
@@ -435,11 +461,12 @@ impl Converter<'_> {
                 &mut body,
             );
         }
+        tail(self, &mut body);
         self.end_body(signature.returns.is_none(), 1, &mut body, outer_body);
         // rustc rejects a function with a return type whose end a path reaches.
         if signature.returns.is_some() && self.variables.left.is_none() {
             self.refuse(
-                &function.name,
+                name,
                 "a function with a return type must return on every path (P2R-50)",
             );
         }
@@ -447,9 +474,9 @@ impl Converter<'_> {
             self_calls: &self.self_calls,
             dropped: &self.dropped_defaults,
         };
-        if recursion::always_recurses(&statements, &target) {
+        if recursion::always_recurses(statements, &target) {
             self.refuse(
-                &function.name,
+                name,
                 "this function calls itself on every path, and rustc rejects it (P2R-50)",
             );
         }
@@ -466,12 +493,12 @@ impl Converter<'_> {
         );
         if body.is_empty() {
             // rustfmt writes an empty body as `{}` on the same line.
-            return Some(vec![emit(0, format!("{open}}}"))]);
+            return vec![emit(0, format!("{open}}}"))];
         }
         let mut lines = vec![emit(0, open)];
         lines.extend(body);
         lines.push("}".to_owned());
-        Some(lines)
+        lines
     }
 }
 

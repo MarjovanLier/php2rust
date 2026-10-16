@@ -37,6 +37,7 @@ mod control;
 mod crates;
 mod dates;
 mod enums;
+mod exceptions;
 mod expressions;
 mod flow;
 mod foreach;
@@ -540,6 +541,8 @@ struct Converter<'c> {
     classes: Vec<classes::ClassInfo>,
     /// The input's own interfaces in source order, which become traits (P2R-370).
     interfaces: Vec<interfaces::InterfaceInfo>,
+    /// The input's own exception classes, which take no struct (P2R-390).
+    exceptions: Vec<exceptions::ExceptionClass>,
     /// The modules that call a method of a trait, with the trait's Rust name, which each
     /// names in a `use` line (P2R-372).
     trait_uses: BTreeSet<(usize, String)>,
@@ -617,6 +620,7 @@ impl<'c> Converter<'c> {
             type_names: TypeNames::default(),
             classes: Vec::new(),
             interfaces: Vec::new(),
+            exceptions: Vec::new(),
             trait_uses: BTreeSet::new(),
             current_method: None,
             current_class: None,
@@ -783,8 +787,11 @@ impl<'c> Converter<'c> {
         // An enum or class reads the interfaces it implements as it registers (P2R-371).
         self.register_interface_names(&program);
         self.register_enums(&program);
+        // An exception class of the input takes no struct (P2R-390).
+        self.register_exceptions(&program);
         self.register_class_names(&program);
         self.register(&program);
+        self.register_exception_functions(&program);
         self.register_class_members(&program);
         self.decide_throws(&program);
         self.decide_modes(&program);
@@ -875,6 +882,31 @@ impl<'c> Converter<'c> {
                             }
                             // PHP declares a readonly class before any statement runs, so it
                             // may come after them (P2R-130).
+                            // PHP declares an exception class before any statement runs when
+                            // its parent is declared already, which P2R-390 checks.
+                            Statement::Class(declaration)
+                                if let Some(index) = self.exception_index(declaration) =>
+                            {
+                                if let Some(item) = self.exception_item(declaration, index) {
+                                    if let Some(function) = &self.exceptions[index].function {
+                                        let rust = function.rust_name.clone();
+                                        // Its use line would import the module too (P2R-173).
+                                        let path = &self.module_paths[module];
+                                        if self.module_paths.iter().any(|other| {
+                                            other.len() == path.len() + 1
+                                                && other.starts_with(path)
+                                                && other[path.len()] == rust
+                                        }) {
+                                            self.refuse(
+                                                &declaration.name,
+                                                "a function may not take the name of a child module of its own module, which its use line would import too (P2R-173)",
+                                            );
+                                        }
+                                        owners.insert(rust, (module, crates::ItemKind::Function));
+                                    }
+                                    items.push(item);
+                                }
+                            }
                             Statement::Class(declaration) => {
                                 // PHP declares a class with interfaces or traits only when
                                 // execution reaches it, as it declares an enum.
@@ -981,7 +1013,14 @@ impl<'c> Converter<'c> {
         }
         // The exception struct follows the shapes in the crate root, and the items of one
         // file (P2R-210).
-        let exception = self.uses_exceptions.then(throws::exception_lines);
+        let exception = self.uses_exceptions.then(|| {
+            let input: Vec<(String, String)> = self
+                .exceptions
+                .iter()
+                .map(|class| (class.name.clone(), class.parent.clone()))
+                .collect();
+            throws::exception_lines(&input)
+        });
         if self.library {
             let mut root = Vec::new();
             for (name, lines) in shapes {

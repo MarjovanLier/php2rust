@@ -4398,8 +4398,10 @@ otherwise than an array (`empty($c)` is false for an empty collection).
   `Illuminate\Database\Eloquent\Collection<K, T>`, as a declared type
   or as the type Mago gives a value, where the class is the vendored one
   (P2R-340), MUST map to `Vec<T>` when `list<T>` has a Rust type
-  (P2R-21) and `T` is neither nullable nor a changing type (P2R-141),
-  whatever `K` is, because no use below reads a key. Such a type is a
+  (P2R-21) and `T` is neither nullable, nor `DateTime|false` (whose Rust
+  type `Option<PhpDateTime>` would make `first()` give two `Option`s,
+  P2R-330), nor a changing type (P2R-141), whatever `K` is, because no
+  use below reads a key. Such a type is a
   collection type below, and a value of it a collection value. A
   collection type is no list type for any rule but these: a parameter of
   a collection type becomes `&[T]`, as a list parameter does (P2R-24),

@@ -24,8 +24,9 @@ const TAKEN: &[&str] = &[
     "Result",
     "Ok",
     "Err",
-    // The map type (P2R-240).
+    // The map type (P2R-240), and the trait a shape's map conversion implements (P2R-271).
     "IndexMap",
+    "From",
     // The struct of `DateTime` (P2R-330).
     "PhpDateTime",
     // The enum of Spatie's `Optional` (P2R-360).

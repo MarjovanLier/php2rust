@@ -3369,7 +3369,8 @@ later sections.
   P2R-60 lists as a difference. An attribute stops by P2R-07 whether or
   not an included file declares its class, on a function, a parameter or
   an arrow function as on a class or a member, other than the one of
-  P2R-341 and those of P2R-351 and P2R-381. The option works for a file
+  P2R-341, those of P2R-351 and P2R-381, the `#[Override]` of P2R-221 and
+  the `#[ObservedBy]` of P2R-460. The option works for a file
   input and
   for a directory input.
   An include path that does not exist, that is neither a file nor a
@@ -4597,13 +4598,15 @@ Six models of the app (`Journal`, `JournalLine`, `JournalFileLine`,
 `#[ObservedBy([XObserver::class])]`, so P2R-401 gives them no struct and
 every read of them stops (P2R-404). Their observers declare only
 `created`, `updated` and `deleted`. Laravel 12.35.1 registers the
-observers when it boots the model: for each event that
-`getObservableEvents()` lists, it hooks the observer's method of that
-name when `method_exists` finds one, in any letter case and also when
-the observer inherits it or takes it from a trait; it throws when a
-named class does not exist. Of these events only `retrieved` fires when
-a model is read, and `creating`, `created`, `saving` and `saved` fire
-on `create()`. Laravel merges a parent's attribute only for a grandchild
+observers when it boots the model on its first use, an empty table
+included: it calls `class_exists` on each, which loads the observer's
+file with its parents, interfaces and traits and throws on the first use
+when one does not exist, and for each event that `getObservableEvents()`
+lists it hooks the observer's method of that name when `method_exists`
+finds one, in any letter case and also when the observer inherits it or
+takes it from a trait. Of these events only `retrieved` fires when a
+model is read, once per loaded row, and `saving`, `creating`, `created`
+and `saved` fire on `create()`. Laravel merges a parent's attribute only for a grandchild
 of `Model`, which P2R-401 does not admit. A throwaway spike that let the
 attribute through cleared five files and made no other file stop. This
 section gives such a model its struct and keeps every form that would
@@ -4614,13 +4617,19 @@ run an observer method stopped.
   `\Illuminate\Database\Eloquent\Attributes\ObservedBy`, a class that a
   file `--include` reads declares (P2R-340), where `<arg>` is one
   positional argument: `X::class`, or an array literal `[..]` of one or
-  more `X::class`, each naming a class that the input or an included
-  file declares (not an interface, trait or enum). The named classes are
-  the model's observers. Such a model takes its struct by P2R-401 as if
-  the attributes were absent. Any other attribute on the model, an
+  more `X::class` without keys, each naming a class (not an interface,
+  trait or enum) that the input or an included file declares together
+  with its parent classes, interfaces and traits at any depth, as PHP
+  loads them when Laravel boots the model (Mago reports a missing one in
+  the input, but not in an included file). The named classes are the
+  model's observers. Such a model takes its struct by P2R-401 as if the
+  attributes were absent. Any other attribute on the model, an
   `ObservedBy` that the input declares, another argument form (a string,
-  a named or unpacked argument, `static::class`, a variable, a second
-  argument) or a class that neither declares keeps P2R-401's stop.
+  a named or unpacked argument, `self::class`, `parent::class`,
+  `static::class`, which PHP rejects in an attribute, a keyed entry,
+  `array(..)`, an empty list, a variable, a second argument) or a class
+  that fails the rule keeps P2R-401's stop, whose message names the
+  admitted form.
 - **P2R-461** On a model with observers, `create` (P2R-411) MUST stop,
   because Laravel runs the observers' `creating`, `created`, `saving`
   and `saved` methods, which the store does not run. Every read form of
@@ -4628,8 +4637,11 @@ run an observer method stopped.
   `findOrFail`, `get` and `all`, with their `where` and `when` links)
   MUST stop when an observer has a method named `retrieved` in any letter
   case, declared, inherited or taken from a trait, at any visibility, as
-  `method_exists` finds it, because Laravel runs it on every row it
-  reads. Otherwise these reads convert as on a model without observers,
+  Mago's method lookup finds it, because Laravel runs it on every row it
+  reads. That lookup also counts a `@method` tag and a private method of
+  a parent, which PHP's `method_exists` does not, so the tool stops there
+  too, which gives no wrong output. The stop names the observer.
+  Otherwise these reads convert as on a model without observers,
   and a read of a field of such a model's struct is a plain field read
   (no event fires).
 - **P2R-462** These stop the conversion, each with a message that names
@@ -4637,7 +4649,8 @@ run an observer method stopped.
   whose observer has `retrieved`, and the forms of `#[ObservedBy]` that
   P2R-460 does not admit (by P2R-401's stop of an attribute). Observers
   that a service provider registers (`M::observe(..)`) remain the review
-  concern of P2R-410.
+  concern of P2R-410, and the top-level code of an included observer's
+  file a review concern of P2R-460.
 
 ## Spec checklist
 
@@ -4676,7 +4689,9 @@ run an observer method stopped.
   observers, listeners or global scopes that a service provider
   registers on a model (`M::observe(..)`, `addGlobalScope(..)`) and
   `Model::unguard()` there, which change what `create`, `find`,
-  `first`, `sole`, `firstOrFail` and `findOrFail` give, a relation that
+  `first`, `sole`, `firstOrFail`, `findOrFail`, `get` and `all` give, in
+  P2R-460 the top-level code of an included observer's file, which PHP
+  runs when Laravel boots the model and loads it, a relation that
   `Model::resolveRelationUsing(..)` registers under one of these names,
   which `Model::__call` tries before it forwards to the query, and a schema
   dump or package migrations that

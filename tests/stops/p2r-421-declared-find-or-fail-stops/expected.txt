@@ -1,0 +1,1 @@
+input.php:20:12: Could not infer a precise return type for function `App\made`. Saw type `mixed`. (mixed-return-statement)

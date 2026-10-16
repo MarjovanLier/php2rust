@@ -49,6 +49,25 @@ function everyRow(): Tag
     return Tag::query()->sole();
 }
 
+function firstOfAll(): Tag
+{
+    return Tag::query()->firstOrFail();
+}
+
+/**
+ * @param list<int> $ids
+ */
+function unpacked(array $ids): Tag
+{
+    return Tag::findOrFail(...$ids);
+}
+
+// A class of the input whose parent is one of Laravel's classes is no exception class of
+// the input (P2R-390).
+final class Missing extends ModelNotFoundException
+{
+}
+
 // A where on the model class goes through __callStatic, which Mago types as mixed.
 function staticWhere(): Tag
 {

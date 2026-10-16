@@ -148,15 +148,32 @@ impl Converter<'_> {
         };
         let (index, op, arguments, wheres) = self.store_form(call)?;
         let key = &self.classes[index].key;
-        let store = self
-            .models
-            .iter()
-            .find(|model| &model.key == key)?
-            .store
-            .clone();
+        let model = self.models.iter().find(|model| &model.key == key)?;
+        let store = model.store.clone();
+        let observers = model.observers.clone();
         let converted = match store {
             Err(reason) => {
                 self.refuse(node, reason);
+                None
+            }
+            Ok(_) if op == StoreOp::Create && !observers.is_empty() => {
+                self.refuse(
+                    node,
+                    "this model has observers, whose creating, created, saving and saved methods Laravel runs on create and the store does not (P2R-461)",
+                );
+                None
+            }
+            // `method_exists` finds an inherited or trait method in any letter case.
+            Ok(_)
+                if op != StoreOp::Create
+                    && observers
+                        .iter()
+                        .any(|observer| self.codebase.method_exists(observer, b"retrieved")) =>
+            {
+                self.refuse(
+                    node,
+                    "an observer of this model has a retrieved method, which Laravel runs on every row it reads and the store does not (P2R-461)",
+                );
                 None
             }
             // `get()` and `all()` give Eloquent's collection, which must be Laravel's
@@ -1029,6 +1046,8 @@ pub(super) struct Model {
     pub(super) fields: Result<Vec<Field>, (Span, String)>,
     /// What the store of the model needs, or why its forms stop (P2R-410).
     pub(super) store: Result<StoreRules, String>,
+    /// The lowercase names of the classes its `#[ObservedBy]` names (P2R-460).
+    pub(super) observers: Vec<Vec<u8>>,
 }
 
 /// A field of a model's struct (P2R-401).
@@ -1087,13 +1106,27 @@ pub(super) fn find(
     let tables = folded.as_ref().map(|(tables, _)| tables);
     let public = public_properties(codebase);
     let overridden = model_methods(codebase);
+    let observed_included = codebase
+        .get_class_like(OBSERVED_BY)
+        .is_some_and(|attribute| included.contains(&attribute.span.file_id));
     let mut models: Vec<Model> = candidates
         .iter()
         .map(|(key, class, names)| {
-            let (fields, store) = match model_fields(class, names, tables, &public, &overridden) {
-                Ok((fields, store)) => (Ok(fields), store),
-                Err(reason) => (Err(reason), Err(String::new())),
+            // Laravel throws when it boots a model whose observer class does not exist.
+            let observers = if class.attribute_lists.is_empty() {
+                Some(Vec::new())
+            } else if observed_included {
+                observed_by(class, names)
+                    .filter(|observers| observers.iter().all(|name| codebase.class_exists(name)))
+            } else {
+                None
             };
+            let admitted = observers.is_some();
+            let (fields, store) =
+                match model_fields(class, names, tables, &public, &overridden, admitted) {
+                    Ok((fields, store)) => (Ok(fields), store),
+                    Err(reason) => (Err(reason), Err(String::new())),
+                };
             let full = names
                 .resolve(&class.name.span().start)
                 .unwrap_or(class.name.value);
@@ -1103,6 +1136,7 @@ pub(super) fn find(
                     .into_owned(),
                 fields,
                 store,
+                observers: observers.unwrap_or_default(),
             }
         })
         .collect();
@@ -1181,6 +1215,58 @@ fn tell_when(codebase: &mut CodebaseMetadata, included: &HashSet<FileId>) {
     codebase.apply_patches_pass();
 }
 
+/// Laravel's attribute that names a model's observers, lowercase.
+const OBSERVED_BY: &[u8] = b"illuminate\\database\\eloquent\\attributes\\observedby";
+
+/// The lowercase names of the classes that a model's attributes name as observers, or `None`
+/// when an attribute is no `#[ObservedBy]` of one positional `X::class` or `[..]` of them
+/// (P2R-460).
+fn observed_by(class: &Class<'_>, names: &ResolvedNames<'_>) -> Option<Vec<Vec<u8>>> {
+    let named = |expression: &Expression<'_>| match expression {
+        Expression::Access(Access::ClassConstant(access))
+            if matches!(&access.constant, ClassLikeConstantSelector::Identifier(constant)
+                if constant.value.eq_ignore_ascii_case(b"class")) =>
+        {
+            match access.class {
+                Expression::Identifier(identifier) => {
+                    Some(resolved(names, identifier, identifier.value()))
+                }
+                _ => None,
+            }
+        }
+        _ => None,
+    };
+    let mut observers = Vec::new();
+    for attribute in class
+        .attribute_lists
+        .iter()
+        .flat_map(|list| list.attributes.iter())
+    {
+        if resolved(names, &attribute.name, attribute.name.value()) != OBSERVED_BY {
+            return None;
+        }
+        let list = attribute.argument_list.as_ref()?;
+        let [PartialArgument::Positional(argument)] = list.arguments.as_slice() else {
+            return None;
+        };
+        if argument.ellipsis.is_some() {
+            return None;
+        }
+        match argument.value {
+            Expression::Array(array) if !array.elements.is_empty() => {
+                for element in array.elements.iter() {
+                    let ArrayElement::Value(element) = element else {
+                        return None;
+                    };
+                    observers.push(named(element.value)?);
+                }
+            }
+            value => observers.push(named(value)?),
+        }
+    }
+    Some(observers)
+}
+
 /// Laravel's trait that gives the query builder `when()`, lowercase.
 pub(super) const CONDITIONABLE: &[u8] = b"illuminate\\support\\traits\\conditionable";
 
@@ -1244,11 +1330,12 @@ fn model_fields(
     tables: Option<&Tables>,
     public: &HashSet<String>,
     overridden: &HashSet<Vec<u8>>,
+    observed: bool,
 ) -> Result<FieldsAndStore, (Span, String)> {
-    if let Some(attributes) = class.attribute_lists.first() {
+    if !observed && let Some(attributes) = class.attribute_lists.first() {
         return Err((
             attributes.span(),
-            "an attribute on a model is not supported, and an observer it names may change what an attribute read gives, so the model takes no struct (P2R-401)".to_owned(),
+            "an attribute on a model is supported only as Laravel's #[ObservedBy(X::class)] or #[ObservedBy([X::class, ..])] naming classes that the input or an included file declares, because another attribute or observer may change what an attribute read gives, so the model takes no struct (P2R-401, P2R-460)".to_owned(),
         ));
     }
     if let Some(modifier) = class

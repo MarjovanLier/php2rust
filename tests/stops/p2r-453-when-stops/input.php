@@ -130,6 +130,15 @@ function threeParameters(?string $name): Collection
     return Code::query()->when($name, fn (Builder $query, string $name, int $extra) => $query->where('name', $name))->get();
 }
 
+// A property the model has no field for, as on a model that takes no struct (P2R-134).
+/**
+ * @return Collection<int, Code>
+ */
+function missingProperty(?Code $code): Collection
+{
+    return Code::query()->when($code, fn (Builder $query, Code $code) => $query->where('name', $code->missing))->get();
+}
+
 // unless() is no form of section 46.
 /**
  * @return Collection<int, Code>

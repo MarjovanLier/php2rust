@@ -97,10 +97,15 @@ interface Convertible
     public function into(): string;
 }
 
-// PHP reserves this name.
+// PHP reserves this name, and the output writes an impl of a trait of the other.
 interface Mixed
 {
     public function anything(): int;
+}
+
+interface From
+{
+    public function origin(): string;
 }
 
 // A class takes the Rust name of this interface.

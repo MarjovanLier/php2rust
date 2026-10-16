@@ -4226,7 +4226,10 @@ relations and every other query method still stop.
   null, as Laravel turns `where('c', null)` into `whereNull('c')`. A value
   of a nullable type, and `null` for a field that is not nullable, stop.
   A `String` field of a column that is not text, and an `i64` field of a
-  REAL column, stop, as in P2R-411.
+  REAL column, stop, as in P2R-411. Review concern, not checked
+  mechanically: the included `Model::query()` gives back Eloquent's
+  builder itself, as Laravel's does; an included subclass with its own
+  `where` would filter otherwise (P2R-451 checks this for `when()`).
 - **P2R-414** These stop, by P2R-135 and P2R-153: any other call on a
   model, a model class or a query (`firstOrCreate(..)`,
   `orderBy(..)`, `where` with an operator or a closure, `update(..)`,
@@ -4509,8 +4512,10 @@ links to conditions of the store.
   the last call, among the `where` links; `first()`, `sole()` and
   `firstOrFail()` then need one or more `where` or `when` links. These
   links convert only where P2R-450 told Mago the type of `when()` and
-  Eloquent's builder takes `when()` from that trait, not from a method
-  it declares itself (which may treat the value otherwise). Such a
+  Eloquent's builder and every subclass of it take `when()` from that
+  trait, not from a method one of them declares (which may treat the
+  value otherwise; an included `query()` may give back a subclass where
+  Mago sees the builder). Such a
   link converts when all of these hold:
   - It has two positional arguments, neither named nor unpacked.
   - `$value` is a variable, a parameter or a property read of such a

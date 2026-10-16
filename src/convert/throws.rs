@@ -565,7 +565,7 @@ impl Converter<'_> {
                     return None;
                 }
                 let exception =
-                    self.new_exception(new.argument_list.as_ref(), throw.exception, &class);
+                    self.new_exception(new.argument_list.as_ref(), throw.exception, &class, false);
                 if exception.is_none() {
                     self.record_refused(throw.exception);
                 }
@@ -938,7 +938,8 @@ impl Converter<'_> {
                 );
                 fine = false;
             }
-            // In a function the binding would not be PHP's superglobal, which it overwrites.
+            // In a function a read of it gives PHP's superglobal, not the exception, and at the
+            // top level the catch overwrites the superglobal for every function.
             if let Some(variable) = &clause.variable
                 && classes::SUPERGLOBALS.contains(&variable.name)
             {
@@ -946,6 +947,13 @@ impl Converter<'_> {
                     variable,
                     "a catch variable named like a superglobal is not supported (P2R-214)",
                 );
+                fine = false;
+            }
+            // PHP rejects it when it compiles the file; Mago does not report it.
+            if let Some(variable) = &clause.variable
+                && variable.name == b"$this"
+            {
+                self.refuse(variable, "PHP rejects $this as a catch variable (P2R-214)");
                 fine = false;
             }
             clauses.push(Clause {

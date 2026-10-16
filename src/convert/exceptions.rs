@@ -310,7 +310,8 @@ impl Converter<'_> {
                 if this.unreachable(last) {
                     return;
                 }
-                if let Some(exception) = this.new_exception(Some(&call.argument_list), node, &name)
+                if let Some(exception) =
+                    this.new_exception(Some(&call.argument_list), node, &name, true)
                 {
                     body.push(emit(
                         1,
@@ -412,10 +413,8 @@ impl Converter<'_> {
                 self.refuse(modifier, classes::DOUBLED_MODIFIER);
             }
             for parameter in constructor.parameter_list.parameters.iter() {
-                if classes::doubled_modifier(&parameter.modifiers).is_some() {
-                    self.refuse(parameter, classes::DOUBLED_MODIFIER);
-                } else if classes::static_parameter(parameter) {
-                    self.refuse(parameter, classes::STATIC_PARAMETER);
+                if let Some((_, problem)) = classes::parameter_modifier(&parameter.modifiers) {
+                    self.refuse(parameter, problem);
                 }
             }
             if let Some(hint) = &constructor.return_type_hint {
@@ -445,13 +444,14 @@ impl Converter<'_> {
     }
 
     /// `PhpException::new("<class>", message, code)` from the arguments `list` of a `new`
-    /// or of `parent::__construct`, which may pass only the message and the code
-    /// (P2R-212).
+    /// or, when `parent` holds, of `parent::__construct`, which may pass only the message
+    /// and the code (P2R-212, P2R-391).
     pub(super) fn new_exception(
         &mut self,
         list: Option<&ArgumentList<'_>>,
         node: &Expression<'_>,
         class: &str,
+        parent: bool,
     ) -> Option<RExpr> {
         let parameters = throws::exception_parameters();
         let extra = list.is_some_and(|list| {
@@ -464,7 +464,11 @@ impl Converter<'_> {
         if extra {
             self.refuse(
                 node,
-                "an exception converts only with the arguments message and code (P2R-212, P2R-391)",
+                if parent {
+                    "parent::__construct(..) converts only with the arguments message and code (P2R-391)"
+                } else {
+                    "a throw converts only with the arguments message and code (P2R-212)"
+                },
             );
             return None;
         }
@@ -479,7 +483,7 @@ impl Converter<'_> {
 }
 
 /// The constructor of a class.
-fn constructor<'d, 'a>(declaration: &'d Class<'a>) -> Option<&'d Method<'a>> {
+pub(super) fn constructor<'d, 'a>(declaration: &'d Class<'a>) -> Option<&'d Method<'a>> {
     declaration.members.iter().find_map(|member| match member {
         ClassLikeMember::Method(method)
             if method.name.value.eq_ignore_ascii_case(b"__construct") =>

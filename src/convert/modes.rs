@@ -19,7 +19,7 @@ use mago_syntax::cst::*;
 use mago_syntax::walker::Walker;
 
 use super::lists::unparenthesized;
-use super::{Converter, Mode, ParameterSignature, parameter_index};
+use super::{Converter, Mode, ParameterSignature, exceptions, parameter_index};
 use crate::types::{self, RustType};
 
 /// The foreach loops whose form the forms of the file decide (P2R-146), by the span of the
@@ -102,6 +102,32 @@ impl Converter<'_> {
                             self.walk_body(None, parameters, Mode::Shared, statements, &mut loops);
                         if let Some(signature) = self.functions.get_mut(&key) {
                             grew |= turn_up(&mut signature.parameters, &found);
+                        }
+                    }
+                    Statement::Class(declaration)
+                        if let Some(index) = self.exception_index(declaration) =>
+                    {
+                        let (Some(signature), Some(constructor)) = (
+                            &self.exceptions[index].function,
+                            exceptions::constructor(declaration),
+                        ) else {
+                            continue;
+                        };
+                        let MethodBody::Concrete(block) = &constructor.body else {
+                            continue;
+                        };
+                        let parameters = forms(&signature.parameters);
+                        let statements = block.statements.iter();
+                        let (found, _) =
+                            self.walk_body(None, parameters, Mode::Shared, statements, &mut loops);
+                        // A throw would have to lend the object, and the forms of its callers
+                        // do not see that (P2R-143).
+                        if found.iter().any(|(_, _, mode)| *mode == Mode::Mut) {
+                            self.refuse(
+                                &constructor.name,
+                                "the constructor of an exception class may not change an object it is given (P2R-391)",
+                            );
+                            self.exceptions[index].function = None;
                         }
                     }
                     Statement::Class(_) | Statement::Enum(_) => {

@@ -941,6 +941,20 @@ impl Converter<'_> {
         if let Some(modifier) = doubled_modifier(&method.modifiers) {
             self.refuse(modifier, DOUBLED_MODIFIER);
         }
+        if let Some(modifier) = method.modifiers.iter().find(|m| {
+            matches!(
+                m,
+                Modifier::Readonly(_)
+                    | Modifier::PublicSet(_)
+                    | Modifier::ProtectedSet(_)
+                    | Modifier::PrivateSet(_)
+            )
+        }) {
+            self.refuse(
+                modifier,
+                "PHP rejects readonly and a set visibility on a method (P2R-135)",
+            );
+        }
         if is_constructor(method) {
             if let Some(hint) = &method.return_type_hint {
                 self.refuse(hint, "PHP rejects a return type on a constructor (P2R-130)");
@@ -979,6 +993,16 @@ impl Converter<'_> {
                     parameter,
                     "static can only be a return type, which PHP requires (P2R-154)",
                 );
+            } else if !is_constructor(method)
+                && parameter
+                    .modifiers
+                    .iter()
+                    .any(|m| matches!(m, Modifier::Abstract(_) | Modifier::Final(_)))
+            {
+                self.refuse(
+                    parameter,
+                    "PHP rejects a modifier on the parameter of a method (P2R-135)",
+                );
             }
         }
     }
@@ -1010,6 +1034,8 @@ impl Converter<'_> {
                 Some("static can only be a return type, which PHP requires (P2R-154)")
             } else if parameter.is_promoted_property() {
                 Some("only a constructor parameter can be promoted to a property (P2R-130)")
+            } else if !parameter.modifiers.is_empty() {
+                Some("PHP rejects a modifier on the parameter of a method (P2R-380)")
             } else if name == b"$this" {
                 Some("a parameter cannot be named $this, which PHP rejects (P2R-135)")
             } else if SUPERGLOBALS.contains(&name) {
@@ -1086,10 +1112,8 @@ impl Converter<'_> {
                 )
             } else if parameter.ampersand.is_some() || parameter.ellipsis.is_some() {
                 Some("a promoted property cannot be by reference or variadic (P2R-130)")
-            } else if doubled_modifier(&parameter.modifiers).is_some() {
-                Some(DOUBLED_MODIFIER)
-            } else if static_parameter(parameter) {
-                Some(STATIC_PARAMETER)
+            } else if let Some((_, problem)) = parameter_modifier(&parameter.modifiers) {
+                Some(problem)
             } else if parameter.variable.name == b"$this" {
                 Some("a parameter cannot be named $this, which PHP rejects (P2R-135)")
             } else if SUPERGLOBALS.contains(&parameter.variable.name) {
@@ -1216,6 +1240,13 @@ impl Converter<'_> {
                 Some((attributes.span(), "attributes are not supported (P2R-07)"))
             } else if let Some(modifier) = doubled_modifier(&plain.modifiers) {
                 Some((modifier.span(), DOUBLED_MODIFIER))
+            } else if let Some(modifier) = wider_set(&plain.modifiers) {
+                Some((modifier.span(), WIDER_SET))
+            } else if final_private(&plain.modifiers) {
+                Some((
+                    plain.span(),
+                    "PHP rejects a property that is both final and private (P2R-140)",
+                ))
             } else {
                 plain
                     .modifiers
@@ -2497,16 +2528,56 @@ pub(super) fn doubled_modifier<'m, 'a>(
     })
 }
 
-pub(super) const STATIC_PARAMETER: &str =
-    "PHP rejects the static modifier on a parameter (P2R-130)";
+/// The problem of a set visibility wider than the visibility its property is read with.
+pub(super) const WIDER_SET: &str =
+    "PHP rejects a set visibility wider than the property's own visibility (P2R-130)";
 
-/// True for a parameter with a `static` modifier, which Mago's parser accepts and PHP
-/// rejects (P2R-130).
-pub(super) fn static_parameter(parameter: &FunctionLikeParameter<'_>) -> bool {
-    parameter
-        .modifiers
+/// The first modifier of a constructor parameter that PHP rejects, with its problem: one
+/// written twice, `static` or `abstract`, or a set visibility wider than the read one.
+/// Mago's parser accepts each of them and its analyser reports none (P2R-130).
+pub(super) fn parameter_modifier<'m, 'a>(
+    modifiers: &'m Sequence<'a, Modifier<'a>>,
+) -> Option<(&'m Modifier<'a>, &'static str)> {
+    if let Some(modifier) = doubled_modifier(modifiers) {
+        return Some((modifier, DOUBLED_MODIFIER));
+    }
+    if let Some(modifier) = modifiers
         .iter()
-        .any(|m| matches!(m, Modifier::Static(_)))
+        .find(|m| matches!(m, Modifier::Static(_) | Modifier::Abstract(_)))
+    {
+        return Some((
+            modifier,
+            "PHP rejects static and abstract on a parameter (P2R-130)",
+        ));
+    }
+    wider_set(modifiers).map(|modifier| (modifier, WIDER_SET))
+}
+
+/// A set visibility wider than the read visibility, which is public when none is written.
+pub(super) fn wider_set<'m, 'a>(
+    modifiers: &'m Sequence<'a, Modifier<'a>>,
+) -> Option<&'m Modifier<'a>> {
+    let width = |modifier: &Modifier<'_>| match modifier {
+        Modifier::Public(_) | Modifier::PublicSet(_) => 3,
+        Modifier::Protected(_) | Modifier::ProtectedSet(_) => 2,
+        Modifier::Private(_) | Modifier::PrivateSet(_) => 1,
+        _ => 0,
+    };
+    let read = modifiers
+        .iter()
+        .find(|m| {
+            matches!(
+                m,
+                Modifier::Public(_) | Modifier::Protected(_) | Modifier::Private(_)
+            )
+        })
+        .map_or(3, width);
+    modifiers.iter().find(|m| {
+        matches!(
+            m,
+            Modifier::PublicSet(_) | Modifier::ProtectedSet(_) | Modifier::PrivateSet(_)
+        ) && width(m) > read
+    })
 }
 
 /// The variables PHP declares in every scope, which a parameter may not take as its name.

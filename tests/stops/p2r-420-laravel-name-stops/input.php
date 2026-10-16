@@ -5,7 +5,7 @@ declare(strict_types=1);
 namespace Illuminate\Database;
 
 // A class of the input with the name of one of Laravel's classes of P2R-420 is no exception
-// class of the input, so it stops, and so do its throw and its catch.
+// class of the input, so it stops, and so does its throw. Its catch names Laravel's class.
 class MultipleRecordsFoundException extends \RuntimeException
 {
 }

@@ -49,6 +49,12 @@ function everyRow(): Tag
     return Tag::query()->sole();
 }
 
+// A where on the model class goes through __callStatic, which Mago types as mixed.
+function staticWhere(): Tag
+{
+    return Tag::where('label', 'a')->firstOrFail();
+}
+
 function filteredFind(): Tag
 {
     return Tag::query()->where('label', 'a')->findOrFail(2);

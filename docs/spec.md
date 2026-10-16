@@ -206,7 +206,9 @@ requirement IDs.
 - **P2R-02** On success the tool MUST write the Rust source to `<output.rs>`
   when `-o` is given, otherwise to stdout, and exit 0.
 - **P2R-03** When the input holds any construct that does not convert
-  (P2R-07), the tool MUST print every problem to stderr and exit 1. Each
+  (P2R-07), the tool MUST print every problem it finds to stderr and exit
+  1; inside one form that does not convert, it may stop at the first
+  problem it meets, so a refused form gives at least one line. Each
   problem is one line, `path:line:column: message`, where `path` is the input
   path exactly as given on the command line, `line` and `column` are 1-based,
   and `column` counts bytes. Lines are sorted by line, then column, then
@@ -3928,8 +3930,8 @@ and its gain is typed attribute reads.
   `default(..)`, `unsigned()`, `constrained(..)`, `cascadeOnDelete()`,
   `nullOnDelete()`, `restrictOnDelete()`, `cascadeOnUpdate()`,
   `onDelete(..)`, `onUpdate(..)`, `unique()`, `index()`, `primary()`, `after(..)`,
-  `comment(..)`, `useCurrent()` and `useCurrentOnUpdate()` keep the
-  column's type. After `foreignId` or `foreignIdFor`, a modifier after
+  `comment(..)`, `useCurrent()`, `useCurrent(true)`, `useCurrent(false)`
+  and `useCurrentOnUpdate()` keep the column's type. After `foreignId` or `foreignIdFor`, a modifier after
   `constrained(..)` belongs to the foreign key, as in Laravel, so
   `nullable()` there leaves the column not nullable; `constrained(..)`
   after any other column method makes the table unknown, because Laravel
@@ -3943,12 +3945,16 @@ and its gain is typed attribute reads.
   columns of a table keep the order in which they were first declared;
   `after()` does not move them. Any other form makes its table unknown:
   another method or modifier, a column name that is not a string
-  literal, an unpacked argument to the method or to `nullable(..)`, a
-  named argument `column`, `columns` or `model` to the method, which
-  binds what the tool reads by position (`id(column: 'code_id')`), any
-  named argument to `nullable(..)`, which Laravel takes as its first
+  literal, an unpacked argument to the method or to `nullable(..)`,
+  `default(..)` or `useCurrent(..)`, a named argument `column`, `columns`
+  or `model` to the method, which binds what the tool reads by position
+  (`id(column: 'code_id')`), any named argument to `nullable(..)`,
+  `default(..)` or `useCurrent(..)`, which Laravel takes as its first
   value by any name (`constrained('t', indexName: 'i')` and
-  `timestamps(precision: 6)` keep the table known), a column declared
+  `timestamps(precision: 6)` keep the table known), `useCurrent(..)` with
+  an argument other than `true` or `false`, a modifier after
+  `timestamps()`, which gives a Collection that Laravel cannot chain, a
+  column declared
   again without `change()`, a `change()` or
   drop of a column the table does not have, `Schema::create` of a table
   that exists, and `Schema::table` of one that does not. None of these is
@@ -4116,8 +4122,9 @@ relations and every other query method still stop.
     and one whose argument is not a string literal of only letters, digits
     and `_` (`'roles as r'`, `'main.roles'`) may name any table, so it
     stops the forms on every model.
-  - A model that uses `SoftDeletes` has a column `deleted_at` that is no
-    field, because Laravel's queries read it to skip deleted rows.
+  - A model that uses `SoftDeletes` has a column `deleted_at` without a
+    default that is no field, because Laravel's queries read it to skip
+    deleted rows, and a default would mark each new row deleted.
 
   Laravel's `Model` declares neither `create` nor `find`: it forwards
   them through `__callStatic`, which Mago types as `mixed`. Before Mago
@@ -4128,7 +4135,8 @@ relations and every other query method still stop.
   read of the result has the model's type.
 - **P2R-411** `M::create([..])` and `M::query()->create([..])`, where `M`
   is a model with a struct and `query()` has no arguments, with one
-  positional argument that is a literal map, MUST convert to
+  positional argument that is a literal map written `[..]` (`array(..)`
+  stops), MUST convert to
   `M::store_create(M { .. })`, which adds the row and gives back its
   struct, when all of these hold:
   - Each key is a string literal that names a field of the struct other
@@ -4146,10 +4154,12 @@ relations and every other query method still stop.
   - Each field other than `id` is named, except a nullable field whose
     column has no default, which gets null: for a column with a default
     the database stores the default while the created model reads null.
-    `default(..)` with a value other than null, and `useCurrent()` after
-    `date(..)`, `dateTime(..)` or `timestamp(..)`, give a default (Laravel
-    writes no default for `useCurrent()` on another column);
-    `default(null)`, `useCurrentOnUpdate()` and a `default(..)`
+    `default(..)` with a value other than null, and `useCurrent()` or
+    `useCurrent(true)` after `date(..)`, `dateTime(..)`, `timestamp(..)`
+    or `softDeletes(..)`, also over a `default(..)`, give a default
+    (Laravel writes no default for `useCurrent()` on another column);
+    `default(null)`, `useCurrent(false)`, `useCurrentOnUpdate()` and a
+    `default(..)`
     after `constrained(..)`, which belongs to the foreign key, give none,
     and `change()` keeps only the default it writes again.
   - The table has no column that is neither nullable nor has a default

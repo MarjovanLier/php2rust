@@ -965,6 +965,14 @@ impl Converter<'_> {
     /// hook, so the signature is kept to forms PHP always compiles.
     fn hook_shape(&mut self, method: &Method<'_>) -> bool {
         let mut refused = !self.defaults_last(&method.parameter_list);
+        // PHP deprecates `&` on a `void` method when it compiles the file.
+        if method.ampersand.is_some() {
+            self.refuse(
+                &method.name,
+                "a method that returns by reference is not supported (P2R-135)",
+            );
+            refused = true;
+        }
         let mut seen: Vec<&[u8]> = Vec::new();
         for parameter in method.parameter_list.parameters.iter() {
             let name = parameter.variable.name;
@@ -1014,7 +1022,7 @@ impl Converter<'_> {
         if unchecked {
             self.refuse(
                 &method.name,
-                "a hook that declares a function, in which self names no class, or that writes self, parent or static after a backslash, a deprecated cast, ${...}, case ...; with a semicolon, backticks or an octal escape above \\377, is not supported: PHP rejects, deprecates or warns about them when it compiles the file, and the tool reads nothing else of a hook (P2R-380)",
+                "a hook that declares a function, in which self names no class, a class, interface, trait, enum or anonymous class, or that writes self, parent or static after a backslash, a deprecated cast, ${...}, case ...; with a semicolon, backticks, a string escape PHP rejects or an octal escape above \\377, $http_response_header, declare, or a closure parameter with a null default on a type without null or a default before a required one, is not supported: PHP rejects, deprecates or warns about them when it compiles the file, and the tool reads nothing else of a hook (P2R-380)",
             );
             refused = true;
         }
@@ -2424,25 +2432,33 @@ fn named_like_hook(method: &Method<'_>) -> bool {
 }
 
 /// The problem of a hook signature outside the forms that P2R-380 leaves out.
-const HOOK_SIGNATURE: &str = "a hook's parameter or return type must be one name, with or without ?, and a default must be a literal, true, false or null, with no variadic or by-reference parameter; the tool checks nothing else of a hook (P2R-380)";
+const HOOK_SIGNATURE: &str = "a hook's parameter or return type must be a class name, int, float, string, bool, array, iterable or object, with or without ?, or mixed (a return type also void, never, static or self), and a default must be a literal, true, false or null, with no variadic or by-reference parameter; the tool checks nothing else of a hook (P2R-380)";
 
 /// True for a type a hook's signature may write: one name, with or without `?`, or `mixed`
 /// alone, and for a return type also `void`, `never`, `static` or `self` alone. PHP compiles
 /// each of these, where it rejects such forms as `?mixed`, `void $x` or `iterable|array`
 /// and Mago does not report them (P2R-380).
 fn hook_hint(hint: &Hint<'_>, returned: bool) -> bool {
+    // PHP warns that it reads such a local name as a class name.
+    let warned = |hint: &Hint<'_>| {
+        matches!(hint, Hint::Identifier(Identifier::Local(name))
+            if [&b"integer"[..], b"boolean", b"double", b"resource"]
+                .iter()
+                .any(|word| name.value.eq_ignore_ascii_case(word)))
+    };
     let single = |hint: &Hint<'_>| {
-        matches!(
-            hint,
-            Hint::Identifier(_)
-                | Hint::Integer(_)
-                | Hint::String(_)
-                | Hint::Bool(_)
-                | Hint::Float(_)
-                | Hint::Array(_)
-                | Hint::Iterable(_)
-                | Hint::Object(_)
-        )
+        !warned(hint)
+            && matches!(
+                hint,
+                Hint::Identifier(_)
+                    | Hint::Integer(_)
+                    | Hint::String(_)
+                    | Hint::Bool(_)
+                    | Hint::Float(_)
+                    | Hint::Array(_)
+                    | Hint::Iterable(_)
+                    | Hint::Object(_)
+            )
     };
     match hint {
         Hint::Nullable(nullable) => single(nullable.hint),
@@ -2472,7 +2488,10 @@ fn hook_default(value: &Expression<'_>, nullable: bool) -> bool {
 /// where Mago reports nothing or a code that a left-out hook drops: `self`, `parent` or
 /// `static` after a backslash (`\self`), a function declared inside, in which `self` names
 /// no class, a cast PHP removed or deprecates (`(real)`, `(integer)` and others), `${...}`,
-/// `case 1;`, backticks and an octal escape above `\377`. PHP accepts such a
+/// `case 1;`, backticks, a string escape PHP rejects or an octal escape above `\377`,
+/// `$http_response_header`, a class-like declared inside (an anonymous class too),
+/// `declare`, and in a closure a `null` default on a type without null or a default
+/// before a required parameter. PHP accepts such a
 /// function itself, `Foo\self` and `${'x'}` outside a string, so this stops more than PHP
 /// rejects (P2R-380).
 struct Unchecked;
@@ -2480,6 +2499,36 @@ struct Unchecked;
 impl<'ast, 'arena> Walker<'ast, 'arena, bool> for Unchecked {
     fn walk_in_function(&self, _function: &'ast Function<'arena>, found: &mut bool) {
         *found = true;
+    }
+
+    // PHP deprecates a default before a parameter without one, as in a closure.
+    fn walk_in_function_like_parameter_list(
+        &self,
+        list: &'ast FunctionLikeParameterList<'arena>,
+        found: &mut bool,
+    ) {
+        let parameters: Vec<&FunctionLikeParameter<'_>> = list.parameters.iter().collect();
+        *found |= parameters.iter().enumerate().any(|(at, parameter)| {
+            parameter.default_value.is_some()
+                && parameters[at + 1..]
+                    .iter()
+                    .any(|later| later.default_value.is_none() && later.ellipsis.is_none())
+        });
+    }
+
+    // PHP deprecates a `null` default on a type without null, such as `int $x = null`.
+    fn walk_in_function_like_parameter(
+        &self,
+        parameter: &'ast FunctionLikeParameter<'arena>,
+        found: &mut bool,
+    ) {
+        *found |= parameter
+            .hint
+            .as_ref()
+            .is_some_and(|hint| !holds_null(hint))
+            && parameter.default_value.as_ref().is_some_and(|default| {
+                matches!(default.value, Expression::Literal(Literal::Null(_)))
+            });
     }
 
     // PHP 8.0 removed `(real)` and `(unset)`; PHP 8.5 deprecates the other four.
@@ -2493,6 +2542,11 @@ impl<'ast, 'arena> Walker<'ast, 'arena, bool> for Unchecked {
                 | UnaryPrefixOperator::RealCast(..)
                 | UnaryPrefixOperator::UnsetCast(..)
         );
+    }
+
+    // PHP 8.5 deprecates this predefined variable when it compiles the file.
+    fn walk_in_direct_variable(&self, variable: &'ast DirectVariable<'arena>, found: &mut bool) {
+        *found |= variable.name == b"$http_response_header";
     }
 
     fn walk_in_indirect_variable(
@@ -2519,12 +2573,40 @@ impl<'ast, 'arena> Walker<'ast, 'arena, bool> for Unchecked {
         *found = true;
     }
 
+    // Mago gives no value for an escape PHP rejects, such as `\u{110000}`.
     fn walk_in_literal_string(&self, string: &'ast LiteralString<'arena>, found: &mut bool) {
-        *found |= printer::octal_overflow(string.raw);
+        *found |= string.value.is_none() || printer::octal_overflow(string.raw);
     }
 
     fn walk_in_literal_string_part(&self, part: &'ast LiteralStringPart<'arena>, found: &mut bool) {
-        *found |= printer::octal_overflow(part.raw);
+        *found |= part.value.is_none() || printer::octal_overflow(part.raw);
+    }
+
+    // PHP rejects a class-like declared inside a method, and an anonymous class brings
+    // its own members, which the tool does not check either.
+    fn walk_in_class(&self, _class: &'ast Class<'arena>, found: &mut bool) {
+        *found = true;
+    }
+
+    fn walk_in_interface(&self, _interface: &'ast Interface<'arena>, found: &mut bool) {
+        *found = true;
+    }
+
+    fn walk_in_trait(&self, _trait: &'ast Trait<'arena>, found: &mut bool) {
+        *found = true;
+    }
+
+    fn walk_in_enum(&self, _enum: &'ast Enum<'arena>, found: &mut bool) {
+        *found = true;
+    }
+
+    fn walk_in_anonymous_class(&self, _class: &'ast AnonymousClass<'arena>, found: &mut bool) {
+        *found = true;
+    }
+
+    // PHP rejects `strict_types` there and warns about an unknown directive.
+    fn walk_in_declare(&self, _declare: &'ast Declare<'arena>, found: &mut bool) {
+        *found = true;
     }
 
     fn walk_in_qualified_identifier(
@@ -2541,6 +2623,16 @@ impl<'ast, 'arena> Walker<'ast, 'arena, bool> for Unchecked {
         found: &mut bool,
     ) {
         *found |= reserved_class_name(identifier.value);
+    }
+}
+
+/// True for a written type that holds `null`: `?T`, `null`, `mixed`, or a union with one.
+fn holds_null(hint: &Hint<'_>) -> bool {
+    match hint {
+        Hint::Nullable(_) | Hint::Null(_) | Hint::Mixed(_) => true,
+        Hint::Union(union) => holds_null(union.left) || holds_null(union.right),
+        Hint::Parenthesized(inner) => holds_null(inner.hint),
+        _ => false,
     }
 }
 

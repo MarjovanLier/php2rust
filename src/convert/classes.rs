@@ -14,7 +14,7 @@ use super::recursion::{self, Target};
 use super::variables::THIS;
 use super::{
     Context, Converter, Mode, ParameterSignature, Signature, Variables, functions, helpers, lists,
-    nulls, unions,
+    nulls,
 };
 use crate::names;
 use crate::printer::{self, RExpr};
@@ -558,8 +558,11 @@ impl Converter<'_> {
                 None => return false,
             };
             let plain = match value {
-                // Mago gives no value for an escape PHP rejects, such as `\u{110000}`.
-                Expression::Literal(Literal::String(string)) => string.value.is_some(),
+                // Mago gives no value for an escape PHP rejects, such as `\u{110000}`, and PHP
+                // warns about an octal escape above \377 when it compiles the file (P2R-49).
+                Expression::Literal(Literal::String(string)) => {
+                    string.value.is_some() && !printer::octal_overflow(string.raw)
+                }
                 Expression::Literal(Literal::Integer(_)) => true,
                 Expression::Access(Access::ClassConstant(access)) => {
                     matches!(access.class, Expression::Identifier(_))
@@ -593,6 +596,15 @@ impl Converter<'_> {
                 .get_method(owner, method.name.value)
                 .is_some_and(|found| !found.flags.is_magic_method())
         };
+        let renamed = |owner: &[u8]| {
+            self.codebase.get_class_like(owner).is_some_and(|found| {
+                found.trait_alias_map.iter().any(|(original, alias)| {
+                    [original, alias]
+                        .iter()
+                        .any(|name| name.as_bytes().eq_ignore_ascii_case(method.name.value))
+                })
+            })
+        };
         self.classes[class].data
             && named_like_hook(method)
             && !self.classes[class].interfaces.iter().any(|&interface| {
@@ -604,21 +616,18 @@ impl Converter<'_> {
                 .get_declaring_method(b"Spatie\\LaravelData\\Data", method.name.value)
                 .is_none_or(|parent| parent.flags.is_magic_method())
             // Mago takes Data's own @method tag over a real method of its trait or interface,
-            // also over a trait method that Data renames to the hook's name.
+            // also over a trait method that Data or one of its traits renames to the name.
+            && !renamed(b"Spatie\\LaravelData\\Data")
             && self
                 .codebase
                 .get_class_like(b"spatie\\laraveldata\\data")
                 .is_none_or(|data| {
-                    !data
-                        .used_traits
-                        .iter()
-                        .chain(data.all_parent_interfaces.iter())
-                        .any(|name| real(name.as_bytes()))
-                        && !data.trait_alias_map.iter().any(|(original, alias)| {
-                            [original, alias]
-                                .iter()
-                                .any(|name| name.as_bytes().eq_ignore_ascii_case(method.name.value))
-                        })
+                    !data.used_traits.iter().any(|name| renamed(name.as_bytes()))
+                        && !data
+                            .used_traits
+                            .iter()
+                            .chain(data.all_parent_interfaces.iter())
+                            .any(|name| real(name.as_bytes()))
                 })
     }
 
@@ -742,7 +751,7 @@ impl Converter<'_> {
                     );
                 } else {
                     hooks.push(lowercase(method));
-                    if !index.is_some_and(|index| self.hook_shape(method, index)) {
+                    if !self.hook_shape(method) {
                         self.left_out.push(method.span());
                     }
                 }
@@ -950,32 +959,16 @@ impl Converter<'_> {
         }
     }
 
-    /// Refuses what PHP rejects in a hook when it compiles the file, where Mago reports
-    /// nothing or a code that a left-out hook drops; true when it refused something
-    /// (P2R-130, P2R-135, P2R-154, P2R-380). The tool reads nothing else of a hook.
-    fn hook_shape(&mut self, method: &Method<'_>, class: usize) -> bool {
-        let mut refused = false;
-        let resolve = |identifier: Option<&Identifier<'_>>| match identifier {
-            Some(identifier) => Some(self.name_key(identifier, identifier.value())),
-            None => Some(self.classes[class].key.clone()),
-        };
-        let written: Vec<(Span, &'static str)> = method
-            .parameter_list
-            .parameters
-            .iter()
-            .filter_map(|parameter| parameter.hint.as_ref())
-            .chain(method.return_type_hint.as_ref().map(|hint| &hint.hint))
-            .filter_map(|hint| {
-                unions::written_problem(hint, &resolve).map(|problem| (hint.span(), problem))
-            })
-            .collect();
-        for (span, problem) in written {
-            self.refuse(&span, problem);
-            refused = true;
-        }
+    /// Refuses a hook whose signature leaves the forms below, or whose body holds what Mago
+    /// reports under a code that a left-out hook drops; true when it refused something
+    /// (P2R-130, P2R-135, P2R-154, P2R-168, P2R-380). The tool reads nothing else of a
+    /// hook, so the signature is kept to forms PHP always compiles.
+    fn hook_shape(&mut self, method: &Method<'_>) -> bool {
+        let mut refused = !self.defaults_last(&method.parameter_list);
         let mut seen: Vec<&[u8]> = Vec::new();
         for parameter in method.parameter_list.parameters.iter() {
             let name = parameter.variable.name;
+            let nullable = matches!(parameter.hint, None | Some(Hint::Nullable(_)));
             let problem = if static_modifier(parameter)
                 || parameter
                     .hint
@@ -989,6 +982,18 @@ impl Converter<'_> {
                 Some("a parameter cannot be named $this, which PHP rejects (P2R-135)")
             } else if seen.contains(&name) {
                 Some("PHP rejects a second parameter of this name (P2R-380)")
+            } else if parameter.ampersand.is_some()
+                || parameter.ellipsis.is_some()
+                || !parameter
+                    .hint
+                    .as_ref()
+                    .is_none_or(|hint| hook_hint(hint, false))
+                || !parameter
+                    .default_value
+                    .as_ref()
+                    .is_none_or(|default| hook_default(default.value, nullable))
+            {
+                Some(HOOK_SIGNATURE)
             } else {
                 None
             };
@@ -998,12 +1003,18 @@ impl Converter<'_> {
             }
             seen.push(name);
         }
+        if let Some(hint) = &method.return_type_hint
+            && !hook_hint(&hint.hint, true)
+        {
+            self.refuse(hint, HOOK_SIGNATURE);
+            refused = true;
+        }
         let mut unchecked = false;
         Unchecked.walk_method(method, &mut unchecked);
         if unchecked {
             self.refuse(
                 &method.name,
-                "a hook that declares a function, or writes self, parent or static after a backslash, is not supported: PHP rejects them, and Mago reports them under a code that a left-out hook drops (P2R-380)",
+                "a hook that declares a function, in which self names no class, or that writes self, parent or static after a backslash, a deprecated cast, ${...}, case ...; with a semicolon, backticks or an octal escape above \\377, is not supported: PHP rejects, deprecates or warns about them when it compiles the file, and the tool reads nothing else of a hook (P2R-380)",
             );
             refused = true;
         }
@@ -2412,14 +2423,108 @@ fn named_like_hook(method: &Method<'_>) -> bool {
     DATA_HOOKS.contains(&lowercase(method).as_slice())
 }
 
-/// Finds in a hook what PHP rejects when it compiles the file and Mago reports under a code
-/// that a left-out hook drops: `self`, `parent` or `static` after a backslash (`\self`), and
-/// a function declared inside, where `self` names no class (P2R-380).
+/// The problem of a hook signature outside the forms that P2R-380 leaves out.
+const HOOK_SIGNATURE: &str = "a hook's parameter or return type must be one name, with or without ?, and a default must be a literal, true, false or null, with no variadic or by-reference parameter; the tool checks nothing else of a hook (P2R-380)";
+
+/// True for a type a hook's signature may write: one name, with or without `?`, or `mixed`
+/// alone, and for a return type also `void`, `never`, `static` or `self` alone. PHP compiles
+/// each of these, where it rejects such forms as `?mixed`, `void $x` or `iterable|array`
+/// and Mago does not report them (P2R-380).
+fn hook_hint(hint: &Hint<'_>, returned: bool) -> bool {
+    let single = |hint: &Hint<'_>| {
+        matches!(
+            hint,
+            Hint::Identifier(_)
+                | Hint::Integer(_)
+                | Hint::String(_)
+                | Hint::Bool(_)
+                | Hint::Float(_)
+                | Hint::Array(_)
+                | Hint::Iterable(_)
+                | Hint::Object(_)
+        )
+    };
+    match hint {
+        Hint::Nullable(nullable) => single(nullable.hint),
+        Hint::Mixed(_) => true,
+        Hint::Void(_) | Hint::Never(_) | Hint::Static(_) | Hint::Self_(_) => returned,
+        other => single(other),
+    }
+}
+
+/// True for a default a hook's parameter may have: a string, int or float literal, `true`
+/// or `false`, and `null` only on a type with `?` or no type, since PHP deprecates an
+/// implicit nullable type when it compiles the file (P2R-168, P2R-380).
+fn hook_default(value: &Expression<'_>, nullable: bool) -> bool {
+    match value {
+        Expression::Literal(Literal::String(string)) => {
+            string.value.is_some() && !printer::octal_overflow(string.raw)
+        }
+        Expression::Literal(
+            Literal::Integer(_) | Literal::Float(_) | Literal::True(_) | Literal::False(_),
+        ) => true,
+        Expression::Literal(Literal::Null(_)) => nullable,
+        _ => false,
+    }
+}
+
+/// Finds in a hook what PHP rejects, deprecates or warns about when it compiles the file,
+/// where Mago reports nothing or a code that a left-out hook drops: `self`, `parent` or
+/// `static` after a backslash (`\self`), a function declared inside, in which `self` names
+/// no class, a cast PHP removed or deprecates (`(real)`, `(integer)` and others), `${...}`,
+/// `case 1;`, backticks and an octal escape above `\377`. PHP accepts such a
+/// function itself, `Foo\self` and `${'x'}` outside a string, so this stops more than PHP
+/// rejects (P2R-380).
 struct Unchecked;
 
 impl<'ast, 'arena> Walker<'ast, 'arena, bool> for Unchecked {
     fn walk_in_function(&self, _function: &'ast Function<'arena>, found: &mut bool) {
         *found = true;
+    }
+
+    // PHP 8.0 removed `(real)` and `(unset)`; PHP 8.5 deprecates the other four.
+    fn walk_in_unary_prefix(&self, unary: &'ast UnaryPrefix<'arena>, found: &mut bool) {
+        *found |= matches!(
+            unary.operator,
+            UnaryPrefixOperator::IntegerCast(..)
+                | UnaryPrefixOperator::BooleanCast(..)
+                | UnaryPrefixOperator::DoubleCast(..)
+                | UnaryPrefixOperator::BinaryCast(..)
+                | UnaryPrefixOperator::RealCast(..)
+                | UnaryPrefixOperator::UnsetCast(..)
+        );
+    }
+
+    fn walk_in_indirect_variable(
+        &self,
+        _variable: &'ast IndirectVariable<'arena>,
+        found: &mut bool,
+    ) {
+        *found = true;
+    }
+
+    fn walk_in_switch_case_separator(
+        &self,
+        separator: &'ast SwitchCaseSeparator,
+        found: &mut bool,
+    ) {
+        *found |= matches!(separator, SwitchCaseSeparator::SemiColon(_));
+    }
+
+    fn walk_in_shell_execute_string(
+        &self,
+        _string: &'ast ShellExecuteString<'arena>,
+        found: &mut bool,
+    ) {
+        *found = true;
+    }
+
+    fn walk_in_literal_string(&self, string: &'ast LiteralString<'arena>, found: &mut bool) {
+        *found |= printer::octal_overflow(string.raw);
+    }
+
+    fn walk_in_literal_string_part(&self, part: &'ast LiteralStringPart<'arena>, found: &mut bool) {
+        *found |= printer::octal_overflow(part.raw);
     }
 
     fn walk_in_qualified_identifier(

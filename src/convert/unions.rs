@@ -376,10 +376,13 @@ impl Converter<'_> {
     }
 }
 
-/// The problem of a written type that PHP rejects when it compiles the file and Mago
-/// accepts (P2R-230). `resolve` is as for `native_problem`.
-pub(super) fn written_problem(
+/// The problem of a declared type whose PHP type `hint` and Mago type `union` disagree on
+/// int and float, or that PHP rejects while Mago accepts it (P2R-25, P2R-230).
+/// `resolve` gives the lowercase fully qualified name of a class name in the hint, or of
+/// the class whose body holds it for `self` (`None`).
+pub(super) fn native_problem(
     hint: &Hint<'_>,
+    union: &TUnion,
     resolve: &dyn Fn(Option<&Identifier<'_>>) -> Option<Vec<u8>>,
 ) -> Option<&'static str> {
     let mut written = Vec::new();
@@ -399,24 +402,6 @@ pub(super) fn written_problem(
             "PHP rejects true|false and bool beside true or false, and Mago does not report it (P2R-230)",
         );
     }
-    None
-}
-
-/// The problem of a declared type whose PHP type `hint` and Mago type `union` disagree on
-/// int and float, or that PHP rejects while Mago accepts it (P2R-25, P2R-230).
-/// `resolve` gives the lowercase fully qualified name of a class name in the hint, or of
-/// the class whose body holds it for `self` (`None`).
-pub(super) fn native_problem(
-    hint: &Hint<'_>,
-    union: &TUnion,
-    resolve: &dyn Fn(Option<&Identifier<'_>>) -> Option<Vec<u8>>,
-) -> Option<&'static str> {
-    if let Some(problem) = written_problem(hint, resolve) {
-        return Some(problem);
-    }
-    let mut written = Vec::new();
-    hint_names(hint, resolve, &mut written);
-    let has = |name: &str| written.iter().any(|w| w == name);
     let (mut int, mut float) = (false, false);
     for atomic in union.types.iter() {
         match atomic {

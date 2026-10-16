@@ -15,9 +15,10 @@ return new class extends Migration
         Schema::create('journals', function (Blueprint $table): void {
             $table->id();
             $table->foreignIdFor(Administration::class)->constrained();
-            // After constrained(), nullable() belongs to the foreign key.
-            $table->foreignId('owner_id')->constrained('users')->nullable();
-            $table->string('code')->unique();
+            // After constrained(), nullable() belongs to the foreign key. A named argument
+            // that binds nothing the tool reads keeps the table known.
+            $table->foreignId('owner_id')->constrained('users', indexName: 'journals_owner_fk')->nullable();
+            $table->string('code', length: 20)->unique();
             $table->string('note')->nullable();
             $table->rememberToken();
             $table->foreign('code')->references('code')->on('codes')->cascadeOnDelete();

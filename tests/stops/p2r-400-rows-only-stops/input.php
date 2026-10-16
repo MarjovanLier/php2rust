@@ -25,3 +25,23 @@ final class Cog extends Model
 final class Belt extends Model
 {
 }
+
+final class Lever extends Model
+{
+}
+
+final class Pulley extends Model
+{
+}
+
+final class Spring extends Model
+{
+}
+
+final class Hinge extends Model
+{
+}
+
+final class Axle extends Model
+{
+}

@@ -1277,9 +1277,10 @@ fn observed_by(class: &Class<'_>, names: &ResolvedNames<'_>) -> Option<Vec<Vec<u
     Some(observers)
 }
 
-/// True when the class-like `name` and its parents, interfaces and traits at any depth are
-/// declared, which PHP loads when Laravel boots a model it observes; Mago reports a missing
-/// one only in the input (P2R-460).
+/// True when the input or an included file declares the class-like `name` and its parents,
+/// interfaces and traits at any depth, which PHP loads when Laravel boots a model it
+/// observes; Mago reports a missing one only in the input. A built-in one stops too, because
+/// Mago's stubs also name classes of extensions that PHP may not load (P2R-460).
 fn declared_tree(codebase: &CodebaseMetadata, name: &[u8], seen: &mut HashSet<Vec<u8>>) -> bool {
     if !seen.insert(name.to_ascii_lowercase()) {
         return true;
@@ -1287,6 +1288,9 @@ fn declared_tree(codebase: &CodebaseMetadata, name: &[u8], seen: &mut HashSet<Ve
     let Some(class) = codebase.get_class_like(name) else {
         return false;
     };
+    if class.flags.is_built_in() {
+        return false;
+    }
     class
         .direct_parent_class
         .iter()
@@ -1363,7 +1367,7 @@ fn model_fields(
     if !observed && let Some(attributes) = class.attribute_lists.first() {
         return Err((
             attributes.span(),
-            "an attribute on a model is supported only as Laravel's #[ObservedBy(X::class)] or #[ObservedBy([X::class, ..])] naming classes (not interfaces, traits or enums) whose parents, interfaces and traits are declared too, because another attribute or observer may change what an attribute read gives, so the model takes no struct (P2R-401, P2R-460)".to_owned(),
+            "an attribute on a model is supported only as Laravel's #[ObservedBy(X::class)] or #[ObservedBy([X::class, ..])] naming classes (not interfaces, traits or enums) that the input or an included file declares with their parents, interfaces and traits, none built into PHP, because another attribute may change what an attribute read gives and Laravel throws when it cannot load an observer, so the model takes no struct (P2R-401, P2R-460)".to_owned(),
         ));
     }
     if let Some(modifier) = class

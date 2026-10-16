@@ -167,8 +167,11 @@ forms of such a method when it loads or compiles the class, that Mago
 checks a hook against an `@method` tag that PHP never reads, and that
 PHP runs a `new` in an attribute argument only when reflection reads it.
 Section 40 (exception classes of the input) was written on 16 Oct 2026;
-it changes P2R-07, the intro of section 22, P2R-210, P2R-212, P2R-214,
-section 14 and the roadmap of section 10.
+it changes P2R-07, P2R-31, the intro of section 22, P2R-210, P2R-212,
+P2R-214, section 14 and the roadmap of section 10. Its spec reviewers
+found constructor forms that PHP rejects and Mago does not report, on
+ordinary classes too, and that PHP rejects a parameter named like a
+superglobal anywhere, not only in a hook.
 
 php2rust converts typed PHP source into normal, readable Rust (`Vec`,
 `String`, `i64`), without AI. It reads PHP with the Mago crates, uses Mago's
@@ -323,7 +326,9 @@ requirement IDs.
   the name of a helper of P2R-160; and a
   function with the name of a function PHP has built in (`next`, `touch`),
   which PHP rejects when it compiles the file and Mago does not report (in
-  a namespace PHP accepts it, P2R-151).
+  a namespace PHP accepts it, P2R-151); and a parameter named like a
+  superglobal (`$_GET`, `$GLOBALS` and the others), which PHP rejects
+  and Mago does not report either.
 - **P2R-32** A call MUST use the declared or built-in function name,
   whatever the letter case of the call (PHP function names ignore case).
 - **P2R-33** Statements outside functions, other than enum, class and
@@ -976,9 +981,10 @@ Sections 3 to 9 apply to nullable values unless this section says otherwise.
     interfaces of P2R-371),
     `abstract`, a trait other than one of constants (P2R-280), a property that is not
     promoted, a static property, a constructor parameter that is not
-    promoted, a constructor with a body, and a parameter default value
-    other than those of P2R-168 (section 16 converts constants and static
-    methods);
+    promoted, a constructor with a body, a constructor with a return type
+    or `static`, which PHP rejects and Mago does not report, and a
+    parameter default value other than those of P2R-168 (section 16
+    converts constants and static methods);
   - a promoted parameter without a type, with a property hook, by reference
     or variadic, which PHP rejects or makes fail and Mago does not report;
   - a method whose PHP name starts with `__`, other than the constructor,
@@ -1322,7 +1328,8 @@ file. Converting several files together is a later slice.
   declared return type (P2R-134). `self` and `static` name the class or
   enum whose body holds the call; `static` names the same class as `self`,
   because no class of the file can extend another class of the file
-  (P2R-130, P2R-350), and both are
+  (P2R-130, P2R-350; an exception class of P2R-390 has no members to
+  call), and both are
   read whatever their letter case (`SELF::`). In the body of an enum,
   `self::Case` and `static::Case` convert as `E::Case` (P2R-112), also as
   a `match` condition (P2R-120), and `self::from()`, `self::tryFrom()` and
@@ -2071,8 +2078,10 @@ Section 40 adds exception classes that the input declares.
   P2R-35, P2R-40, P2R-50, P2R-104, P2R-106, P2R-145 and the end rule of
   P2R-211), a `throw` leaves its block as `return` does, and each `throw`
   and each call that throws in a `try` body is a path to its handlers
-  (P2R-214). These stop the conversion: any argument other than `message`
-  and `code`, positional or named; `new` of any other class than these
+  (P2R-214). These stop the conversion: for a class of P2R-210, or an
+  exception class of the input without a constructor, any argument other
+  than `message` and `code`, positional or named; `new` of any other
+  class than these
   and the exception classes of the input (P2R-392); a `throw` of
   any other expression; and an exception object used in any other way
   (`new C(..)` outside a `throw` stops by P2R-133).
@@ -2094,8 +2103,9 @@ Section 40 adds exception classes that the input declares.
   these paths as PHP does, so a variable that the body and a handler both
   assign is assigned once on each path. The handlers are one
   `if e.is_a("C") { .. } else if ..` chain in source order, a union
-  `catch (A | B $e)` testing `e.is_a("A") || e.is_a("B")`. A clause that
-  names `Exception` or `Throwable`, alone or in a union, is a catch-all: it
+  `catch (A | B $e)` testing `e.is_a("A") || e.is_a("B")`. A clause whose
+  class PHP resolves to `\Exception` or `\Throwable`, alone or in a
+  union, is a catch-all: it
   ends the chain as `else { .. }`, or stands alone after the `let` when it
   is the only clause. Without a catch-all the chain ends with
   `else { return Err(e); }` in a function that throws, so it throws
@@ -3685,20 +3695,28 @@ properties a constructor promotes are not kept, and a class with
 methods, such as getters, still stops.
 
 - **P2R-390** A class declared at the top level whose `extends` names
-  one class that PHP resolves to a class of P2R-210, or to another
-  exception class of the input, is an exception class of the input. It
-  MUST convert to no struct: its fully qualified PHP name, without the
-  leading backslash (`App\Exceptions\RoleDoesNotExistException`), joins
-  the class tree of `is_a` under its parent (P2R-210), and `uncaught()`
-  prints that name, as PHP does. It may be `final`, and it may hold a
-  constructor (P2R-391) and nothing else. These stop: an attribute on
-  it; `abstract` or `readonly`; `implements`; any other member (a
+  one class, and whose chain of parents of the input ends at a class
+  that PHP resolves to one of P2R-210, is an exception class of the
+  input. It MUST convert to no struct: its fully qualified PHP name as
+  declared, in that letter case and without the leading backslash
+  (`App\Exceptions\RoleDoesNotExistException`), joins the class tree of
+  `is_a` under its parent (P2R-210), after the built-in classes under
+  the same parent and in source order, and `uncaught()` prints that
+  name, as PHP does, whatever letter case a `throw` or `catch` writes.
+  The output writes the name as a Rust string literal with each `\`
+  doubled (`"App\\Exceptions\\RoleDoesNotExistException"`). P2R-111
+  applies to its name, as to a class's. It may be `final`, and it may
+  hold a constructor (P2R-391) and nothing else. These stop: an
+  attribute on it or on its constructor (P2R-381 does not apply to
+  it); `abstract` or `readonly`; `implements`; any other member (a
   method, a property, a constant, a trait use); a parent of the input
   that is `final`; a parent of the input that the same file declares
   after it, because PHP then declares the class only when execution
-  reaches it; and any use of the class other than `throw new` (P2R-212)
-  and a `catch` clause (P2R-392): a type that names it stops (P2R-22),
-  and so do `new` outside a `throw`, `instanceof` and a static access.
+  reaches it; and any use of the class other than `throw new` (P2R-212),
+  a `catch` clause (P2R-392), the `extends` of another exception class,
+  a `use` line (P2R-150) and a docblock: a type that names it stops
+  (P2R-22), and so do `new` outside a `throw`, `instanceof` and a static
+  access.
 - **P2R-391** The constructor of an exception class of the input MUST
   convert to `pub fn <name>(<parameters>) -> PhpException`, placed
   where the class stands, where `<name>` is the class's short name in
@@ -3712,24 +3730,32 @@ methods, such as getters, still stops.
   of the body, which converts to `return PhpException::new("<class>",
   message, code);` with the arguments of P2R-212. A class with a
   constructor makes the output hold the struct of P2R-210 even when no
-  `throw` or `catch` converts. These stop: a constructor that is not
-  public or that returns by reference; a body that reads or writes
-  `$this`, holds a `return`, holds another `parent::` access or holds a
-  `throw` or a call that throws (P2R-211); a promoted parameter named
-  `message`, `code`, `file`, `line`, `previous` or `trace`, which
-  PHP's `Exception` declares; a constructor in a class whose parent of
+  `throw` or `catch` converts. These stop: a constructor with a
+  modifier other than `public` and `final` (`static` and `abstract`
+  included), with a return type, or that returns by reference, which
+  PHP rejects or warns about and Mago does not report; a promoted
+  parameter with a property hook, which runs when the constructor sets
+  the property (P2R-130); a body that does not end with that call, or
+  that reads or writes `$this`, holds a `return`, holds another
+  `parent::` access or holds a `throw` or a call that throws (P2R-211);
+  a promoted parameter named `message`, `code`, `file`, `line`,
+  `previous` or `trace`, names of properties of PHP's `Exception`, the
+  first four of which change what `getMessage()`, `getCode()`, the
+  uncaught text or `getLine()` give; a constructor in a class whose parent of
   the input has a constructor, and a class without a constructor whose
   parent of the input has one, because `parent::__construct(..)` or
-  `new` would run the parent's; and a name that P2R-31 refuses for a
-  function, or that a function or another exception class of the input
-  gives.
+  `new` would run the parent's; and a name that P2R-31 or P2R-173
+  refuses for a function, or that a function or another exception class
+  of the input gives. For P2R-31 the function is a function of the file,
+  so a variable, parameter or `catch` variable of its Rust name stops.
 - **P2R-392** `throw new C(..)`, where `C` is an exception class of the
   input, MUST convert as P2R-212 converts a class of P2R-210: for a class
   without a constructor with `PhpException::new("<class>", message,
   code)`, and for a class with one with `<name>(<arguments>)`, its
   arguments converted as for a call of that function (P2R-169). A
   `catch` clause MUST accept an exception class of the input as it
-  accepts a class of P2R-210, testing `e.is_a("<class>")` (P2R-214). In
+  accepts a class of P2R-210, testing `e.is_a("<class>")` (P2R-214),
+  where `<class>` is the name P2R-390 gives. In
   a directory input, a module that names the function of P2R-391 holds a
   `use` line for it (P2R-174).
 

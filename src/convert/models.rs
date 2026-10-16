@@ -163,16 +163,22 @@ impl Converter<'_> {
                 );
                 None
             }
-            // `method_exists` finds an inherited or trait method in any letter case.
+            // Mago's lookup finds an inherited or trait method in any letter case.
             Ok(_)
                 if op != StoreOp::Create
                     && observers
                         .iter()
                         .any(|observer| self.codebase.method_exists(observer, b"retrieved")) =>
             {
+                let observer = observers
+                    .iter()
+                    .find(|observer| self.codebase.method_exists(observer, b"retrieved"))
+                    .and_then(|observer| self.codebase.get_class_like(observer))
+                    .map(|class| class.original_name.to_string())
+                    .unwrap_or_default();
                 self.refuse(
                     node,
-                    "an observer of this model has a retrieved method, which Laravel runs on every row it reads and the store does not (P2R-461)",
+                    format!("the observer {observer} of this model has a retrieved method, which Laravel runs on every row it reads and the store does not (P2R-461)"),
                 );
                 None
             }
@@ -1116,8 +1122,12 @@ pub(super) fn find(
             let observers = if class.attribute_lists.is_empty() {
                 Some(Vec::new())
             } else if observed_included {
-                observed_by(class, names)
-                    .filter(|observers| observers.iter().all(|name| codebase.class_exists(name)))
+                observed_by(class, names).filter(|observers| {
+                    observers.iter().all(|name| {
+                        codebase.class_exists(name)
+                            && declared_tree(codebase, name, &mut HashSet::new())
+                    })
+                })
             } else {
                 None
             };
@@ -1265,6 +1275,24 @@ fn observed_by(class: &Class<'_>, names: &ResolvedNames<'_>) -> Option<Vec<Vec<u
         }
     }
     Some(observers)
+}
+
+/// True when the class-like `name` and its parents, interfaces and traits at any depth are
+/// declared, which PHP loads when Laravel boots a model it observes; Mago reports a missing
+/// one only in the input (P2R-460).
+fn declared_tree(codebase: &CodebaseMetadata, name: &[u8], seen: &mut HashSet<Vec<u8>>) -> bool {
+    if !seen.insert(name.to_ascii_lowercase()) {
+        return true;
+    }
+    let Some(class) = codebase.get_class_like(name) else {
+        return false;
+    };
+    class
+        .direct_parent_class
+        .iter()
+        .chain(class.direct_parent_interfaces.iter())
+        .chain(class.used_traits.iter())
+        .all(|parent| declared_tree(codebase, parent.as_bytes(), seen))
 }
 
 /// Laravel's trait that gives the query builder `when()`, lowercase.

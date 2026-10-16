@@ -4397,7 +4397,9 @@ otherwise than an array (`empty($c)` is false for an empty collection).
 - **P2R-440** `Illuminate\Support\Collection<K, T>` and
   `Illuminate\Database\Eloquent\Collection<K, T>`, as a declared type
   or as the type Mago gives a value, where the class is the vendored one
-  (P2R-340), MUST map to `Vec<T>` when `list<T>` has a Rust type
+  (P2R-340) and, for Eloquent's class, so is its parent
+  `Illuminate\Support\Collection`, from which it inherits the methods of
+  P2R-442, MUST map to `Vec<T>` when `list<T>` has a Rust type
   (P2R-21) and `T` is neither nullable, nor `DateTime|false` (whose Rust
   type `Option<PhpDateTime>` would make `first()` give two `Option`s,
   P2R-330), nor a changing type (P2R-141), whatever `K` is, because no
@@ -4426,9 +4428,10 @@ otherwise than an array (`empty($c)` is false for an empty collection).
   limit that section 42 states: an index whose columns start with a
   `where` column can make SQLite give another order. `get([..])` and
   `all([..])` with a list of columns stop, because Laravel then loads only
-  those columns, and so does a `where` that P2R-413 refuses. On a model
-  whose store does not apply, these forms stop with the reason of
-  P2R-410. `M::get()` and `M::where(..)->get()` stop, by P2R-153 or on
+  those columns, and so does a `where` that P2R-413 refuses. These forms
+  also stop when Eloquent's collection class maps to no `Vec` by P2R-440
+  (the input declares it or its parent), and on a model whose store does
+  not apply, with the reason of P2R-410. `M::get()` and `M::where(..)->get()` stop, by P2R-153 or on
   Mago's finding (P2R-11), because `__callStatic` forwards them and Mago
   gives `mixed`.
 - **P2R-442** On a collection value `$c`, these MUST convert, in the

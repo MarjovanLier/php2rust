@@ -4649,8 +4649,9 @@ run an observer method stopped.
   whose observer has `retrieved`, and the forms of `#[ObservedBy]` that
   P2R-460 does not admit (by P2R-401's stop of an attribute). Observers
   that a service provider registers (`M::observe(..)`) remain the review
-  concern of P2R-410, and the top-level code of an included observer's
-  file a review concern of P2R-460.
+  concern of P2R-410; the top-level code of an included observer's file,
+  and an included observer that PHP refuses to declare for a reason
+  other than a missing name, are review concerns of P2R-460.
 
 ## Spec checklist
 
@@ -4691,7 +4692,10 @@ run an observer method stopped.
   `Model::unguard()` there, which change what `create`, `find`,
   `first`, `sole`, `firstOrFail`, `findOrFail`, `get` and `all` give, in
   P2R-460 the top-level code of an included observer's file, which PHP
-  runs when Laravel boots the model and loads it, a relation that
+  runs when Laravel boots the model and loads it, and an included
+  observer that PHP refuses to declare for a reason other than a missing
+  name (a class that extends an interface or leaves a method abstract),
+  which Mago reports only in the input, a relation that
   `Model::resolveRelationUsing(..)` registers under one of these names,
   which `Model::__call` tries before it forwards to the query, and a schema
   dump or package migrations that

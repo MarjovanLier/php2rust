@@ -661,10 +661,13 @@ impl Converter<'_> {
             self.refuse(arguments[0], nulls::NULL_BUILT_IN);
             return None;
         }
-        if !matches!(ty, RustType::Vec(_) | RustType::Map(..)) {
+        if !matches!(
+            ty,
+            RustType::Vec(_) | RustType::Map(..) | RustType::Collection(_)
+        ) {
             self.refuse(
                 node,
-                "count() converts on a list or a map only (P2R-48, P2R-242)",
+                "count() converts on a list, a map or a collection only (P2R-48, P2R-242, P2R-442)",
             );
             return None;
         }

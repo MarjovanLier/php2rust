@@ -371,7 +371,7 @@ impl<'ast, 'arena> Body<'ast, 'arena, '_, '_> {
                 match self.root_named(variable.name, depth) {
                     Root::This => Some(converter.classes[self.class?].own_type()),
                     Root::Value(at) => match self.type_at(self.open[at].list, at)? {
-                        RustType::Vec(element) => Some(*element),
+                        RustType::Vec(element) | RustType::Collection(element) => Some(*element),
                         _ => None,
                     },
                     Root::Parameter(at) => Some(self.parameters[at].1.clone()),
@@ -1151,7 +1151,7 @@ impl<'ast, 'arena, 'x, 'c> Walker<'ast, 'arena, Body<'ast, 'arena, 'x, 'c>> for 
         // A map field is borrowed for every value type (P2R-242).
         let copy_list = matches!(
             body.type_of(foreach.expression),
-            Some(RustType::Vec(element)) if element.is_copy()
+            Some(RustType::Vec(element) | RustType::Collection(element)) if element.is_copy()
         ) || matches!(body.type_of(foreach.expression), Some(RustType::Map(..)));
         let property = matches!(
             unparenthesized(foreach.expression),

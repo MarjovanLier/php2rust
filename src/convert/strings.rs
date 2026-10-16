@@ -869,7 +869,8 @@ impl Converter<'_> {
             }
             // A slice cannot move into a `Vec`.
             RExpr::Var(name)
-                if matches!(ty, RustType::Vec(_)) && self.variables.is_borrowed(&name) =>
+                if matches!(ty, RustType::Vec(_) | RustType::Collection(_))
+                    && self.variables.is_borrowed(&name) =>
             {
                 RExpr::Method(Box::new(RExpr::Var(name)), "to_vec")
             }
@@ -918,7 +919,12 @@ impl Converter<'_> {
         } else {
             self.is_reference(&expr)
         };
-        if (matches!(ty, RustType::String | RustType::Vec(_)) || ty.is_struct()) && !reference {
+        if (matches!(
+            ty,
+            RustType::String | RustType::Vec(_) | RustType::Collection(_)
+        ) || ty.is_struct())
+            && !reference
+        {
             RExpr::Ref(Box::new(expr))
         } else {
             expr

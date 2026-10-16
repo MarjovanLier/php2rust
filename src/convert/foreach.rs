@@ -126,6 +126,21 @@ impl Converter<'_> {
             let (element, by_ref, iter) = self.map_iteration(statement, expr, &ty, key, value);
             return (element, by_ref, iter, Some((**key).clone()));
         }
+        // A collection iterates as a list of its elements, without a key, because Laravel
+        // keeps the keys a collection had (P2R-442, P2R-443).
+        let ty = match ty {
+            RustType::Collection(element) if statement.target.key().is_none() => {
+                RustType::Vec(element)
+            }
+            RustType::Collection(_) => {
+                self.refuse(
+                    list,
+                    "a foreach over a collection converts without a key only, because Laravel keeps the keys a collection had (P2R-443)",
+                );
+                return (None, false, String::new(), None);
+            }
+            other => other,
+        };
         let RustType::Vec(element) = &ty else {
             let message = if matches!(ty, RustType::Option(_)) {
                 "foreach over a value that may be null is not supported (P2R-106)"

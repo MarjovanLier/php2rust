@@ -13,6 +13,7 @@ use mago_codex::ttype::atomic::array::key::ArrayKey;
 use mago_codex::ttype::atomic::array::keyed::TKeyedArray;
 use mago_codex::ttype::atomic::array::list::TList;
 use mago_codex::ttype::atomic::object::TObject;
+use mago_codex::ttype::atomic::object::named::TNamedObject;
 use mago_codex::ttype::atomic::scalar::TScalar;
 use mago_codex::ttype::atomic::scalar::bool::TBool;
 use mago_codex::ttype::union::TUnion;
@@ -35,6 +36,8 @@ pub struct TypeNames {
     /// True when an included file declares Spatie's `Optional` with the shape of
     /// laravel-data 4.18 (P2R-360).
     pub optional: bool,
+    /// True when an included file declares Laravel's collection classes (P2R-440).
+    pub collections: bool,
     /// The Rust names of the traits of the input's interfaces, which no shape or union may
     /// take (P2R-370).
     pub traits: HashSet<String>,
@@ -143,6 +146,9 @@ pub enum RustType {
     DateTime,
     /// `T|Optional`, Spatie's marker of a value left out, as `PhpOptional<T>` (P2R-360).
     Optional(Box<RustType>),
+    /// Laravel's collection of `T`, as `Vec<T>`, apart from a list because only the uses of
+    /// section 45 convert (P2R-440).
+    Collection(Box<RustType>),
 }
 
 impl RustType {
@@ -153,7 +159,7 @@ impl RustType {
             Self::F64 => "f64".into(),
             Self::Bool => "bool".into(),
             Self::String => "String".into(),
-            Self::Vec(element) => format!("Vec<{}>", element.owned()),
+            Self::Vec(element) | Self::Collection(element) => format!("Vec<{}>", element.owned()),
             Self::Option(inner) => format!("Option<{}>", inner.owned()),
             Self::Enum(name) | Self::Class(name) | Self::Shape(name) | Self::Union(name) => {
                 name.clone()
@@ -169,7 +175,7 @@ impl RustType {
     pub fn parameter(&self) -> String {
         match self {
             Self::String => "&str".into(),
-            Self::Vec(element) => format!("&[{}]", element.owned()),
+            Self::Vec(element) | Self::Collection(element) => format!("&[{}]", element.owned()),
             Self::Class(name) | Self::Shape(name) | Self::Union(name) => format!("&{name}"),
             Self::Map(..) | Self::Optional(_) => format!("&{}", self.owned()),
             Self::Option(inner) => format!("Option<{}>", inner.parameter()),
@@ -212,7 +218,7 @@ impl RustType {
         match self {
             Self::I64 | Self::F64 | Self::Bool | Self::Enum(_) | Self::DateTime => true,
             Self::String | Self::Vec(_) | Self::Class(_) | Self::Shape(_) | Self::Union(_) => false,
-            Self::Map(..) | Self::Optional(_) => false,
+            Self::Map(..) | Self::Optional(_) | Self::Collection(_) => false,
             Self::Option(inner) => inner.is_copy(),
         }
     }
@@ -224,7 +230,8 @@ impl RustType {
             Self::Vec(inner)
             | Self::Option(inner)
             | Self::Map(_, inner)
-            | Self::Optional(inner) => inner.holds_class(),
+            | Self::Optional(inner)
+            | Self::Collection(inner) => inner.holds_class(),
             _ => false,
         }
     }
@@ -240,7 +247,7 @@ pub fn built(ty: &RustType) -> bool {
         RustType::DateTime => true,
         RustType::Optional(inner) => built(inner),
         // A list or map of `PhpOptional` waits for a later slice (P2R-360).
-        RustType::Vec(element) | RustType::Map(_, element) => {
+        RustType::Vec(element) | RustType::Map(_, element) | RustType::Collection(element) => {
             built(element) && !matches!(**element, RustType::Optional(_))
         }
         // A variable written both `T|Optional|null` and `null` waits too (P2R-360).
@@ -324,6 +331,8 @@ fn typed(union: &TUnion, enums: &TypeNames, declared: bool) -> Result<RustType, 
         });
         return match found {
             _ if falsy || truthy => Err(unknown()),
+            // A collection is never nullable or in a union (P2R-440).
+            Some(RustType::Collection(_)) => Err(unknown()),
             Some(RustType::DateTime) if nullable => Err(unknown()),
             Some(ty) if nullable => {
                 Ok(RustType::Optional(Box::new(RustType::Option(Box::new(ty)))))
@@ -347,6 +356,7 @@ fn typed(union: &TUnion, enums: &TypeNames, declared: bool) -> Result<RustType, 
         Some(RustType::Option(_)) if nullable => Err(unknown()),
         // `Option<PhpDateTime>` is `DateTime|false`, whose `None` is `false` (P2R-330).
         Some(RustType::DateTime) if nullable => Err(unknown()),
+        Some(RustType::Collection(_)) if nullable => Err(unknown()),
         Some(ty) if nullable => Ok(RustType::Option(Box::new(ty))),
         Some(ty) => Ok(ty),
         None => Err(unknown()),
@@ -407,8 +417,13 @@ pub fn declared_type(union: &TUnion, enums: &TypeNames) -> Result<RustType, Stri
             map
         });
     }
-    // Only `DateTime|false` holds a `DateTime` (P2R-330).
-    if members.len() < 2 || members.contains(&RustType::DateTime) {
+    // Only `DateTime|false` holds a `DateTime` (P2R-330), and no union a collection
+    // (P2R-440).
+    if members.len() < 2
+        || members
+            .iter()
+            .any(|member| matches!(member, RustType::DateTime | RustType::Collection(_)))
+    {
         return Err(error);
     }
     members.sort_by_key(variant);
@@ -468,6 +483,8 @@ pub fn variant(ty: &RustType) -> String {
         RustType::Option(inner) => variant(inner),
         RustType::DateTime => "DateTime".to_owned(),
         RustType::Optional(_) => "Optional".to_owned(),
+        // No union holds a collection (P2R-440).
+        RustType::Collection(_) => "Collection".to_owned(),
     }
 }
 
@@ -866,11 +883,39 @@ fn atomic_type(atomic: &TAtomic, enums: &TypeNames, declared: bool) -> Option<Ru
             match enums.get(&key) {
                 Some(ty) => Some(ty.clone()),
                 None if key == b"datetime" => Some(RustType::DateTime),
+                None if enums.collections && COLLECTIONS.contains(&key.as_slice()) => {
+                    collection_type(found, enums, declared)
+                }
                 None => None,
             }
         }
         _ => None,
     }
+}
+
+/// The lowercase names of Laravel's two collection classes (P2R-440).
+pub const COLLECTIONS: [&[u8]; 2] = [
+    b"illuminate\\support\\collection",
+    b"illuminate\\database\\eloquent\\collection",
+];
+
+/// `Collection<K, T>` as a collection of `T`, whatever `K` is, when `T` is neither nullable,
+/// nor a union, nor `PhpOptional`, and `list<T>` has a Rust type (P2R-440).
+fn collection_type(found: &TNamedObject, enums: &TypeNames, declared: bool) -> Option<RustType> {
+    if found.intersection_types.is_some() {
+        return None;
+    }
+    let [_, element] = found.type_parameters.as_deref()? else {
+        return None;
+    };
+    let element = typed(element, enums, declared).ok()?;
+    if matches!(
+        element,
+        RustType::Option(_) | RustType::Union(_) | RustType::Optional(_)
+    ) {
+        return None;
+    }
+    Some(RustType::Collection(Box::new(element)))
 }
 
 /// `list<T>`, `non-empty-list<T>` and `list{T, T}` all give `Vec<T>`. A shape like

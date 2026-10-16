@@ -34,6 +34,7 @@ mod booleans;
 mod changes;
 mod classes;
 mod closures;
+mod collections;
 mod control;
 mod crates;
 mod dates;
@@ -286,6 +287,7 @@ fn analyse(
     let mut converter = Converter::new(&codebase, analysed);
     converter.models = models;
     converter.type_names.optional = converter.included_optional();
+    converter.type_names.collections = converter.included_collections();
     converter.built_in_classes = built_in_classes;
     converter.built_in_functions = built_in_functions;
     converter.library = library;

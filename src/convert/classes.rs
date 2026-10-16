@@ -446,9 +446,10 @@ impl Converter<'_> {
             RustType::Class(name) => self
                 .class_named(name)
                 .is_some_and(|index| self.classes[index].changing),
-            RustType::Vec(inner) | RustType::Option(inner) | RustType::Optional(inner) => {
-                self.is_changing(inner)
-            }
+            RustType::Vec(inner)
+            | RustType::Option(inner)
+            | RustType::Optional(inner)
+            | RustType::Collection(inner) => self.is_changing(inner),
             RustType::Union(name) => self
                 .type_names
                 .union(name)
@@ -464,8 +465,11 @@ impl Converter<'_> {
         match ty {
             RustType::Option(inner) => self.is_changing(inner),
             RustType::Vec(element) => self.nullable_changing(element),
-            // A map clones its values, which such a class does not derive (P2R-240).
-            RustType::Map(_, value) => self.is_changing(value) || self.nullable_changing(value),
+            // A map clones its values, which such a class does not derive (P2R-240), and so
+            // does a collection's `first()` (P2R-440).
+            RustType::Map(_, value) | RustType::Collection(value) => {
+                self.is_changing(value) || self.nullable_changing(value)
+            }
             // A union enum holds its member inline, as an `Option` does (P2R-230).
             RustType::Union(_) => self.is_changing(ty),
             // `PhpOptional` holds its value inline and is cloned where it is stored
@@ -2324,6 +2328,11 @@ impl Converter<'_> {
                 .date_method(call, node, object)
                 .map(|(call, ty)| (call, Some(ty)));
         }
+        if let RustType::Collection(element) = &ty {
+            return self
+                .collection_method(call, node, object, element)
+                .map(|(call, ty)| (call, Some(ty)));
+        }
         // An enum value has the methods of its enum (P2R-155).
         let (RustType::Class(class) | RustType::Enum(class)) = &ty else {
             self.record_refused_arguments(&call.argument_list);
@@ -2947,7 +2956,7 @@ fn store(field: &ParameterSignature) -> String {
     match &field.ty {
         ty if ty.is_copy() || field.mode == Mode::Owned => name.clone(),
         RustType::String => format!("{name}: {name}.to_string()"),
-        RustType::Vec(_) => format!("{name}: {name}.to_vec()"),
+        RustType::Vec(_) | RustType::Collection(_) => format!("{name}: {name}.to_vec()"),
         RustType::Option(_) => format!("{name}: {name}.map(ToOwned::to_owned)"),
         _ => format!("{name}: {name}.clone()"),
     }

@@ -543,7 +543,7 @@ impl Converter<'_> {
             .iter()
             .filter(|parameter| written.contains(&parameter.php_name))
             .filter(|parameter| match parameter.ty.inner() {
-                RustType::String | RustType::Map(..) => true,
+                RustType::String | RustType::Map(..) | RustType::Collection(_) => true,
                 RustType::Vec(element) => !self.is_changing(element),
                 _ => false,
             })
@@ -643,7 +643,7 @@ pub(super) fn copy_lines(
             let name = &parameter.rust_name;
             let copy = match &parameter.ty {
                 RustType::Option(_) => "map(ToOwned::to_owned)",
-                RustType::Vec(_) => "to_vec()",
+                RustType::Vec(_) | RustType::Collection(_) => "to_vec()",
                 RustType::Map(..) => "clone()",
                 _ => "to_string()",
             };

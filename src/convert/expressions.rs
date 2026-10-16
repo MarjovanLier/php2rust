@@ -394,6 +394,10 @@ impl Converter<'_> {
                 self.refuse(arguments[0], super::optionals::OPTIONAL_USE);
                 return None;
             }
+            RustType::Collection(_) => {
+                self.refuse(arguments[0], super::collections::COLLECTION_USE);
+                return None;
+            }
             // Converted above.
             RustType::Union(_) => return None,
         };

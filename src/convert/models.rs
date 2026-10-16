@@ -162,8 +162,16 @@ impl Converter<'_> {
             Ok(store) => match op {
                 StoreOp::Create => self.store_create(node, index, arguments, &store),
                 StoreOp::Find | StoreOp::FindOrFail => self.store_find(node, index, arguments, op),
-                StoreOp::First | StoreOp::Sole | StoreOp::FirstOrFail => {
+                StoreOp::First | StoreOp::Sole | StoreOp::FirstOrFail | StoreOp::Get => {
                     self.store_first(node, index, &wheres, &store, op)
+                }
+                StoreOp::All => {
+                    let name = self.classes[index].rust_name.clone();
+                    self.store_uses.entry(index).or_default().all = true;
+                    Some((
+                        RExpr::Call(format!("{name}::store_all"), Vec::new()),
+                        RustType::Collection(Box::new(RustType::Class(name))),
+                    ))
                 }
             },
         };
@@ -216,6 +224,8 @@ impl Converter<'_> {
             (b"sole", StoreOp::Sole),
             (b"firstorfail", StoreOp::FirstOrFail),
             (b"findorfail", StoreOp::FindOrFail),
+            (b"get", StoreOp::Get),
+            (b"all", StoreOp::All),
         ]
         .into_iter()
         .find(|(name, _)| named(method, name))
@@ -241,14 +251,20 @@ impl Converter<'_> {
             (None, None) => return None,
         };
         wheres.reverse();
-        // `first`, `sole` and `firstOrFail` follow one `where` or more; the others none.
-        if op.filters() == wheres.is_empty() {
-            return None;
-        }
-        // `M::first()` is no form; `first` comes only through `query()`, and without the
-        // columns to load, which would leave the others unread.
-        if op.filters() && (object.is_none() || !arguments.arguments.is_empty()) {
-            return None;
+        match op {
+            // `get()` comes through `query()`, after any number of `where`, and `M::all()`
+            // on the class; both without the columns to load (P2R-441).
+            StoreOp::Get if object.is_none() || !arguments.arguments.is_empty() => return None,
+            StoreOp::All if object.is_some() || !arguments.arguments.is_empty() => return None,
+            StoreOp::Get | StoreOp::All => {}
+            // `first`, `sole` and `firstOrFail` follow one `where` or more; the others none.
+            _ if op.filters() == wheres.is_empty() => return None,
+            // `M::first()` is no form; `first` comes only through `query()`, and without the
+            // columns to load, which would leave the others unread.
+            _ if op.filters() && (object.is_none() || !arguments.arguments.is_empty()) => {
+                return None;
+            }
+            _ => {}
         }
         let key = self.class_key(class)?;
         let index = self.classes.iter().position(|c| c.key == key && c.model)?;
@@ -474,6 +490,15 @@ impl Converter<'_> {
             }
             tests.push(self.store_compared(value.value, &field)?);
         }
+        let collection = RustType::Collection(Box::new(RustType::Class(name.clone())));
+        // `M::query()->get()` reads every row, as `M::all()` does (P2R-441).
+        if tests.is_empty() {
+            self.store_uses.entry(index).or_default().all = true;
+            return Some((
+                RExpr::Call(format!("{name}::store_all"), Vec::new()),
+                collection,
+            ));
+        }
         // The closure's names may not be names its values read (`$row->code`).
         let read: HashSet<String> = tests
             .iter()
@@ -506,6 +531,10 @@ impl Converter<'_> {
             StoreOp::FirstOrFail => {
                 uses.first_or_fail = true;
                 ("store_first_or_fail", RustType::Class(name.clone()))
+            }
+            StoreOp::Get => {
+                uses.get = true;
+                ("store_get", collection)
             }
             _ => {
                 uses.first = true;
@@ -643,7 +672,7 @@ fn variables_read(expr: &RExpr) -> Vec<String> {
 }
 
 /// The operation of a form of section 42 or 43.
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum StoreOp {
     Create,
     Find,
@@ -651,6 +680,8 @@ enum StoreOp {
     Sole,
     FirstOrFail,
     FindOrFail,
+    Get,
+    All,
 }
 
 impl StoreOp {
@@ -717,6 +748,8 @@ pub(super) struct StoreUse {
     pub(super) sole: bool,
     pub(super) first_or_fail: bool,
     pub(super) find_or_fail: bool,
+    pub(super) get: bool,
+    pub(super) all: bool,
 }
 
 /// The `impl` block of a model's store, with only the functions its code calls, because
@@ -762,6 +795,22 @@ fn store_lines(name: &str, php_name: &str, uses: StoreUse) -> Vec<String> {
             String::new(),
             format!("    pub fn store_first(matches: impl Fn(&{name}) -> bool) -> Option<{name}> {{"),
             format!("        {name}::store_rows().with_borrow(|rows| rows.iter().find(|row| matches(row)).cloned())"),
+            "    }".to_owned(),
+        ]);
+    }
+    if uses.get {
+        lines.extend([
+            String::new(),
+            format!("    pub fn store_get(matches: impl Fn(&{name}) -> bool) -> Vec<{name}> {{"),
+            format!("        {name}::store_rows().with_borrow(|rows| rows.iter().filter(|row| matches(row)).cloned().collect())"),
+            "    }".to_owned(),
+        ]);
+    }
+    if uses.all {
+        lines.extend([
+            String::new(),
+            format!("    pub fn store_all() -> Vec<{name}> {{"),
+            format!("        {name}::store_rows().with_borrow(|rows| rows.clone())"),
             "    }".to_owned(),
         ]);
     }

@@ -300,8 +300,8 @@ impl Converter<'_> {
                 );
                 return None;
             }
-            if store.numeric_text.contains(&column) {
-                self.refuse(entry.value, NUMERIC_TEXT);
+            if let Some(reason) = store.retyped.get(&column) {
+                self.refuse(entry.value, *reason);
                 return None;
             }
             let expr = self.store_value(entry.value, &field.ty)?;
@@ -396,7 +396,7 @@ impl Converter<'_> {
     ) -> Option<(RExpr, RustType)> {
         let name = self.classes[index].rust_name.clone();
         let fields = self.classes[index].fields.clone();
-        let mut condition: Option<RExpr> = None;
+        let mut tests: Vec<StoreTest> = Vec::new();
         for list in wheres {
             let [Argument::Positional(column), Argument::Positional(value)] =
                 list.arguments.as_slice()
@@ -427,26 +427,44 @@ impl Converter<'_> {
                 );
                 return None;
             };
-            if store
-                .numeric_text
-                .contains(String::from_utf8_lossy(&field.php_name).as_ref())
+            if let Some(reason) = store
+                .retyped
+                .get(String::from_utf8_lossy(&field.php_name).as_ref())
             {
-                self.refuse(value.value, NUMERIC_TEXT);
+                self.refuse(value.value, *reason);
                 return None;
             }
-            let compared = self.store_compared(value.value, &field)?;
-            condition = Some(match condition {
-                Some(earlier) => RExpr::Binary(Box::new(earlier), BinOp::And, Box::new(compared)),
-                None => compared,
-            });
+            tests.push(self.store_compared(value.value, &field)?);
         }
-        let condition = condition?;
+        // The closure's names may not be names its values read (`$row->code`).
+        let read: HashSet<String> = tests
+            .iter()
+            .flat_map(|test| variables_read(&test.value))
+            .collect();
+        let fresh = |base: &str, taken: &[&str]| {
+            (0..)
+                .map(|n| {
+                    if n == 0 {
+                        base.to_owned()
+                    } else {
+                        format!("{base}_{n}")
+                    }
+                })
+                .find(|name| !read.contains(name) && !taken.contains(&name.as_str()))
+                .unwrap_or_default()
+        };
+        let row = fresh("row", &[]);
+        let text = fresh("text", &[row.as_str()]);
+        let condition = tests
+            .into_iter()
+            .map(|test| test.rendered(&row, &text))
+            .reduce(|earlier, test| RExpr::Binary(Box::new(earlier), BinOp::And, Box::new(test)))?;
         self.store_uses.entry(index).or_default().first = true;
         Some((
             RExpr::Call(
                 format!("{name}::store_first"),
                 vec![RExpr::Closure(
-                    vec![format!("row: &{name}")],
+                    vec![format!("{row}: &{name}")],
                     Box::new(condition),
                 )],
             ),
@@ -460,11 +478,12 @@ impl Converter<'_> {
         &mut self,
         value: &Expression<'_>,
         field: &ParameterSignature,
-    ) -> Option<RExpr> {
-        let read = RExpr::Field(
-            Box::new(RExpr::Var("row".to_owned())),
-            field.rust_name.clone(),
-        );
+    ) -> Option<StoreTest> {
+        let test = |kind, value| StoreTest {
+            field: field.rust_name.clone(),
+            kind,
+            value,
+        };
         if !steady(value) {
             self.refuse(
                 value,
@@ -484,11 +503,7 @@ impl Converter<'_> {
                 );
                 return None;
             }
-            return Some(RExpr::MethodCall(
-                Box::new(read),
-                "is_none".to_owned(),
-                Vec::new(),
-            ));
+            return Some(test(TestKind::IsNone, RExpr::None));
         }
         let (expr, found) = self.expression(value)?;
         if matches!(found, RustType::Option(_)) || !same_kind(&found, &field.ty) {
@@ -499,26 +514,9 @@ impl Converter<'_> {
             return None;
         }
         Some(match &field.ty {
-            // A `String` compares with a `&str` or a `String` value alike.
-            RustType::Option(inner) if **inner == RustType::String => {
-                let read = RExpr::MethodCall(Box::new(read), "as_ref".to_owned(), Vec::new());
-                let test = RExpr::Binary(
-                    Box::new(RExpr::Raw("*text".to_owned())),
-                    BinOp::Eq,
-                    Box::new(expr),
-                );
-                RExpr::MethodCall(
-                    Box::new(read),
-                    "is_some_and".to_owned(),
-                    vec![RExpr::Closure(vec!["text".to_owned()], Box::new(test))],
-                )
-            }
-            RustType::Option(_) => RExpr::Binary(
-                Box::new(read),
-                BinOp::Eq,
-                Box::new(RExpr::Some(Box::new(expr))),
-            ),
-            _ => RExpr::Binary(Box::new(read), BinOp::Eq, Box::new(expr)),
+            RustType::Option(inner) if **inner == RustType::String => test(TestKind::TextEq, expr),
+            RustType::Option(_) => test(TestKind::SomeEq, expr),
+            _ => test(TestKind::Eq, expr),
         })
     }
 
@@ -536,6 +534,61 @@ impl Converter<'_> {
 /// The problem of a value for a `String` field of a column that is not text (P2R-411,
 /// P2R-413).
 const NUMERIC_TEXT: &str = "the field is a string cast of a column that is not text, which SQLite stores by the column's type, so the value reads back as another string (P2R-411, P2R-413)";
+const REAL_INT: &str = "the field is an int cast of a float or double column, which SQLite stores as REAL, so an int above 2^53 reads back rounded (P2R-411, P2R-413)";
+
+/// The test of one `where`, before the closure's names are chosen (P2R-413).
+struct StoreTest {
+    field: String,
+    kind: TestKind,
+    value: RExpr,
+}
+
+enum TestKind {
+    /// `where('c', null)` on a nullable field.
+    IsNone,
+    Eq,
+    /// A value for a nullable field that is not text.
+    SomeEq,
+    /// A value for a nullable `String` field, which compares with a `&str` or a `String`.
+    TextEq,
+}
+
+impl StoreTest {
+    fn rendered(self, row: &str, text: &str) -> RExpr {
+        let read = RExpr::Field(Box::new(RExpr::Var(row.to_owned())), self.field);
+        let value = Box::new(self.value);
+        match self.kind {
+            TestKind::IsNone => RExpr::MethodCall(Box::new(read), "is_none".to_owned(), Vec::new()),
+            TestKind::Eq => RExpr::Binary(Box::new(read), BinOp::Eq, value),
+            TestKind::SomeEq => {
+                RExpr::Binary(Box::new(read), BinOp::Eq, Box::new(RExpr::Some(value)))
+            }
+            TestKind::TextEq => {
+                let read = RExpr::MethodCall(Box::new(read), "as_ref".to_owned(), Vec::new());
+                let test =
+                    RExpr::Binary(Box::new(RExpr::Raw(format!("*{text}"))), BinOp::Eq, value);
+                RExpr::MethodCall(
+                    Box::new(read),
+                    "is_some_and".to_owned(),
+                    vec![RExpr::Closure(vec![text.to_owned()], Box::new(test))],
+                )
+            }
+        }
+    }
+}
+
+/// The names of the variables `expr` reads, from its debug form, where each is a `Var`.
+fn variables_read(expr: &RExpr) -> Vec<String> {
+    let text = format!("{expr:?}");
+    text.split("Var(\"")
+        .skip(1)
+        .map(|rest| {
+            rest.chars()
+                .take_while(|c| c.is_ascii_alphanumeric() || *c == '_')
+                .collect()
+        })
+        .collect()
+}
 
 /// The operation of a form of section 42.
 #[derive(Clone, Copy, Debug)]
@@ -565,11 +618,18 @@ fn same_kind(found: &RustType, field: &RustType) -> bool {
     kind(found) != 0 && kind(found) == kind(field)
 }
 
-/// True for a value that reads the same each time it is read: a variable, a literal, or a
-/// property read of such a value (P2R-413).
+/// True for a value that reads the same each time it is read: a variable, a literal (a
+/// negative number included), or a property read of such a value (P2R-413).
 fn steady(value: &Expression<'_>) -> bool {
     match unparenthesized(value) {
         Expression::Variable(Variable::Direct(_)) | Expression::Literal(_) => true,
+        Expression::UnaryPrefix(unary) => {
+            matches!(unary.operator, UnaryPrefixOperator::Negation(_))
+                && matches!(
+                    unparenthesized(unary.operand),
+                    Expression::Literal(Literal::Integer(_) | Literal::Float(_))
+                )
+        }
         Expression::Access(Access::Property(access)) => {
             matches!(&access.property, ClassLikeMemberSelector::Identifier(_))
                 && steady(access.object)
@@ -766,7 +826,7 @@ pub(super) fn find(
                 "another model with a struct reads the table {table} too, and one store per model would split its rows (P2R-410)"
             ));
         } else if let Some((_, seeds)) = &folded
-            && (seeds.any || seeds.tables.contains(table))
+            && (seeds.any || seeds.tables.contains(&table.to_ascii_lowercase()))
         {
             model.store = Err(format!(
                 "a migration writes rows into the table {table}, which the store, empty when it starts, does not hold (P2R-410)"
@@ -995,9 +1055,10 @@ type FieldsAndStore = (Vec<Field>, Result<StoreRules, String>);
 #[derive(Clone, Debug)]
 pub(super) struct StoreRules {
     pub(super) table: String,
-    /// The `String` fields of a column that is not text, which SQLite stores by the column's
-    /// type, so a value reads back as another string (`'1.0'` as `'1'`).
-    pub(super) numeric_text: HashSet<String>,
+    /// The fields whose values SQLite stores by the column's type, so a value reads back as
+    /// another value, each with the reason: a `String` field of a column that is not text
+    /// (`'1.0'` as `'1'`) and an `i64` field of a REAL column (2^53 + 1 as 2^53).
+    pub(super) retyped: HashMap<String, &'static str>,
     pub(super) create: Result<CreateRules, String>,
 }
 
@@ -1039,19 +1100,21 @@ fn store_rules(
             "the store needs an int id that id() declares and no cast changes, which the table {table} does not have (P2R-410)"
         ));
     }
-    let numeric_text = fields
+    let retyped = fields
         .iter()
-        .filter(|f| {
-            f.kind == Kind::Text
-                && columns
-                    .iter()
-                    .any(|c| c.name == f.column && c.kind != Kind::Text)
+        .filter_map(|f| {
+            let column = columns.iter().find(|c| c.name == f.column)?;
+            let reason = match f.kind {
+                Kind::Text if column.kind != Kind::Text => NUMERIC_TEXT,
+                Kind::Int if column.real => REAL_INT,
+                _ => return None,
+            };
+            Some((f.column.clone(), reason))
         })
-        .map(|f| f.column.clone())
         .collect();
     Ok(StoreRules {
         table: table.to_owned(),
-        numeric_text,
+        retyped,
         create: create_rules(class, table, columns, fields, timestamps),
     })
 }
@@ -1107,27 +1170,35 @@ fn fillable_keys(class: &Class<'_>) -> Result<Option<HashSet<String>>, String> {
         let ClassLikeMember::Property(Property::Plain(plain)) = member else {
             continue;
         };
-        let [PropertyItem::Concrete(item)] = plain.items.as_slice() else {
-            continue;
-        };
-        let Expression::Array(array) = item.value else {
-            continue;
-        };
-        match item.variable.name {
-            b"$fillable" => {
-                let keys = array
-                    .elements
-                    .iter()
-                    .map(|element| match element {
-                        ArrayElement::Value(value) => string_literal(value.value),
-                        _ => None,
-                    })
-                    .collect::<Option<HashSet<String>>>()
-                    .ok_or("the model's $fillable is not a list of string literals (P2R-411)")?;
-                fillable = Some(keys);
+        for item in plain.items.iter() {
+            let array = match item {
+                PropertyItem::Concrete(item) => match item.value {
+                    Expression::Array(array) => Some(array),
+                    _ => None,
+                },
+                PropertyItem::Abstract(_) => None,
+            };
+            match (item.variable().name, array) {
+                (b"$fillable", array) => {
+                    let keys = array
+                        .and_then(|array| {
+                            array
+                                .elements
+                                .iter()
+                                .map(|element| match element {
+                                    ArrayElement::Value(value) => string_literal(value.value),
+                                    _ => None,
+                                })
+                                .collect::<Option<HashSet<String>>>()
+                        })
+                        .ok_or(
+                            "the model's $fillable is not a list of string literals (P2R-411)",
+                        )?;
+                    fillable = Some(keys);
+                }
+                (b"$guarded", array) => open = array.is_some_and(|array| array.elements.is_empty()),
+                _ => {}
             }
-            b"$guarded" => open = array.elements.is_empty(),
-            _ => {}
         }
     }
     // Laravel looks in $fillable first, and with an empty one fills what $guarded allows.
@@ -1470,6 +1541,8 @@ pub(super) struct Column {
     pub(super) default: bool,
     /// `id()`, an auto-increment key that the database numbers (P2R-410).
     pub(super) increments: bool,
+    /// `float()` or `double()`, whose values SQLite stores as REAL (P2R-411).
+    pub(super) real: bool,
 }
 
 /// A table after the migrations: its columns in the order of their first declaration, or
@@ -1556,7 +1629,8 @@ pub(super) fn fold(migrations: &[Migration], keyed: &HashMap<Vec<u8>, String>) -
 #[derive(Debug, Default)]
 pub(super) struct Seeds {
     tables: HashSet<String>,
-    /// A `DB::table(..)` names its table by something other than a string literal.
+    /// A `DB::table(..)` names its table by something other than a string literal of only
+    /// letters, digits and `_`.
     any: bool,
 }
 
@@ -1575,11 +1649,13 @@ impl<'ast, 'arena> Walker<'ast, 'arena, Seeds> for SeedWalk<'_, '_> {
         if !table || !self.reader.facade(call.class, "db") {
             return;
         }
+        // SQLite matches a table name in any case, and an alias or schema (`roles as r`,
+        // `main.roles`) may name any table.
         match sole_argument(&call.argument_list).and_then(string_literal) {
-            Some(name) => {
-                seeds.tables.insert(name);
+            Some(name) if name.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_') => {
+                seeds.tables.insert(name.to_ascii_lowercase());
             }
-            None => seeds.any = true,
+            _ => seeds.any = true,
         }
     }
 }
@@ -2165,6 +2241,8 @@ impl Reader<'_> {
         let mut nullable_set: Option<bool> = None;
         // `id()` is an auto-increment key, which the database numbers on insert.
         let mut default = lower.as_slice() == b"id";
+        // Laravel's grammars write useCurrent() only for a date or time column.
+        let dated = matches!(lower.as_slice(), b"date" | b"datetime" | b"timestamp");
         let mut change = false;
         let mut foreign = false;
         for (name, arguments) in modifiers {
@@ -2178,7 +2256,7 @@ impl Reader<'_> {
                         [Expression::Literal(Literal::Null(_))]
                     );
                 }
-                b"usecurrent" if !foreign => default = true,
+                b"usecurrent" if !foreign => default = default || dated,
                 // After constrained(), a modifier belongs to the foreign key, as in Laravel.
                 b"nullable" if !foreign => {
                     nullable_set = match positional_list(arguments).as_slice() {
@@ -2226,6 +2304,7 @@ impl Reader<'_> {
                 nullable: nullable_set.unwrap_or(nullable),
                 default,
                 increments: lower.as_slice() == b"id",
+                real: matches!(lower.as_slice(), b"float" | b"double"),
             };
             let existing = columns.iter().position(|c| c.name == column.name);
             match (change, existing) {

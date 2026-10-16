@@ -498,7 +498,8 @@ impl Converter<'_> {
                     if n == 0 {
                         base.to_owned()
                     } else {
-                        format!("{base}_{n}")
+                        // `r#type_1` is the plain name `type_1`, which a value may read.
+                        format!("{}_{n}", base.trim_start_matches("r#"))
                     }
                 })
                 .find(|name| !read.contains(name) && !taken.contains(&name.as_str()))
@@ -1178,7 +1179,7 @@ fn tell_when(codebase: &mut CodebaseMetadata, included: &HashSet<FileId>) {
 }
 
 /// Laravel's trait that gives the query builder `when()`, lowercase.
-const CONDITIONABLE: &[u8] = b"illuminate\\support\\traits\\conditionable";
+pub(super) const CONDITIONABLE: &[u8] = b"illuminate\\support\\traits\\conditionable";
 
 /// The lowercase fully qualified name of the name at `node`, written `raw`.
 fn resolved(names: &ResolvedNames<'_>, node: &impl HasSpan, raw: &[u8]) -> Vec<u8> {

@@ -3,8 +3,9 @@
 use mago_span::{HasSpan, Span};
 use mago_syntax::cst::*;
 
+use super::classes::SUPERGLOBALS;
 use super::lists::unparenthesized;
-use super::models::{StoreRules, StoreTest, TestValue, steady, variables_read};
+use super::models::{CONDITIONABLE, StoreRules, StoreTest, TestValue, steady, variables_read};
 use super::{Converter, ParameterSignature};
 use crate::names;
 use crate::printer::{BinOp, RExpr};
@@ -107,6 +108,13 @@ impl Converter<'_> {
         fields: &[ParameterSignature],
         store: &StoreRules,
     ) -> Option<WhenTest> {
+        if !self.when_told() {
+            self.refuse(
+                node,
+                "when converts only as Laravel's, whose type the tool tells Mago when an included file declares its trait Conditionable (P2R-450, P2R-451)",
+            );
+            return None;
+        }
         let [Argument::Positional(value), Argument::Positional(callback)] =
             list.arguments.as_slice()
         else {
@@ -164,6 +172,17 @@ impl Converter<'_> {
                 tests.push(self.bound_test(value, &field, second.as_deref(), &inner)?);
             }
         }
+        // Rust would read such a value nowhere, and rustc warns about a parameter it is.
+        if !option
+            && falsy(&inner, &RExpr::Bool(true)).is_none()
+            && !tests.iter().any(StoreTest::binds)
+        {
+            self.refuse(
+                value,
+                "a when whose value is an object or an enum case without null, which is always truthy, needs a where on the callback's second parameter (P2R-453)",
+            );
+            return None;
+        }
         let base = second
             .as_deref()
             .and_then(names::rust_name)
@@ -172,9 +191,26 @@ impl Converter<'_> {
             value: value_expr,
             option,
             inner,
-            base: base.trim_start_matches("r#").to_owned(),
+            base,
             tests,
         })
+    }
+
+    /// True when the tool told Mago the type of Laravel's `when()`: an included file, never
+    /// the input, declares its trait with the method (P2R-450).
+    fn when_told(&self) -> bool {
+        self.codebase
+            .get_class_like(CONDITIONABLE)
+            .is_some_and(|conditionable| {
+                !self
+                    .files
+                    .iter()
+                    .any(|analysed| analysed.file == conditionable.span.file_id)
+                    && conditionable
+                        .methods
+                        .iter()
+                        .any(|method| method.as_bytes().eq_ignore_ascii_case(b"when"))
+            })
     }
 
     /// The parameters and the `where` chains of a callback of P2R-451, or `None` with a
@@ -264,6 +300,19 @@ impl Converter<'_> {
                 );
                 return None;
             }
+            // Mago does not report these, but PHP rejects the file.
+            let name = parameter.variable.name;
+            let message = if name == b"$this" {
+                "a parameter cannot be named $this, which PHP rejects (P2R-135)"
+            } else if SUPERGLOBALS.contains(&name) {
+                "PHP rejects a parameter named like a superglobal (P2R-31)"
+            } else if list[0].variable.name == name && !std::ptr::eq(list[0], *parameter) {
+                "PHP rejects two parameters of one name (P2R-451)"
+            } else {
+                continue;
+            };
+            self.refuse(&parameter.variable, message);
+            return None;
         }
         let query = list[0];
         if query.hint.is_some() {
@@ -284,15 +333,21 @@ impl Converter<'_> {
         }
         let second = list.get(1).copied();
         if let Some(second) = second
-            && second.hint.is_some()
+            && let Some(hint) = &second.hint
         {
+            // PHP checks the hint against the value it passes: `false` or `true` would throw
+            // a TypeError for the other truthy bool.
+            let plain = matches!(
+                hint,
+                Hint::Integer(_) | Hint::String(_) | Hint::Bool(_) | Hint::Identifier(_)
+            );
             let declared = self
                 .parameter_type(callback.node, 1)
                 .and_then(|union| types::rust_type(&union, &self.type_names).ok());
-            if declared.as_ref() != Some(inner) {
+            if !plain || declared.as_ref() != Some(inner) {
                 self.refuse(
                     second,
-                    "the second parameter of the callback of when is untyped or of the type of the value without null (P2R-451)",
+                    "the second parameter of the callback of when is untyped or written as the PHP type of the value without null: int, string, bool, the class or the enum (P2R-451)",
                 );
                 return None;
             }

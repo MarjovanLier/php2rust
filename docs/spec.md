@@ -341,14 +341,15 @@ requirement IDs.
   (`getTotal()` and `get_total()`); a variable whose Rust name equals the
   Rust name of a function in the file; a PHP function named `main`; a
   function, variable, parameter or foreach key or value whose Rust name is
-  the name of a helper of P2R-160 (the parameters of a `when` callback are
-  none of these, P2R-452); and a
+  the name of a helper of P2R-160; and a
   function with the name of a function PHP has built in (`next`, `touch`),
   which PHP rejects when it compiles the file and Mago does not report (in
   a namespace PHP accepts it, P2R-151); and a parameter named like a
   superglobal (`$_GET`, `$GLOBALS` and the others) and a parameter of a
   function with a modifier (`public`, `readonly`, `static`), which PHP
-  rejects and Mago does not report either.
+  rejects and Mago does not report either. Of these clauses only the
+  superglobal one applies to the parameters of a `when` callback
+  (P2R-451); P2R-452 names the binding.
 - **P2R-32** A call MUST use the declared or built-in function name,
   whatever the letter case of the call (PHP function names ignore case).
 - **P2R-33** Statements outside functions, other than enum, class and

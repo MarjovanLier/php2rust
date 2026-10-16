@@ -1,0 +1,4 @@
+input.php:25:19: the type App\Shape has no Rust type (P2R-22)
+input.php:30:16: the type App\Shape has no Rust type (P2R-22)
+input.php:37:12: instanceof converts only with the class DateTime, on a value of type DateTime|false (P2R-333)
+input.php:42:12: C::class is not supported (P2R-156)

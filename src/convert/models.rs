@@ -502,7 +502,10 @@ impl Converter<'_> {
                         format!("{}_{n}", base.trim_start_matches("r#"))
                     }
                 })
-                .find(|name| !read.contains(name) && !taken.contains(&name.as_str()))
+                // `r#type` is the word `type` of a value's Rust form.
+                .find(|name| {
+                    !read.contains(name.trim_start_matches("r#")) && !taken.contains(&name.as_str())
+                })
                 .unwrap_or_default()
         };
         let row = fresh("row", &[]);

@@ -335,8 +335,8 @@ impl Converter<'_> {
         if let Some(second) = second
             && let Some(hint) = &second.hint
         {
-            // PHP checks the hint against the value it passes: `false` or `true` would throw
-            // a TypeError for the other truthy bool.
+            // Laravel calls the callback only for a truthy value, so `false` throws a TypeError
+            // every time; `?string` and `true` are left out of the form (P2R-451).
             let plain = matches!(
                 hint,
                 Hint::Integer(_) | Hint::String(_) | Hint::Bool(_) | Hint::Identifier(_)
@@ -425,16 +425,34 @@ impl Converter<'_> {
         }
         if let Expression::Access(Access::Property(access)) = unparenthesized(value)
             && is_second(access.object)
+            && matches!(inner, RustType::Enum(_))
+        {
+            self.refuse(
+                value,
+                "an enum case's value or name in the callback of when is not supported yet (P2R-451, P2R-453)",
+            );
+            return None;
+        }
+        if let Expression::Access(Access::Property(access)) = unparenthesized(value)
+            && is_second(access.object)
             && let ClassLikeMemberSelector::Identifier(name) = &access.property
             && let RustType::Class(class) = inner
         {
-            // A model that takes no struct has no properties (P2R-401).
-            let Some(property) = self.class_named(class).and_then(|index| {
+            let index = self.class_named(class);
+            let Some(property) = index.and_then(|index| {
                 self.properties(index)
                     .find(|property| property.php_name == name.value)
                     .cloned()
             }) else {
-                self.refuse(value, "this class has no property of that name (P2R-134)");
+                let structless = index
+                    .and_then(|index| self.model_fields(&self.classes[index].key))
+                    .is_some_and(|fields| fields.is_empty());
+                let message = if structless {
+                    "this model takes no struct (P2R-401), so a property read of it does not convert"
+                } else {
+                    "this class has no property of that name (P2R-134)"
+                };
+                self.refuse(value, message);
                 return None;
             };
             return self.compared_test(

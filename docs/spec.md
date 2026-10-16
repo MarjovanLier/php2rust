@@ -4618,8 +4618,11 @@ run an observer method stopped.
   file `--include` reads declares (P2R-340), where `<arg>` is one
   positional argument: `X::class`, or an array literal `[..]` of one or
   more `X::class` without keys, each naming a class (not an interface,
-  trait or enum) that the input, an included file or PHP itself declares
-  together with its parent classes, interfaces and traits at any depth, as PHP
+  trait or enum) that the input or an included file declares together
+  with its parent classes, interfaces and traits at any depth, none of
+  them one of PHP's built-in classes (Mago's stubs also name classes of
+  extensions that PHP may not load, such as `\Redis`, and Laravel then
+  throws on the first use), as PHP
   loads them when Laravel boots the model (Mago reports a missing one in
   the input, but not in an included file). The named classes are the
   model's observers. Such a model takes its struct by P2R-401 as if the
@@ -4694,8 +4697,9 @@ run an observer method stopped.
   P2R-460 the top-level code of an included observer's file, which PHP
   runs when Laravel boots the model and loads it, and an included
   observer that PHP refuses to declare for a reason other than a missing
-  name (a class that extends an interface or leaves a method abstract),
-  which Mago reports only in the input, a relation that
+  name (a class that extends an interface or a final class, leaves a
+  method abstract or inherits in a cycle), which Mago reports only in
+  the input, a relation that
   `Model::resolveRelationUsing(..)` registers under one of these names,
   which `Model::__call` tries before it forwards to the query, and a schema
   dump or package migrations that

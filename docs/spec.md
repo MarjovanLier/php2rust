@@ -1933,7 +1933,8 @@ string}`), and keeps an object that may be missing in a nullable property
   the places of the shape the tool meets second, other than a shape whose
   fields are those of the first with a `?T` field typed `T` or `null`,
   which Mago gives a shape after a check of that field against null and
-  which maps to the struct of the first (P2R-104), and a shape that maps
+  which maps to the struct of the first (P2R-104), a type Mago gives a
+  read and never a second declared shape, and a shape that maps
   to the struct of a shape with a union field (P2R-430); and a shape whose Rust
   name is the Rust name of an enum or class of the input (P2R-131,
   P2R-173).
@@ -4347,13 +4348,17 @@ member of another union, still stops.
   the name of `U` and the stops of P2R-230 apply to the field's value
   type, and so does P2R-200's stop of a value type that is or holds a
   class, for each member (`array{at: Point|int}` stops); a field whose
-  type is a map with union values, or holds one, stops (P2R-250). A
+  type is a map with union values, or a list, a map or a `null` union
+  that holds one, stops (P2R-250), while a union field may hold such a
+  map as its map member (P2R-270). A
   shape that a declared type names takes its own field types, so two
   declared shapes of one Rust name with different field types stop by
   P2R-200, whichever the tool meets first. Any other shape type with
   the keys of such a shape, each of whose field types fits the struct's
   field (for a union field, the Rust type (P2R-21) of each member of its
-  Mago type a member of `U`, `null` only for `Option<U>`), maps to the
+  Mago type a member of `U`, `null` only for `Option<U>`; for any other
+  field, the same Rust type after P2R-21, or `T` or `null` for an
+  `Option<T>` field, as in P2R-200's exception for `?T`), maps to the
   same struct: the type Mago gives a read or a copy of it (a variable, a
   parameter, a `foreach` value, a list element) and the type it gives an
   array literal in a local variable, so a field type that Mago narrows

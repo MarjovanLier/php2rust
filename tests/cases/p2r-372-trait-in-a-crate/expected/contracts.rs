@@ -8,4 +8,5 @@ pub trait Labelable {
 
 pub trait Lines {
     fn lines(&self, csv: &str) -> Vec<AmountNameShape>;
+    fn amount(&self) -> i64;
 }

@@ -81,6 +81,14 @@ interface Rejected
     public function getLabel(): string;
 
     public function GETLABEL(): string;
+
+    abstract public function hollow(): int;
+
+    public public function doubled(): int;
+
+    protected function hidden(): int;
+
+    public function shielded(#[\SensitiveParameter] string $secret): int;
 }
 
 // A prelude trait gives every type a method of this name.
@@ -89,10 +97,10 @@ interface Convertible
     public function into(): string;
 }
 
-// A trait of Rust's prelude takes this name.
-interface ToString
+// PHP reserves this name.
+interface Mixed
 {
-    public function text(): string;
+    public function anything(): int;
 }
 
 // A class takes the Rust name of this interface.
@@ -106,5 +114,25 @@ final readonly class ItemRecord
     public function id(): int
     {
         return 1;
+    }
+}
+
+// A shape struct cannot take the name of a trait.
+interface NameSizeShape
+{
+    public function size(): int;
+}
+
+/** @param array{name: string, size: int} $row */
+function shaped(array $row): int
+{
+    return $row['size'];
+}
+
+// An interface declared inside another statement.
+if (true) {
+    interface Late
+    {
+        public function late(): int;
     }
 }

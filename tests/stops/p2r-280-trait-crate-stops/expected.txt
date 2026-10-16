@@ -1,2 +1,2 @@
-input/Names.php:7:1: another enum, class, trait or function of the crate has the same Rust name or fully qualified name (P2R-173)
-input/Other.php:8:1: another enum, class, trait or function of the crate has the same Rust name or fully qualified name (P2R-173)
+input/Names.php:7:1: another enum, class, interface, trait or function of the crate has the same Rust name or fully qualified name (P2R-173)
+input/Other.php:8:1: another enum, class, interface, trait or function of the crate has the same Rust name or fully qualified name (P2R-173)

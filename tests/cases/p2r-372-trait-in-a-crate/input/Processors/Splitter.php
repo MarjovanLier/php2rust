@@ -21,4 +21,9 @@ final readonly class Splitter implements Lines
         }
         return $rows;
     }
+
+    public function amount(): int
+    {
+        return $this->amount;
+    }
 }

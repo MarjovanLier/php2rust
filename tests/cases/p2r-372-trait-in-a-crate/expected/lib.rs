@@ -2,6 +2,7 @@
 
 pub mod contracts;
 pub mod enums;
+pub mod nullable;
 pub mod processors;
 pub mod util;
 

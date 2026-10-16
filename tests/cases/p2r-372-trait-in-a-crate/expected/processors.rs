@@ -25,6 +25,10 @@ impl Lines for Splitter {
         }
         return rows;
     }
+
+    fn amount(&self) -> i64 {
+        return self.amount;
+    }
 }
 
 fn php_explode(separator: &str, text: &str) -> Vec<String> {

@@ -224,12 +224,18 @@ fn included_files(paths: &[PathBuf]) -> Result<Vec<convert::Included>, String> {
 }
 
 /// The migrations of `--migrations`: the regular files directly in the directory whose
-/// names match `*_*.php`, as Laravel reads them, in byte order of the names without `.php`.
+/// names match `*_*.php` and do not start with `.`, as Laravel reads them, in byte order of
+/// the names without `.php`.
 /// A file that cannot be read or is not UTF-8 has no source (P2R-400).
 fn migration_files(dir: &Path) -> Result<Vec<convert::Migration>, String> {
     let shown = dir.display().to_string();
     if !dir.is_dir() {
-        return Err(format!("{shown}: the migrations directory does not exist"));
+        let why = if dir.exists() {
+            "the migrations path is not a directory"
+        } else {
+            "the migrations directory does not exist"
+        };
+        return Err(format!("{shown}: {why}"));
     }
     let entries = fs::read_dir(dir)
         .map_err(|err| format!("{shown}: cannot read the migrations directory: {err}"))?;
@@ -239,10 +245,13 @@ fn migration_files(dir: &Path) -> Result<Vec<convert::Migration>, String> {
             entry.map_err(|err| format!("{shown}: cannot read the migrations directory: {err}"))?;
         let name = entry.file_name();
         let bytes = name.as_encoded_bytes();
-        let migration = bytes
-            .strip_suffix(b".php")
-            .is_some_and(|stem| stem.contains(&b'_'));
-        if migration && entry.file_type().is_ok_and(|kind| kind.is_file()) {
+        // PHP's glob() does not match a leading `.` with `*` (macOS `._` files).
+        let migration = !bytes.starts_with(b".")
+            && bytes
+                .strip_suffix(b".php")
+                .is_some_and(|stem| stem.contains(&b'_'));
+        // Laravel requires a symlink to a file as well.
+        if migration && dir.join(&name).is_file() {
             names.push(name);
         }
     }

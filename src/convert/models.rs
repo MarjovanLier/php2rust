@@ -20,7 +20,7 @@ use mago_syntax::cst::*;
 use mago_syntax::parser::parse_file;
 use mago_syntax::walker::Walker;
 
-use super::{Converter, Mode, ParameterSignature};
+use super::{Converter, Mode, ParameterSignature, classes};
 use crate::names;
 use crate::types::{self, RustType};
 
@@ -47,10 +47,24 @@ impl Converter<'_> {
         if let Some((span, message)) = reason {
             self.refuse(&span, message);
         }
+        // PHP rejects these when it compiles the file, and Mago does not report them.
+        if let Some(modifier) = classes::doubled_modifier(&declaration.modifiers) {
+            self.refuse(modifier, classes::DOUBLED_MODIFIER);
+        }
+        let mut methods: HashSet<Vec<u8>> = HashSet::new();
+        let mut properties: HashSet<&[u8]> = HashSet::new();
         // A method that keeps the struct still stops; one that takes it away is the reason
         // above, whose span holds this one (P2R-03).
         for member in declaration.members.iter() {
             match member {
+                ClassLikeMember::Method(method)
+                    if !methods.insert(method.name.value.to_ascii_lowercase()) =>
+                {
+                    self.refuse(
+                        &method.name,
+                        "PHP rejects a second method of one name in a class (P2R-401)",
+                    );
+                }
                 ClassLikeMember::Method(method)
                     if !method.name.value.eq_ignore_ascii_case(b"casts") =>
                 {
@@ -58,6 +72,16 @@ impl Converter<'_> {
                         &method.name,
                         "a method of a model is not supported yet (P2R-401)",
                     );
+                }
+                ClassLikeMember::Property(Property::Plain(plain)) => {
+                    for item in plain.items.iter() {
+                        if !properties.insert(item.variable().name) {
+                            self.refuse(
+                                item,
+                                "PHP rejects a second property of one name in a class (P2R-401)",
+                            );
+                        }
+                    }
                 }
                 // A trait of the input that a model uses is used (P2R-280).
                 ClassLikeMember::TraitUse(trait_use) => {
@@ -324,6 +348,18 @@ fn model_fields(
     }
     // Laravel merges casts() over $casts.
     casts.extend(later_casts);
+    let timestamps = !class.members.iter().any(|member| {
+        matches!(member, ClassLikeMember::Property(Property::Plain(plain))
+            if matches!(plain.items.as_slice(), [PropertyItem::Concrete(item)]
+                if item.variable.name == b"$timestamps"
+                    && matches!(item.value, Expression::Literal(Literal::False(_)))))
+    });
+    let soft_deletes = class.members.iter().any(|member| {
+        matches!(member, ClassLikeMember::TraitUse(trait_use)
+        if trait_use.trait_names.iter().any(|name| {
+            resolved(names, name, name.value()) == b"illuminate\\database\\eloquent\\softdeletes"
+        }))
+    });
     let Some(tables) = tables else {
         return Err((
             class.name.span(),
@@ -367,6 +403,16 @@ fn model_fields(
         let kind = match casts.get(&column.name) {
             Some(Some(kind)) => *kind,
             Some(None) => continue,
+            // Laravel casts the key `id` to int under the model's casts, as its key type is
+            // int and it increments (a model that changes either takes no struct).
+            None if column.name == "id" => Kind::Int,
+            // And it reads these as dates, whatever the column method.
+            None if (timestamps
+                && (column.name == "created_at" || column.name == "updated_at"))
+                || (soft_deletes && column.name == "deleted_at") =>
+            {
+                continue;
+            }
             None if column.kind == Kind::Untyped => continue,
             None => column.kind,
         };
@@ -473,23 +519,55 @@ fn model_member(
                 };
             }
             // Laravel reads an attribute through an accessor, a method returning
-            // `Casts\Attribute`, or a method of the model that this one overrides.
+            // `Casts\Attribute`, or a method of the model that this one overrides; it runs a
+            // method with `#[Boot]` or `#[Initialize]`, or named boot<Trait> or
+            // initialize<Trait>, when it boots or builds the model.
             let accessor = lower.len() > b"getattribute".len()
                 && (lower.starts_with(b"get") || lower.starts_with(b"set"))
                 && lower.ends_with(b"attribute");
-            let attribute = matches!(&method.return_type_hint, Some(hint)
-                if matches!(&hint.hint, Hint::Identifier(identifier)
-                    if resolved(names, identifier, identifier.value())
-                        == b"illuminate\\database\\eloquent\\casts\\attribute"));
-            if lower == b"getroutekeyname" {
+            let attribute = method
+                .return_type_hint
+                .as_ref()
+                .is_some_and(|hint| names_attribute(&hint.hint, names));
+            let lifecycle = lower.starts_with(b"boot") || lower.starts_with(b"initialize");
+            let attributed = method
+                .attribute_lists
+                .iter()
+                .flat_map(|list| list.attributes.iter())
+                .any(|attribute| {
+                    resolved(names, &attribute.name, attribute.name.value()) != b"override"
+                });
+            if lower == b"getroutekeyname" && !attributed {
                 Member::KeepsReads
-            } else if accessor || attribute || overridden.contains(&lower) {
+            } else if accessor
+                || attribute
+                || lifecycle
+                || attributed
+                || overridden.contains(&lower)
+            {
                 Member::Other
             } else {
                 Member::KeepsReads
             }
         }
         _ => Member::Other,
+    }
+}
+
+/// True for a type that names `Casts\Attribute`, also inside `?` or a union, which Laravel
+/// reads as an accessor (P2R-401).
+fn names_attribute(hint: &Hint<'_>, names: &ResolvedNames<'_>) -> bool {
+    match hint {
+        Hint::Identifier(identifier) => {
+            resolved(names, identifier, identifier.value())
+                == b"illuminate\\database\\eloquent\\casts\\attribute"
+        }
+        Hint::Nullable(nullable) => names_attribute(nullable.hint, names),
+        Hint::Union(union) => {
+            names_attribute(union.left, names) || names_attribute(union.right, names)
+        }
+        Hint::Parenthesized(inner) => names_attribute(inner.hint, names),
+        _ => false,
     }
 }
 
@@ -818,7 +896,17 @@ impl Reader<'_> {
             matches!(member, ClassLikeMember::Method(method)
                 if method.name.value.eq_ignore_ascii_case(b"shouldRun"))
         });
-        if should_run {
+        // PHP rejects a second method or property of one name, so Laravel stops there.
+        let mut seen: HashSet<Vec<u8>> = HashSet::new();
+        let doubled = class.members.iter().any(|member| match member {
+            ClassLikeMember::Method(method) => !seen.insert(method.name.value.to_ascii_lowercase()),
+            ClassLikeMember::Property(Property::Plain(plain)) => plain
+                .items
+                .iter()
+                .any(|item| !seen.insert(item.variable().name.to_vec())),
+            _ => false,
+        });
+        if should_run || doubled {
             return None;
         }
         let up = class.members.iter().find_map(|member| match member {
@@ -902,11 +990,20 @@ impl Reader<'_> {
             }
             return;
         }
-        // A chain on `DB::table(..)` changes rows, not columns.
+        // A chain on `DB::table(..)` changes rows, not columns, when its arguments call only
+        // the forms of a rows-only migration; a callback of chunk() may call Schema.
         if let Statement::Expression(expression) = statement
             && self.on_db_table(expression.expression)
         {
-            return;
+            let walker = RowsOnly {
+                reader: self,
+                own: Vec::new(),
+            };
+            let mut rows = true;
+            walker.walk_expression(expression.expression, &mut rows);
+            if rows {
+                return;
+            }
         }
         unknown_all(
             tables,
@@ -991,10 +1088,15 @@ impl Reader<'_> {
         }
     }
 
-    /// True for a chain of calls whose innermost receiver is `DB::table(..)`.
+    /// True for a chain of calls whose innermost receiver is `DB::table(..)` and that does
+    /// not reach the connection, which runs any statement.
     fn on_db_table(&self, expression: &Expression<'_>) -> bool {
         match expression {
-            Expression::Call(Call::Method(call)) => self.on_db_table(call.object),
+            Expression::Call(Call::Method(call)) => {
+                let connection = matches!(&call.method, ClassLikeMemberSelector::Identifier(method)
+                    if method.value.eq_ignore_ascii_case(b"getConnection"));
+                !connection && self.on_db_table(call.object)
+            }
             Expression::Call(Call::StaticMethod(call)) => {
                 self.facade(call.class, "db")
                     && matches!(&call.method, ClassLikeMemberSelector::Identifier(method)
@@ -1097,6 +1199,15 @@ impl Reader<'_> {
         let (method, arguments) = chain[0];
         let modifiers = &chain[1..];
         let unknown = |what: &str| Err(self.reason(statement, what));
+        // A named argument (`id(column: 'code_id')`) names what the position would.
+        let plain = chain.iter().all(|(_, list)| {
+            list.arguments.iter().all(|argument| {
+                matches!(argument, Argument::Positional(positional) if positional.ellipsis.is_none())
+            })
+        });
+        if !plain {
+            return unknown("a named or unpacked argument in a Blueprint call");
+        }
         let lower = method.to_ascii_lowercase();
         let named = |default: Option<&str>| -> Option<String> {
             match positional_list(arguments).first() {
@@ -1232,6 +1343,7 @@ impl Reader<'_> {
                 | b"onupdate"
                 | b"unique"
                 | b"index"
+                | b"primary"
                 | b"after"
                 | b"comment"
                 | b"usecurrent"
@@ -1307,17 +1419,36 @@ impl RowsOnly<'_, '_> {
                     || (carbon && method == b"now")
             }
             Call::Method(call) => {
+                // down() is not checked, so a call of it is not.
                 let own = matches!(call.object, Expression::Variable(Variable::Direct(variable))
                     if variable.name == b"$this")
                     && matches!(&call.method, ClassLikeMemberSelector::Identifier(method)
-                        if self.own.contains(&method.value.to_ascii_lowercase()));
-                own || self.reader.on_db_table(call.object)
+                        if self.own.contains(&method.value.to_ascii_lowercase())
+                            && !method.value.eq_ignore_ascii_case(b"down"));
+                own || self.chain(call)
             }
             Call::Function(call) => matches!(call.function, Expression::Identifier(identifier)
                 if [&b"now"[..], b"date", b"count"]
                     .contains(&self.reader.resolved(identifier).as_slice())),
             Call::NullSafeMethod(_) => false,
         }
+    }
+
+    /// True for a call chained on `DB::table(..)`, `DB::raw(..)`, `now()` or `now()` of
+    /// Carbon that does not reach the connection of a query, which runs any statement.
+    fn chain(&self, call: &MethodCall<'_>) -> bool {
+        let connection = matches!(&call.method, ClassLikeMemberSelector::Identifier(method)
+            if method.value.eq_ignore_ascii_case(b"getConnection"));
+        !connection
+            && match call.object {
+                Expression::Call(Call::Method(inner)) => self.chain(inner),
+                Expression::Call(inner @ Call::StaticMethod(_)) => self.allowed(inner),
+                Expression::Call(Call::Function(inner)) => {
+                    matches!(inner.function, Expression::Identifier(identifier)
+                        if self.reader.resolved(identifier) == b"now")
+                }
+                _ => false,
+            }
     }
 }
 

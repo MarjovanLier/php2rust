@@ -3834,13 +3834,17 @@ and its gain is typed attribute reads.
   without `.php`. Migrations never enter Mago: the tool parses them and
   resolves their names only, and prints no Mago finding about them. A
   migration's last top-level statement is `return new class extends
-  Migration { .. };`, where `Migration` resolves to
+  Migration { .. };`, with only `declare` and `use` statements before
+  it, because Laravel runs any other code when it requires the file;
+  `Migration` resolves to
   `\Illuminate\Database\Migrations\Migration`, and its class has a public
   method `up()` without parameters, with or without the return type
-  `void` and with no modifier written twice, no method `shouldRun()`,
-  which Laravel asks before it runs `up()`, and no two methods,
-  properties or constants of one name, which PHP rejects; its other
-  members are not read (a `$connection` naming another
+  `void`, no method `shouldRun()`, which Laravel asks before it runs
+  `up()`, no two methods, properties or constants of one name and no
+  modifier written twice, which PHP rejects, and no hooked property and
+  no closure or arrow function in a constant, a property default or a
+  parameter default (PHP 8.5 allows them there), because a read in
+  `up()` would run its code; its other members are not read (a `$connection` naming another
   database included), and `down()` is not read. `Schema` stands for
   `\Illuminate\Support\Facades\Schema` and `DB` for
   `\Illuminate\Support\Facades\DB`, each also by Laravel's global alias
@@ -3931,10 +3935,12 @@ and its gain is typed attribute reads.
   `after()` does not move them. Any other form makes its table unknown:
   another method or modifier, a column name that is not a string
   literal, an unpacked argument to the method or to `nullable(..)`, a
-  named argument where the tool reads by position (the first argument
-  of the method, the second of `foreignIdFor`, any of `nullable`:
-  `id(column: 'code_id')`; `constrained('t', indexName: 'i')` keeps the
-  table known), a column declared again without `change()`, a `change()` or
+  named argument `column`, `columns` or `model` to the method, which
+  binds what the tool reads by position (`id(column: 'code_id')`), any
+  named argument to `nullable(..)`, which Laravel takes as its first
+  value by any name (`constrained('t', indexName: 'i')` and
+  `timestamps(precision: 6)` keep the table known), a column declared
+  again without `change()`, a `change()` or
   drop of a column the table does not have, `Schema::create` of a table
   that exists, and `Schema::table` of one that does not. None of these is
   a problem of its own: a model of an unknown table stops (P2R-401), and

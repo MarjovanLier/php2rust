@@ -3577,28 +3577,37 @@ forms of those attributes that the app uses.
 
 - **P2R-380** On a class of P2R-350, a method whose name, in any letter
   case, is one of those eight MUST be left out with its signature and
-  body when it has this form: it is declared `public` or with no
-  visibility, it is `static` (`final` may stand too), it has a body and
-  no attribute, no interface of the class declares a method of that
-  name, and `Data`, as Mago knows it, has no real method of that name,
-  only an `@method` tag or nothing. Nothing of it enters the Rust output
+  body when it has this form: its modifiers are `static` and at most one
+  `public` and one `final` (no visibility means public), it has a body
+  and no attribute, no interface of the class declares a method of that
+  name, and neither `Data`, as Mago knows it, nor a trait it uses has a
+  real method of that name, only an `@method` tag or nothing (Mago
+  takes a tag of `Data` over a real method of its trait). Nothing of it enters the Rust output
   and the tool's own checks do not read it; its docblock is not part of
   it. Of Mago's findings inside it (P2R-11), these are not reported: a
-  name or type that no file declares (`non-existent-class`,
-  `non-existent-method`, `mixed-method-access`), which PHP checks only
-  when the line runs, and a parameter count that does not match the
+  class or method that does not exist, or a call on a mixed value
+  (`non-existent-class`, `non-existent-method`, `mixed-method-access`),
+  which PHP checks only when the line runs, and a parameter count that
+  does not match the
   `@method` tag (`incompatible-parameter-count`), which PHP never
   checks. Every other Mago finding inside it still stops, such as
   `return;` in a method with a return type, which PHP rejects when it
-  compiles the file. A call of it stops, as a call of a method the class
+  compiles the file. Some of those stop a file that PHP accepts: Mago
+  checks a parameter or return type against the tag too, and a value of
+  a class that no file declares leads to other codes, such as
+  `mixed-return-statement`, so a hook that uses Laravel converts only
+  with the framework's sources in `--include`. A call of it stops, as a
+  call of a method the class
   does not declare does (P2R-135, P2R-153). A method of one of those
   names in another form stops (P2R-380), and so does a second one whose
   name is equal ignoring letter case: laravel-data calls it as a public
-  static method, and PHP rejects an attribute such as `#[\Override]` and
-  a second method of one name when it loads the class, which Mago does
-  not always report. When an interface of the class declares the name,
-  P2R-371 applies to the method instead; when `Data` has a real method
-  of the name, P2R-350's stop applies (`withValidator` and
+  static method, and PHP rejects an attribute such as `#[\Override]`, a
+  modifier such as `readonly` or one written twice, and a second method
+  of one name when it loads the class, which Mago does not always
+  report. When an interface of the class declares the name,
+  P2R-371 applies to the method instead, and so does P2R-350's stop for
+  the name of an `@method` tag; when `Data` or its trait has a real
+  method of the name, P2R-350's stop applies (`withValidator` and
   `prepareForPipeline` are real methods of version 4.18.0, not hooks).
 - **P2R-381** The attributes of P2R-351, with its argument forms, MUST
   be left out on every class of the input, not only on a class of
@@ -3638,6 +3647,7 @@ forms of those attributes that the app uses.
   `create()` returns a new `Optional` and does nothing else, as 4.18.0's
   does, which Mago's metadata does not show, and in P2R-380 a PHP
   compile-time error inside a left-out method that Mago does not report,
-  such as a parameter named twice, because the tool does not read that
-  method) are the only parts not checked mechanically.
+  such as a parameter named twice, `unset($this)` or an attribute that
+  PHP rejects in its body, because the tool does not read that method)
+  are the only parts not checked mechanically.
 - [x] No speculative features: later milestones carry no requirements yet.

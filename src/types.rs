@@ -663,7 +663,25 @@ fn fits_union(value: &TUnion, ty: &RustType, enums: &TypeNames) -> bool {
     let Some(members) = enums.unions.borrow().get(name).cloned() else {
         return false;
     };
-    within(value, &members, matches!(ty, RustType::Option(_)), enums)
+    let nullable = matches!(ty, RustType::Option(_));
+    let all = |types: &[RustType]| types.iter().all(|ty| members.contains(ty));
+    // `scalar` and `array-key` count as each of their types (P2R-230), where `within`
+    // takes one of them as enough.
+    value.types.iter().all(|atomic| match atomic {
+        TAtomic::Scalar(TScalar::Generic) => all(&[
+            RustType::Bool,
+            RustType::F64,
+            RustType::I64,
+            RustType::String,
+        ]),
+        TAtomic::Scalar(TScalar::ArrayKey) => all(&[RustType::I64, RustType::String]),
+        other => within(
+            &TUnion::from_vec(vec![other.clone()]),
+            &members,
+            nullable,
+            enums,
+        ),
+    })
 }
 
 /// True for a map of union values, also inside a list or `Option`, which a declared map
@@ -790,8 +808,9 @@ fn shape_type(keyed: &TKeyedArray, enums: &TypeNames, declared: bool) -> Result<
     let mut shapes = enums.shapes.borrow_mut();
     match shapes.get(&rust_name) {
         // After a check of a field against null, Mago narrows the whole shape: that is
-        // still the declared struct, as a narrowed read keeps its `Option` (P2R-104).
-        Some(known) if narrows(known, &fields) => {}
+        // still the declared struct, as a narrowed read keeps its `Option` (P2R-104). Two
+        // declared shapes keep their own fields, so they match only when equal (P2R-430).
+        Some(known) if *known == fields || (!declared && narrows(known, &fields)) => {}
         Some(_) => {
             return Err(format!(
                 "two different array shapes give the Rust name {rust_name} (P2R-200)"

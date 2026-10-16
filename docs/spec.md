@@ -4618,8 +4618,8 @@ run an observer method stopped.
   file `--include` reads declares (P2R-340), where `<arg>` is one
   positional argument: `X::class`, or an array literal `[..]` of one or
   more `X::class` without keys, each naming a class (not an interface,
-  trait or enum) that the input or an included file declares together
-  with its parent classes, interfaces and traits at any depth, as PHP
+  trait or enum) that the input, an included file or PHP itself declares
+  together with its parent classes, interfaces and traits at any depth, as PHP
   loads them when Laravel boots the model (Mago reports a missing one in
   the input, but not in an included file). The named classes are the
   model's observers. Such a model takes its struct by P2R-401 as if the

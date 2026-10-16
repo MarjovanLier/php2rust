@@ -891,7 +891,16 @@ impl Reader<'_> {
                     | Statement::Noop(_)
             )
         });
-        if code.count() != 1 {
+        // PHP refuses inline text before a `declare`, so Laravel stops at that file.
+        let inline = program
+            .statements
+            .iter()
+            .any(|statement| matches!(statement, Statement::Inline(_)));
+        let declare = program
+            .statements
+            .iter()
+            .any(|statement| matches!(statement, Statement::Declare(_)));
+        if code.count() != 1 || (inline && declare) {
             return None;
         }
         let Statement::Return(Return {

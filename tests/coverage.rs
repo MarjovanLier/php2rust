@@ -1,4 +1,4 @@
-//! Every requirement ID from P2R-07 to P2R-49 and from P2R-100 to P2R-453 names at least one
+//! Every requirement ID from P2R-07 to P2R-49 and from P2R-100 to P2R-462 names at least one
 //! case or stop folder (P2R-75).
 
 use std::fs;
@@ -11,7 +11,7 @@ fn requirement_ids(spec: &str) -> Vec<String> {
         .skip(1)
         .filter_map(|rest| rest.split_once("**"))
         .filter_map(|(number, _)| number.parse::<u32>().ok())
-        .filter(|number| (7..=49).contains(number) || (100..=453).contains(number))
+        .filter(|number| (7..=49).contains(number) || (100..=462).contains(number))
         .map(|number| format!("P2R-{number:02}"))
         .collect();
     ids.dedup();
@@ -34,7 +34,7 @@ fn every_requirement_has_a_case_or_stop_folder() {
     let ids = requirement_ids(&spec);
     assert!(
         ids.len() >= 20,
-        "found only {} requirement IDs from P2R-07 to P2R-49 and P2R-100 to P2R-453 in docs/spec.md; the parser may be wrong",
+        "found only {} requirement IDs from P2R-07 to P2R-49 and P2R-100 to P2R-462 in docs/spec.md; the parser may be wrong",
         ids.len()
     );
     let mut folders = folder_names(root, "cases");

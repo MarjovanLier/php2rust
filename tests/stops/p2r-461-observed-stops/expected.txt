@@ -1,0 +1,6 @@
+input.php:27:12: this model has observers, whose creating, created, saving and saved methods Laravel runs on create and the store does not (P2R-461)
+input.php:64:12: an observer of this model has a retrieved method, which Laravel runs on every row it reads and the store does not (P2R-461)
+input.php:65:12: an observer of this model has a retrieved method, which Laravel runs on every row it reads and the store does not (P2R-461)
+input.php:66:12: an observer of this model has a retrieved method, which Laravel runs on every row it reads and the store does not (P2R-461)
+input.php:67:12: an observer of this model has a retrieved method, which Laravel runs on every row it reads and the store does not (P2R-461)
+input.php:68:12: an observer of this model has a retrieved method, which Laravel runs on every row it reads and the store does not (P2R-461)

@@ -18,8 +18,9 @@ interface Labelled
 {
 }
 
-// Each of these takes the struct away, because PHP may read an attribute through it.
-#[ObservedBy([Observed::class])]
+// Each of these takes the struct away, because PHP may read an attribute through it. An
+// #[ObservedBy] with a string is no form of P2R-460.
+#[ObservedBy('App\Observed')]
 final class Observed extends Model
 {
     protected $table = 'items';

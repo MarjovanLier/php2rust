@@ -823,9 +823,9 @@ Sections 3 to 9 apply to nullable values unless this section says otherwise.
   letter case of the use (`suit::Hearts` gives `Suit::Hearts`), as P2R-32
   does for functions. These stop the conversion: a name that breaks those
   rules; two enums, or two cases of one enum, with the same Rust name; an
-  enum named `Option`, `String`, `Vec`, `ToOwned`, `None`, `Some` or
-  `IndexMap` (P2R-240), which
-  the output uses;
+  enum named `Option`, `String`, `Vec`, `ToOwned`, `None`, `Some`,
+  `IndexMap` (P2R-240) or `From`, whose `impl From<..> for IndexMap<..>`
+  a shape writes (P2R-271), which the output uses;
   and an enum with a name PHP reserves, a keyword or a type name (`list`,
   `readonly`, `match`, `bool`, `self` and the others; `enum` is allowed), or
   the name of a class, interface, enum or trait PHP has built in

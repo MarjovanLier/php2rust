@@ -713,6 +713,7 @@ Each milestone gets its own requirements in this file when its work starts.
   read in order, with `get()` and `all()` on the store (section 45);
   conditional filters with `when()` on store queries (section 46);
   models with observers, read but not created (section 47);
+  relation methods on models, left out of the output (section 48);
   unions as list values; values
   of interface types, interface inheritance and class inheritance;
   closures.
@@ -4656,9 +4657,48 @@ run an observer method stopped.
   and an included observer that PHP refuses to declare for a reason
   other than a missing name, are review concerns of P2R-460.
 
+## 48. Relation methods on models (milestone 2, slice 38, draft)
+
+Most models of the app declare relation methods such as
+`public function journalLines(): HasMany { return
+$this->hasMany(JournalLine::class); }`, and P2R-401 stops each one with
+"a method of a model is not supported yet", although the method leaves
+the struct. Laravel 12.35.1's `getAttribute` returns a loaded column
+before it looks for a relation of that name, so a relation method does
+not change what a column read gives. A throwaway spike that let such
+methods through cleared twelve model files when the factories are
+included (`--include database/factories`) and made no other file stop.
+This section leaves a relation method out of the output, as P2R-401
+leaves out `casts()`, while every use of the relation keeps stopping.
+
+- **P2R-470** A method of a model (P2R-401) MAY be a relation method and
+  MUST then be left out of the output: it is public, not static and not
+  abstract, has no parameters and no attribute, declares a return type
+  that PHP resolves to one of `BelongsTo`, `HasMany`, `HasOne`,
+  `BelongsToMany`, `HasManyThrough`, `HasOneThrough`, `MorphTo`,
+  `MorphMany` and `MorphOne` in
+  `\Illuminate\Database\Eloquent\Relations`, declared in a file that
+  `--include` reads (P2R-340), and its body is one statement
+  `return $this-><relation>(..);`, where `<relation>` is the method of
+  Laravel's `HasRelationships` of that name in lower camel case
+  (`belongsTo`, `hasMany`, and so on) and its arguments are string
+  literals and `X::class`. [NEEDS CLARIFICATION: does Laravel 12.35.1
+  ever give a relation method precedence over a loaded column of the
+  same name in getAttribute, for example through `$relations` already
+  set or a `snake_attributes` setting?]
+- **P2R-471** A call of a relation method (`$m->journalLines()`), a read
+  of a relation as a property (`$m->journalLines`, which has no field of
+  the struct, P2R-134) and every other use of the relation MUST still
+  stop. A method of another form keeps P2R-401's stop.
+- **P2R-472** These stop, with a message that names the form: a relation
+  method with a parameter, another visibility, `static`, an attribute, a
+  return type of another class (also a relation class the input
+  declares, or a union), or a body other than the one `return`.
+
 ## Spec checklist
 
-- [x] No `[NEEDS CLARIFICATION]` markers left. Decided in review: problems
+- [ ] No `[NEEDS CLARIFICATION]` markers left: section 48 is a draft
+  with one open marker in P2R-470, for its spec review. Decided in review: problems
   inside or equal to a reported span are not reported (P2R-03); exit 2 wins
   over exit 1 (P2R-04); comments are not copied in version 1 (P2R-52); `[]`
   takes its element type from the same variable or the declared type it

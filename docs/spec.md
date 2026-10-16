@@ -3812,8 +3812,8 @@ methods, such as getters, still stops.
 
 ## 41. Eloquent models from migrations (milestone 2, slice 31)
 
-The Laravel app keeps its data in 35 Eloquent models. A model extends
-`Illuminate\Database\Eloquent\Model` and declares no property: its
+The Laravel app keeps its data in 35 Eloquent models, 33 of which extend
+`Illuminate\Database\Eloquent\Model` directly. A model declares no property: its
 attributes are the columns of its table, and only the migrations in
 `database/migrations` declare those, so Mago types every attribute read as
 `mixed`. This section reads the migrations, tells Mago the type of each
@@ -3832,22 +3832,33 @@ and its gain is typed attribute reads.
   Migration { .. };`, where `Migration` resolves to
   `\Illuminate\Database\Migrations\Migration`, and its class has a public
   method `up()` without parameters, with or without the return type
-  `void`; its other members are not read, and `down()` is not read. The
-  statements of each `up()` change a set of tables, file after file, in
-  order:
+  `void`, and no method `shouldRun()`, which Laravel asks before it runs
+  `up()`; its other members are not read (a `$connection` naming another
+  database included), and `down()` is not read. `Schema` stands for
+  `\Illuminate\Support\Facades\Schema` and `DB` for
+  `\Illuminate\Support\Facades\DB`, each also by Laravel's global alias
+  (`\DB`). A migration changes rows only, and is skipped, when every call
+  in its class, `down()` aside, is a chain of calls on `DB::table(..)`,
+  `DB::raw(..)`, `now()`, `date(..)`, `count(..)`, `now()` of Carbon
+  (`Carbon\Carbon`, `Carbon\CarbonImmutable` or
+  `Illuminate\Support\Carbon`) or a call on `$this` of a method the
+  class declares, and it holds no `new`, partial application, `include`,
+  `require`, `eval` or `exit`. The statements of each other `up()` change a set
+  of tables, file after file, in order:
   - `Schema::create('<t>', <closure>);` creates table `t`, and
-    `Schema::table('<t>', <closure>);` changes it; `Schema` resolves to
-    `\Illuminate\Support\Facades\Schema`.
+    `Schema::table('<t>', <closure>);` changes it.
   - `if (! Schema::hasTable('<t>')) { Schema::create('<t>', <closure>); }`
     creates `t` when no table `t` exists, known or unknown, and otherwise
-    does nothing.
-  - A statement that is a chain on `DB::table('<t>')`, where `DB` resolves
-    to `\Illuminate\Support\Facades\DB`, whatever its arguments hold
-    (`DB::raw(..)` too), changes rows, not columns, and is skipped.
+    does nothing; after a form that made tables unknown, a table that
+    the tool has not seen may exist, so the guard makes `t` unknown.
+  - A statement that is a chain on `DB::table('<t>')`, whatever its
+    arguments hold (`DB::raw(..)` too), changes rows, not columns, and is
+    skipped.
   - Any other statement (`DB::statement(..)`, `DB::unprepared(..)`, a
     call of a helper method) makes every table that exists at that point
-    unknown; a table created after it is known. A file that does not
-    parse or does not have this shape does the same.
+    unknown; a table created after it is known. A file that cannot be
+    read, is not valid UTF-8, does not parse or does not have this shape
+    does the same.
 
   The closure is `function (Blueprint $table) { .. }`, with or without
   `static` and the return type `void`, where `Blueprint` resolves to
@@ -3856,7 +3867,8 @@ and its gain is typed attribute reads.
   it (`->nullable()`); another closure form, or another statement in it,
   makes its table unknown. A column method names its column by its first
   argument, a string literal, and the arguments after the name are not
-  read (`string('ip', 45)`, `enum('c', [..])`). These declare a column
+  read (`string('ip', 45)`, `enum('c', [..])`), nor is the argument of
+  `timestamps(..)`. These declare a column
   of a Rust type: `id()` (column `id`, or the name of its argument),
   `foreignId`, `bigInteger`, `unsignedBigInteger`, `integer`,
   `unsignedInteger`, `smallInteger`, `unsignedSmallInteger`,
@@ -3872,8 +3884,8 @@ and its gain is typed attribute reads.
   `HasFactory` and `SoftDeletes`, because Laravel takes the column's name
   and type from `C`'s key; for any other `C` the table is unknown. These
   declare a column without a Rust type: `boolean` and `decimal`, which
-  PHP reads as an int or a bool, and as a string or a float, depending on
-  the database driver; `float` and `double`; `timestamp`, `dateTime` and
+  PHP reads as an int or a bool, and as a string, a float or an int,
+  depending on the database driver; `float` and `double`; `timestamp`, `dateTime` and
   `date`; and `timestamps()` (`created_at` and `updated_at`) and
   `softDeletes()` (`deleted_at`, or the name of its argument), whose
   columns are nullable. The modifiers `nullable()` and `nullable(true)`
@@ -3882,9 +3894,11 @@ and its gain is typed attribute reads.
   `nullOnDelete()`, `restrictOnDelete()`, `cascadeOnUpdate()`,
   `onDelete(..)`, `onUpdate(..)`, `unique()`, `index()`, `after(..)`,
   `comment(..)`, `useCurrent()` and `useCurrentOnUpdate()` keep the
-  column's type. A modifier after `constrained(..)` belongs to the foreign
-  key, as in Laravel, so `nullable()` there leaves the column not
-  nullable. `change()` replaces the column of that name with the new
+  column's type. After `foreignId` or `foreignIdFor`, a modifier after
+  `constrained(..)` belongs to the foreign key, as in Laravel, so
+  `nullable()` there leaves the column not nullable; `constrained(..)`
+  after any other column method makes the table unknown, because Laravel
+  then keeps the later modifiers on the column. `change()` replaces the column of that name with the new
   declaration, nullability included, as Laravel 11 and later do, and the
   column keeps its place. The table methods `unique(..)`, `index(..)`,
   `primary(..)`, `foreign(..)` with `references(..)`, `on(..)` and the
@@ -3897,7 +3911,10 @@ and its gain is typed attribute reads.
   literal, a column declared again without `change()`, a `change()` or
   drop of a column the table does not have, `Schema::create` of a table
   that exists, and `Schema::table` of one that does not. None of these is
-  a problem of its own: a model of an unknown table stops (P2R-401). A
+  a problem of its own: a model of an unknown table stops (P2R-401), and
+  its message names the form with the migration's path, the directory as
+  given on the command line joined to the file name by one `/` (as
+  P2R-171 forms an input path), and its line. A
   directory that does not exist or cannot be listed exits 2 with its
   reason (P2R-04), as P2R-340 does for an include path, and so does a
   second `--migrations`. The option does not take its files out of a
@@ -3914,51 +3931,60 @@ and its gain is typed attribute reads.
   before each capital letter that follows another character, then lower
   case: `VATRate` gives `v_a_t_rate`) with the last word in the plural:
   `y` after a consonant becomes `ies`, a word ending in `s`, `x`, `z`,
-  `ch` or `sh` gains `es`, and any other gains `s`. Laravel's pluralizer
-  also knows irregular and uncountable words (`person`, `software`), so a
-  model of such a word stops unless `$table` names its table. A model
+  `ch` or `sh` gains `es`, and any other gains `s`. The tool knows only
+  these rules. Laravel's pluralizer has more (`person` gives `people`,
+  `software` stays, `quiz` gives `quizzes`), so a model whose table
+  Laravel names otherwise finds no table of this rule's name and stops,
+  unless `$table` names its table; it converts wrongly only when the
+  migrations create both names, and Laravel then reads the other table.
+  A model
   MUST convert to `#[derive(Clone, Debug)] pub struct <Name> { pub
   <field>: <type>, .. }`, with no `impl` block, `final` or not: one field
   per column of its table in the order of P2R-400, named by P2R-30 from
   the column name, of the column's Rust type after P2R-402, inside
   `Option` when the column is nullable. Left out of the struct are a
   column without a Rust type, a column whose cast is not one of P2R-402,
-  a column named like a public property of `Model` or a trait of it
-  (`exists`, `timestamps`), which PHP reads instead of the column, and a
+  a column named like a public instance property of `Model` or of a
+  trait it uses at any depth (`exists`, `timestamps`), which PHP reads
+  instead of the column, and a
   column whose Rust name P2R-30 refuses. Two fields with one Rust name
   stop the model (P2R-131). Its body may hold the properties `$table`,
   `$fillable`, `$guarded`, `$hidden` and `$casts`, each `protected` with
   a literal value (a string, or a list or map of strings and `C::class`),
   the method `protected function casts(): array { return [..]; }` with a
   literal map, which is read with `$casts`, its entries winning on a
-  shared key as in Laravel, and the trait uses `HasFactory` and
+  shared key as in Laravel, the trait uses `HasFactory` and
   `SoftDeletes` (resolving to
   `\Illuminate\Database\Eloquent\Factories\HasFactory` and
-  `\Illuminate\Database\Eloquent\SoftDeletes`); these are left out. A
-  method whose declared return type PHP resolves to a class in the
-  namespace `Illuminate\Database\Eloquent\Relations` (a relation), the
-  method `getRouteKeyName` and a method named `scope` followed by a
-  capital letter stop the conversion, and still leave the struct to the
-  code that reads the model, because none of them changes what an
-  attribute read gives. Everything else stops the model and leaves it
-  without a struct, because PHP may read an attribute through it
-  differently: any other member (an accessor `get<Name>Attribute`, a
-  method returning `Casts\Attribute`, a constant, another property or
-  trait); an attribute on the class (P2R-07), such as `#[ObservedBy]`,
+  `\Illuminate\Database\Eloquent\SoftDeletes`), and `public $timestamps
+  = true;` or `false`, which changes only date columns; these are left
+  out. A method stops the conversion and still leaves the struct to the
+  code that reads the model, with or without attributes on it (such as
+  `#[Override]`), because it does not change what an attribute read
+  gives, unless it is an accessor or mutator (a name `get<Name>Attribute`
+  or `set<Name>Attribute`), has a declared return type that PHP resolves
+  to `\Illuminate\Database\Eloquent\Casts\Attribute`, or overrides a
+  method of `Model` or of a trait it uses at any depth (`booted`,
+  `getAttribute`), other than `getRouteKeyName`. Everything else stops the
+  model and leaves it without a struct, because PHP may read an attribute
+  through it differently: such a method, a constant, another property or
+  trait; an attribute on the class (P2R-07), such as `#[ObservedBy]`,
   whose observer may change a model it reads; `abstract`, `readonly` or
   `implements`; a missing `--migrations`; a table that the migrations do
   not create or have made unknown; and a cast of a column its table does
-  not have. Such a model stops with one problem at its name, whose
-  message names the reason, for an unknown table the form with its
-  migration file and line, or that no migration creates the table; each
-  read of a model without a struct stops by P2R-404. A Mago finding about
-  a left-out member stops the model by P2R-11 (`@use
-  HasFactory<XFactory>` needs `--include` of the factory classes).
+  not have. The problem points at the member, attribute or modifier that
+  takes the struct away, or at the model's name for a reason of its
+  table, whose message names the form with its migration's path and
+  line, or that no migration creates the table; each read of a model
+  without a struct stops by P2R-404. A Mago finding in the model's
+  declaration, its name included, stops the conversion by P2R-11 and
+  leaves the struct (`@use HasFactory<XFactory>` needs `--include` of
+  the factory classes).
 - **P2R-402** The casts `'integer'` and `'int'`, `'string'`, and
   `'boolean'` and `'bool'` in `$casts` or `casts()` MUST give the column
   the Rust type `i64`, `String` or `bool`, whatever its type in the
   migrations (a date or a boolean column too), keeping its nullability,
-  because Laravel applies a cast before it reads the column's type. Every
+  because Laravel applies a cast before its date handling. Every
   other cast (a date cast, `'encrypted'`, `'decimal:2'`, a class such as
   an enum or a custom cast) leaves the column out of the struct.
 - **P2R-403** Before Mago analyses the input, the tool MUST tell Mago each

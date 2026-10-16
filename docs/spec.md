@@ -161,7 +161,11 @@ ignoring letter case where Rust names differ, that PHP rejects several
 interface forms that Mago's analyser does not report, and that a trait
 method meets the methods Rust's prelude gives every type. Section 39
 (laravel-data's request hooks left out) was written on 16 Oct 2026; it
-changes P2R-07, P2R-350, P2R-351 and the roadmap of section 10.
+changes P2R-07, P2R-340, P2R-341, P2R-350, P2R-351, section 14 and the
+roadmap of section 10. Its spec reviewers found that PHP rejects several
+forms of such a method when it loads or compiles the class, that Mago
+checks a hook against an `@method` tag that PHP never reads, and that
+PHP runs a `new` in an attribute argument only when reflection reads it.
 
 php2rust converts typed PHP source into normal, readable Rust (`Vec`,
 `String`, `i64`), without AI. It reads PHP with the Mago crates, uses Mago's
@@ -974,7 +978,7 @@ Sections 3 to 9 apply to nullable values unless this section says otherwise.
     or variadic, which PHP rejects or makes fail and Mago does not report;
   - a method whose PHP name starts with `__`, other than the constructor,
     and an attribute on the class or a member (P2R-07), other than the
-    `#[Override]` of P2R-221 and the attributes of P2R-351;
+    `#[Override]` of P2R-221 and the attributes of P2R-351 and P2R-381;
   - a class that is not `readonly` (section 15 converts it), and a class
     declared inside a function or another statement;
   - a property whose type does not convert (P2R-20, P2R-22; a nullable
@@ -3288,7 +3292,8 @@ later sections.
   P2R-60 lists as a difference. An attribute stops by P2R-07 whether or
   not an included file declares its class, on a function, a parameter or
   an arrow function as on a class or a member, other than the one of
-  P2R-341 and those of P2R-351. The option works for a file input and
+  P2R-341 and those of P2R-351 and P2R-381. The option works for a file
+  input and
   for a directory input.
   An include path that does not exist, that is neither a file nor a
   directory (a named pipe), or below which a directory cannot be listed
@@ -3302,7 +3307,7 @@ later sections.
   hide the argument's value in a stack trace, and the Rust output prints
   no stack trace. `StringManipulation::nameFix` carries it, so that
   package converts in full only with this rule. Every other attribute on
-  a parameter stops (P2R-07), other than those of P2R-351.
+  a parameter stops (P2R-07), other than those of P2R-351 and P2R-381.
 
 ## 36. Spatie Data classes as plain structs (milestone 2, slice 26)
 
@@ -3376,8 +3381,9 @@ parent to a later section.
   named arguments after the positional ones and each name once: PHP
   compiles the arguments as constant expressions and rejects other
   forms, such as a call or `static::class`, when it compiles the file,
-  and Mago does not report them all; P2R-382 allows `new` of an included
-  class too. Every other attribute there, and one with another argument,
+  and Mago does not report them all; P2R-382 allows `new` too, and
+  P2R-381 leaves them out on other classes. Every other attribute there,
+  and one with another argument,
   stops (P2R-07), and an attribute group
   (`#[A, B]`) that holds an attribute that stops, stops as a whole.
 
@@ -3561,37 +3567,57 @@ seven that its `ValidateableData` trait names in `@method` tags
 (`rules`, `messages`, `attributes`, `stopOnFirstFailure`, `redirect`,
 `redirectRoute` and `errorBag`), and `authorize`, which its
 `AuthorizedDataPipe` looks for. None has a real method in `Data`, only
-laravel-data calls them (through `app()->call`), and `from()`, which runs
-them, stops (P2R-350). 12 of the 60 `Data` classes of the Laravel app
-declare `rules()` or `authorize()`, whose bodies use Laravel's
-validation rules and `Gate`. This section leaves them out, as P2R-351
-leaves out the validation attributes, and it leaves out two more forms
-of those attributes that the app uses.
+laravel-data calls them (through `app()->call`), and the methods that run
+them (`from()`, `validate()`, `validateAndCreate()`,
+`getValidationRules()`) stop (P2R-350). 12 of the 60 `Data` classes of
+the Laravel app declare `rules()` or `authorize()`, whose bodies use
+Laravel's validation rules and `Gate`. This section leaves them out, as
+P2R-351 leaves out the validation attributes, and it leaves out two more
+forms of those attributes that the app uses.
 
-- **P2R-380** In a class that P2R-350 converts, a method whose name, in
-  any letter case, is one of those eight, and that is `public` and
-  `static`, MUST be left out with its signature and body: nothing of it
-  enters the Rust output, the tool reports no problem inside it, also no
-  Mago finding (P2R-11), and P2R-350's stop for a method named like a
-  method of `Data` does not apply to it. A call of it in the input stops,
-  as a call of a method the class does not declare does (P2R-153). Such a
-  method that is not `public` and `static` still stops by P2R-350, and so
-  does an override of a real method of `Data` (`withValidator`,
-  `prepareForPipeline`), which PHP checks against the parent when it
-  loads the class.
+- **P2R-380** On a class of P2R-350, a method whose name, in any letter
+  case, is one of those eight MUST be left out with its signature and
+  body when it has this form: it is declared `public` or with no
+  visibility, it is `static` (`final` may stand too), it has a body and
+  no attribute, no interface of the class declares a method of that
+  name, and `Data`, as Mago knows it, has no real method of that name,
+  only an `@method` tag or nothing. Nothing of it enters the Rust output
+  and the tool's own checks do not read it; its docblock is not part of
+  it. Of Mago's findings inside it (P2R-11), these are not reported: a
+  name or type that no file declares (`non-existent-class`,
+  `non-existent-method`, `mixed-method-access`), which PHP checks only
+  when the line runs, and a parameter count that does not match the
+  `@method` tag (`incompatible-parameter-count`), which PHP never
+  checks. Every other Mago finding inside it still stops, such as
+  `return;` in a method with a return type, which PHP rejects when it
+  compiles the file. A call of it stops, as a call of a method the class
+  does not declare does (P2R-135, P2R-153). A method of one of those
+  names in another form stops (P2R-380), and so does a second one whose
+  name is equal ignoring letter case: laravel-data calls it as a public
+  static method, and PHP rejects an attribute such as `#[\Override]` and
+  a second method of one name when it loads the class, which Mago does
+  not always report. When an interface of the class declares the name,
+  P2R-371 applies to the method instead; when `Data` has a real method
+  of the name, P2R-350's stop applies (`withValidator` and
+  `prepareForPipeline` are real methods of version 4.18.0, not hooks).
 - **P2R-381** The attributes of P2R-351, with its argument forms, MUST
-  also be left out on a class with no parent and no interface, on the
-  class and on the promoted parameters of its constructor: laravel-data
-  reads them only on a class it builds, which extends one of its own
-  classes, and PHP builds an attribute only when reflection reads it.
-- **P2R-382** An argument of such an attribute MAY also be
-  `new C(...)`, where `C` resolves to a class that an included file
-  declares and each argument of `new` has one of the forms of P2R-351;
-  the attribute is left out with it. PHP accepts `new` in an attribute
-  argument as a constant expression and runs it only when reflection
-  builds the attribute (`newInstance()`), which never runs in the
-  converted code. `new` of any other class, or with another argument,
-  stops (P2R-07).
+  be left out on every class of the input, not only on a class of
+  P2R-350: on the class and on the promoted parameters of its
+  constructor, of a `readonly` class too. laravel-data reads them only
+  on a class that extends one of its own classes (it builds its
+  `DataClass` only for `BaseData`), and any parent other than `Data`
+  stops by P2R-130.
+- **P2R-382** An argument of such an attribute MAY also be `new C`,
+  `new C()` or `new C(` arguments `)`, where `C` is a class name (not
+  `self`, `parent`, `static` or an expression), and each argument of
+  `new` is a string or int literal or `Name::class`, with named
+  arguments after the positional ones, each name once, and no `new`
+  inside; the attribute is left out with it. PHP compiles such a `new`
+  as a constant expression and runs it only when reflection reads the
+  arguments (`getArguments()` or `newInstance()`), which never runs in
+  the converted code, so whether `C` can be built does not change the
+  output. A Mago finding on it still stops (P2R-11), and so does any
+  other `new` (P2R-07).
 
 ## Spec checklist
 
@@ -3610,6 +3636,8 @@ of those attributes that the app uses.
   input reaches, and which of two included declarations of one name
   wins, which no output shows, and in P2R-361 that the included
   `create()` returns a new `Optional` and does nothing else, as 4.18.0's
-  does, which Mago's metadata does not show) are the only parts not
-  checked mechanically.
+  does, which Mago's metadata does not show, and in P2R-380 a PHP
+  compile-time error inside a left-out method that Mago does not report,
+  such as a parameter named twice, because the tool does not read that
+  method) are the only parts not checked mechanically.
 - [x] No speculative features: later milestones carry no requirements yet.

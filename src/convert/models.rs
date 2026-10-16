@@ -1363,7 +1363,7 @@ fn model_fields(
     if !observed && let Some(attributes) = class.attribute_lists.first() {
         return Err((
             attributes.span(),
-            "an attribute on a model is supported only as Laravel's #[ObservedBy(X::class)] or #[ObservedBy([X::class, ..])] naming classes that the input or an included file declares, because another attribute or observer may change what an attribute read gives, so the model takes no struct (P2R-401, P2R-460)".to_owned(),
+            "an attribute on a model is supported only as Laravel's #[ObservedBy(X::class)] or #[ObservedBy([X::class, ..])] naming classes (not interfaces, traits or enums) whose parents, interfaces and traits are declared too, because another attribute or observer may change what an attribute read gives, so the model takes no struct (P2R-401, P2R-460)".to_owned(),
         ));
     }
     if let Some(modifier) = class

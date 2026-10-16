@@ -1,0 +1,2 @@
+input.php:9:37: a class that extends another is not supported (P2R-130)
+input.php:15:11: a throw converts only for new of one of PHP's built-in exception classes or an exception class of the input (P2R-212, P2R-392)

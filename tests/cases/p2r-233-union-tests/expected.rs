@@ -300,12 +300,12 @@ impl PhpException {
     }
 
     pub fn uncaught(self) -> ! {
-        let _ = std::io::Write::flush(&mut std::io::stdout());
+        let _ = ::std::io::Write::flush(&mut ::std::io::stdout());
         eprintln!(
             "PHP Fatal error:  Uncaught {}: {}",
             self.class, self.message
         );
-        std::process::exit(255)
+        ::std::process::exit(255)
     }
 }
 

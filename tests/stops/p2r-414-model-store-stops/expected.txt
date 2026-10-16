@@ -26,7 +26,7 @@ input.php:271:12: the model uses SoftDeletes, so Laravel's queries read deleted_
 input.php:276:12: the model uses SoftDeletes, so Laravel's queries read deleted_at, which the table shelveds needs as a column without a default that the struct leaves out (P2R-410)
 input.php:281:12: the model uses SoftDeletes, so Laravel's queries read deleted_at, which the table archiveds needs as a column without a default that the struct leaves out (P2R-410)
 input.php:286:12: this class has no method of that name (P2R-153)
-input.php:292:31: find converts only with an int id, which the store compares with the row's id (P2R-412)
+input.php:292:31: find and findOrFail convert only with an int id, which the store compares with the row's id (P2R-412, P2R-421)
 input.php:297:32: the column of where must be a string literal that names a field of the struct (P2R-413)
 input.php:302:40: the value of where must be a variable, a literal or a property read of one, which reads the same each time the store compares a row (P2R-413)
 input.php:307:40: the value of where must have the PHP type of its field and not be null (P2R-413)

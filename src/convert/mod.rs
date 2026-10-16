@@ -323,9 +323,9 @@ fn short_name(key: &[u8]) -> &[u8] {
     key.rsplit(|byte| *byte == b'\\').next().unwrap_or(key)
 }
 
-/// The Mago findings that a left-out hook drops: a name or type that no file declares, which
-/// PHP checks only when the line runs, and a signature that does not match the `@method`
-/// tag of `Data`, which PHP never checks (P2R-380).
+/// The Mago findings that a left-out hook drops: a class or method that does not exist, or a
+/// call on a mixed value, which PHP checks only when the line runs, and a parameter count
+/// that does not match the `@method` tag of `Data`, which PHP never checks (P2R-380).
 const LEFT_OUT_CODES: [&str; 4] = [
     "non-existent-class",
     "non-existent-method",

@@ -580,11 +580,16 @@ impl Converter<'_> {
     }
 
     /// True for a method of a `Data` class named like a hook, in any letter case, that no
-    /// interface of the class declares, which is P2R-371's, and that `Data` has no real
-    /// method of, only an `@method` tag or nothing, which P2R-350 checks (P2R-380). It
-    /// reads Mago's codebase, because the interfaces' own methods are read after the
-    /// classes.
+    /// interface of the class declares, which is P2R-371's, and that neither `Data` nor a
+    /// trait it uses has a real method of, only an `@method` tag or nothing, which P2R-350
+    /// checks (P2R-380). It reads Mago's codebase, because the interfaces' own methods are
+    /// read after the classes.
     fn hook_name(&self, class: usize, method: &Method<'_>) -> bool {
+        let real = |owner: &[u8]| {
+            self.codebase
+                .get_method(owner, method.name.value)
+                .is_some_and(|found| !found.flags.is_magic_method())
+        };
         self.classes[class].data
             && named_like_hook(method)
             && !self.classes[class].interfaces.iter().any(|&interface| {
@@ -595,6 +600,11 @@ impl Converter<'_> {
                 .codebase
                 .get_declaring_method(b"Spatie\\LaravelData\\Data", method.name.value)
                 .is_none_or(|parent| parent.flags.is_magic_method())
+            // Mago takes Data's own @method tag over a real method of its trait.
+            && self
+                .codebase
+                .get_class_like(b"spatie\\laraveldata\\data")
+                .is_none_or(|data| !data.used_traits.iter().any(|name| real(name.as_bytes())))
     }
 
     /// Refuses everything a class of these slices may not hold (P2R-130, P2R-140).
@@ -2325,21 +2335,21 @@ fn named_like_hook(method: &Method<'_>) -> bool {
 }
 
 /// True for a public static method with a body and no attribute, the only form of a hook
-/// that is left out (P2R-380). PHP checks an attribute such as `#[\Override]` when it
+/// that is left out (P2R-380). PHP checks an attribute such as `#[\Override]`, and a
+/// modifier other than `public`, `static` and `final` or one written twice, when it
 /// loads the class.
 fn hook_form(method: &Method<'_>) -> bool {
+    let count =
+        |kind: fn(&Modifier<'_>) -> bool| method.modifiers.iter().filter(|m| kind(m)).count();
+    let statics = count(|m| matches!(m, Modifier::Static(_)));
+    let publics = count(|m| matches!(m, Modifier::Public(_)));
+    let finals = count(|m| matches!(m, Modifier::Final(_)));
     matches!(method.body, MethodBody::Concrete(_))
         && method.attribute_lists.is_empty()
-        && method
-            .modifiers
-            .iter()
-            .any(|modifier| matches!(modifier, Modifier::Static(_)))
-        && !method.modifiers.iter().any(|modifier| {
-            matches!(
-                modifier,
-                Modifier::Protected(_) | Modifier::Private(_) | Modifier::Abstract(_)
-            )
-        })
+        && statics == 1
+        && publics <= 1
+        && finals <= 1
+        && statics + publics + finals == method.modifiers.len()
 }
 
 /// True for a class declared `readonly` (P2R-130).

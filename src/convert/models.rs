@@ -577,16 +577,13 @@ impl StoreTest {
     }
 }
 
-/// The names of the variables `expr` reads, from its debug form, where each is a `Var`.
+/// Every name in the debug form of `expr`: the variables it reads, also those inside raw
+/// Rust text, and more, which only makes a closure name take a suffix it did not need.
 fn variables_read(expr: &RExpr) -> Vec<String> {
-    let text = format!("{expr:?}");
-    text.split("Var(\"")
-        .skip(1)
-        .map(|rest| {
-            rest.chars()
-                .take_while(|c| c.is_ascii_alphanumeric() || *c == '_')
-                .collect()
-        })
+    format!("{expr:?}")
+        .split(|c: char| !(c.is_ascii_alphanumeric() || c == '_'))
+        .filter(|word| !word.is_empty())
+        .map(str::to_owned)
         .collect()
 }
 
@@ -647,17 +644,18 @@ pub(super) struct StoreUse {
 }
 
 /// The `impl` block of a model's store, with only the functions its code calls, because
-/// rustc warns about the others (P2R-50, P2R-410).
+/// rustc warns about the others (P2R-50, P2R-410). The paths start with `::std`, because a
+/// namespace `Std` gives the crate a module `std`.
 fn store_lines(name: &str, uses: StoreUse) -> Vec<String> {
     let mut lines = vec![
         String::new(),
         format!("impl {name} {{"),
         format!(
-            "    fn store_rows() -> &'static std::thread::LocalKey<std::cell::RefCell<Vec<{name}>>> {{"
+            "    fn store_rows() -> &'static ::std::thread::LocalKey<::std::cell::RefCell<Vec<{name}>>> {{"
         ),
         "        thread_local! {".to_owned(),
         format!(
-            "            static ROWS: std::cell::RefCell<Vec<{name}>> = const {{ std::cell::RefCell::new(Vec::new()) }};"
+            "            static ROWS: ::std::cell::RefCell<Vec<{name}>> = const {{ ::std::cell::RefCell::new(Vec::new()) }};"
         ),
         "        }".to_owned(),
         "        &ROWS".to_owned(),
@@ -825,12 +823,17 @@ pub(super) fn find(
             model.store = Err(format!(
                 "another model with a struct reads the table {table} too, and one store per model would split its rows (P2R-410)"
             ));
-        } else if let Some((_, seeds)) = &folded
-            && (seeds.any || seeds.tables.contains(&table.to_ascii_lowercase()))
-        {
-            model.store = Err(format!(
-                "a migration writes rows into the table {table}, which the store, empty when it starts, does not hold (P2R-410)"
-            ));
+        } else if let Some((_, seeds)) = &folded {
+            if seeds.tables.contains(&table.to_ascii_lowercase()) {
+                model.store = Err(format!(
+                    "a migration writes rows into the table {table}, which the store, empty when it starts, does not hold (P2R-410)"
+                ));
+            } else if seeds.any {
+                model.store = Err(
+                    "a migration writes rows through a table name the tool cannot read, which may be this model's table (P2R-410)"
+                        .to_owned(),
+                );
+            }
         }
     }
     for model in &models {
@@ -1080,13 +1083,13 @@ fn store_rules(
     (timestamps, soft_deletes): (bool, bool),
 ) -> Result<StoreRules, String> {
     // Laravel's queries of a SoftDeletes model skip a row whose deleted_at is set, which the
-    // store, holding no such column, never has; a field of it could set one.
+    // store, holding no such column, never has; a field or a default of it could set one.
     if soft_deletes
-        && (!columns.iter().any(|c| c.name == "deleted_at")
+        && (!columns.iter().any(|c| c.name == "deleted_at" && !c.default)
             || fields.iter().any(|f| f.column == "deleted_at"))
     {
         return Err(format!(
-            "the model uses SoftDeletes, so Laravel's queries read deleted_at, which the table {table} needs as a column the struct leaves out (P2R-410)"
+            "the model uses SoftDeletes, so Laravel's queries read deleted_at, which the table {table} needs as a column without a default that the struct leaves out (P2R-410)"
         ));
     }
     // The store numbers the rows as `id()`, an auto-increment key, does.
@@ -1097,7 +1100,7 @@ fn store_rules(
             .any(|f| f.column == "id" && f.kind == Kind::Int && !f.nullable);
     if !numbered {
         return Err(format!(
-            "the store needs an int id that id() declares and no cast changes, which the table {table} does not have (P2R-410)"
+            "the store needs a field id of type int whose column id() declares and no cast changes, and the model of the table {table} has none (P2R-410)"
         ));
     }
     let retyped = fields
@@ -1170,35 +1173,31 @@ fn fillable_keys(class: &Class<'_>) -> Result<Option<HashSet<String>>, String> {
         let ClassLikeMember::Property(Property::Plain(plain)) = member else {
             continue;
         };
-        for item in plain.items.iter() {
-            let array = match item {
-                PropertyItem::Concrete(item) => match item.value {
-                    Expression::Array(array) => Some(array),
-                    _ => None,
-                },
-                PropertyItem::Abstract(_) => None,
-            };
-            match (item.variable().name, array) {
-                (b"$fillable", array) => {
-                    let keys = array
-                        .and_then(|array| {
-                            array
-                                .elements
-                                .iter()
-                                .map(|element| match element {
-                                    ArrayElement::Value(value) => string_literal(value.value),
-                                    _ => None,
-                                })
-                                .collect::<Option<HashSet<String>>>()
-                        })
-                        .ok_or(
-                            "the model's $fillable is not a list of string literals (P2R-411)",
-                        )?;
-                    fillable = Some(keys);
-                }
-                (b"$guarded", array) => open = array.is_some_and(|array| array.elements.is_empty()),
-                _ => {}
+        let [PropertyItem::Concrete(item)] = plain.items.as_slice() else {
+            continue;
+        };
+        let array = match item.value {
+            Expression::Array(array) => Some(array),
+            _ => None,
+        };
+        match item.variable.name {
+            b"$fillable" => {
+                let keys = array
+                    .and_then(|array| {
+                        array
+                            .elements
+                            .iter()
+                            .map(|element| match element {
+                                ArrayElement::Value(value) => string_literal(value.value),
+                                _ => None,
+                            })
+                            .collect::<Option<HashSet<String>>>()
+                    })
+                    .ok_or("the model's $fillable is not a list of string literals (P2R-411)")?;
+                fillable = Some(keys);
             }
+            b"$guarded" => open = array.is_some_and(|array| array.elements.is_empty()),
+            _ => {}
         }
     }
     // Laravel looks in $fillable first, and with an empty one fills what $guarded allows.
@@ -2125,16 +2124,19 @@ impl Reader<'_> {
         let unknown = |what: &str| Err(self.reason(statement, what));
         // A named argument binds what the tool reads by position when it names a
         // Blueprint method's `$column`, `$columns` or `$model` (`id(column: 'code_id')`);
-        // nullable() goes through Fluent::__call, which takes its first value by any name.
+        // nullable(), default() and useCurrent() go through Fluent::__call, which takes its
+        // first value by any name.
         let plain = |list: &ArgumentList<'_>, read: &[&[u8]]| {
             list.arguments.iter().all(|argument| match argument {
                 Argument::Positional(positional) => positional.ellipsis.is_none(),
                 Argument::Named(named) => !read.is_empty() && !read.contains(&named.name.value),
             })
         };
-        let nullable_named = modifiers
-            .iter()
-            .any(|(name, list)| name.eq_ignore_ascii_case(b"nullable") && !plain(list, &[]));
+        let nullable_named = modifiers.iter().any(|(name, list)| {
+            let lower = name.to_ascii_lowercase();
+            matches!(lower.as_slice(), b"nullable" | b"default" | b"usecurrent")
+                && !plain(list, &[])
+        });
         if !plain(arguments, &[b"column", b"columns", b"model"]) || nullable_named {
             return unknown("a named or unpacked argument in a Blueprint call");
         }
@@ -2222,6 +2224,10 @@ impl Reader<'_> {
             b"remembertoken" => vec![(Some("remember_token".to_owned()), Kind::Text, true)],
             b"boolean" | b"decimal" | b"float" | b"double" | b"timestamp" | b"datetime"
             | b"date" => vec![(named(None), Kind::Untyped, false)],
+            // timestamps() gives a Collection, so Laravel throws on a modifier after it.
+            b"timestamps" if !modifiers.is_empty() => {
+                return unknown("a modifier after timestamps(), which Laravel cannot chain");
+            }
             b"timestamps" => vec![
                 (Some("created_at".to_owned()), Kind::Untyped, true),
                 (Some("updated_at".to_owned()), Kind::Untyped, true),
@@ -2241,8 +2247,13 @@ impl Reader<'_> {
         let mut nullable_set: Option<bool> = None;
         // `id()` is an auto-increment key, which the database numbers on insert.
         let mut default = lower.as_slice() == b"id";
-        // Laravel's grammars write useCurrent() only for a date or time column.
-        let dated = matches!(lower.as_slice(), b"date" | b"datetime" | b"timestamp");
+        // Laravel's grammars write useCurrent() only for a date or time column, and then
+        // over any default(..).
+        let dated = matches!(
+            lower.as_slice(),
+            b"date" | b"datetime" | b"timestamp" | b"softdeletes"
+        );
+        let mut current = false;
         let mut change = false;
         let mut foreign = false;
         for (name, arguments) in modifiers {
@@ -2256,7 +2267,17 @@ impl Reader<'_> {
                         [Expression::Literal(Literal::Null(_))]
                     );
                 }
-                b"usecurrent" if !foreign => default = default || dated,
+                b"usecurrent" if !foreign => {
+                    current = match positional_list(arguments).as_slice() {
+                        [] | [Expression::Literal(Literal::True(_))] => true,
+                        [Expression::Literal(Literal::False(_))] => false,
+                        _ => {
+                            return unknown(
+                                "useCurrent() with an argument other than true or false",
+                            );
+                        }
+                    };
+                }
                 // After constrained(), a modifier belongs to the foreign key, as in Laravel.
                 b"nullable" if !foreign => {
                     nullable_set = match positional_list(arguments).as_slice() {
@@ -2302,7 +2323,7 @@ impl Reader<'_> {
                 name,
                 kind,
                 nullable: nullable_set.unwrap_or(nullable),
-                default,
+                default: default || (current && dated),
                 increments: lower.as_slice() == b"id",
                 real: matches!(lower.as_slice(), b"float" | b"double"),
             };

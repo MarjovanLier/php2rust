@@ -10,3 +10,5 @@ input.php:41:13: the migrations leave the table hinges of this model unknown: mi
 input.php:45:13: the migrations leave the table axles of this model unknown: migrations/2025_08_01_000011_chunk_down.php:15: a statement other than Schema::create, Schema::table and a DB::table chain (P2R-400)
 input.php:49:13: the migrations leave the table cams of this model unknown: migrations/2025_08_01_000013_closure_in_property.php: the file is not a migration of the form the tool reads (P2R-400)
 input.php:53:13: the migrations leave the table wheels of this model unknown: migrations/2025_08_01_000015_code_before_return.php: the file is not a migration of the form the tool reads (P2R-400)
+input.php:57:13: the migrations leave the table gaskets of this model unknown: migrations/2025_08_01_000017_callable_in_constant.php: the file is not a migration of the form the tool reads (P2R-400)
+input.php:61:13: the migrations leave the table seals of this model unknown: migrations/2025_08_01_000019_constructor.php: the file is not a migration of the form the tool reads (P2R-400)

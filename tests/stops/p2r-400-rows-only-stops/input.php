@@ -53,3 +53,11 @@ final class Cam extends Model
 final class Wheel extends Model
 {
 }
+
+final class Gasket extends Model
+{
+}
+
+final class Seal extends Model
+{
+}

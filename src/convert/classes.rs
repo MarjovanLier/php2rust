@@ -663,6 +663,8 @@ impl Converter<'_> {
                 modifier,
                 "only readonly and final may stand on a class (P2R-130)",
             );
+        } else if let Some(modifier) = doubled_modifier(&declaration.modifiers) {
+            self.refuse(modifier, DOUBLED_MODIFIER);
         }
         if let Some(extends) = &declaration.extends
             && !data
@@ -936,6 +938,9 @@ impl Converter<'_> {
             );
         }
         // PHP rejects these when it compiles the file; Mago does not report them.
+        if let Some(modifier) = doubled_modifier(&method.modifiers) {
+            self.refuse(modifier, DOUBLED_MODIFIER);
+        }
         if is_constructor(method) {
             if let Some(hint) = &method.return_type_hint {
                 self.refuse(hint, "PHP rejects a return type on a constructor (P2R-130)");
@@ -1081,6 +1086,14 @@ impl Converter<'_> {
                 )
             } else if parameter.ampersand.is_some() || parameter.ellipsis.is_some() {
                 Some("a promoted property cannot be by reference or variadic (P2R-130)")
+            } else if doubled_modifier(&parameter.modifiers).is_some() {
+                Some(DOUBLED_MODIFIER)
+            } else if static_parameter(parameter) {
+                Some(STATIC_PARAMETER)
+            } else if parameter.variable.name == b"$this" {
+                Some("a parameter cannot be named $this, which PHP rejects (P2R-135)")
+            } else if SUPERGLOBALS.contains(&parameter.variable.name) {
+                Some("PHP rejects a parameter named like a superglobal (P2R-31)")
             } else if !parameter
                 .attribute_lists
                 .iter()
@@ -1201,6 +1214,8 @@ impl Converter<'_> {
                 Some((var.span(), "var is not supported (P2R-140)"))
             } else if let Some(attributes) = plain.attribute_lists.first() {
                 Some((attributes.span(), "attributes are not supported (P2R-07)"))
+            } else if let Some(modifier) = doubled_modifier(&plain.modifiers) {
+                Some((modifier.span(), DOUBLED_MODIFIER))
             } else {
                 plain
                     .modifiers
@@ -2455,6 +2470,43 @@ const DATA_HOOKS: [&[u8]; 8] = [
 /// True for a method named like a hook of laravel-data, in any letter case (P2R-380).
 fn named_like_hook(method: &Method<'_>) -> bool {
     DATA_HOOKS.contains(&lowercase(method).as_slice())
+}
+
+/// The problem of a modifier list PHP rejects when it compiles the file.
+pub(super) const DOUBLED_MODIFIER: &str =
+    "PHP rejects a modifier written twice and a second visibility (P2R-130)";
+
+/// The first modifier of `modifiers` that repeats an earlier one, or that is a second
+/// visibility (`public`, `protected`, `private`) or a second set visibility (`private(set)`),
+/// which PHP rejects when it compiles the file and Mago does not report.
+pub(super) fn doubled_modifier<'m, 'a>(
+    modifiers: &'m Sequence<'a, Modifier<'a>>,
+) -> Option<&'m Modifier<'a>> {
+    let kind = |modifier: &Modifier<'_>| match modifier {
+        Modifier::Public(_) | Modifier::Protected(_) | Modifier::Private(_) => 0,
+        Modifier::PublicSet(_) | Modifier::ProtectedSet(_) | Modifier::PrivateSet(_) => 1,
+        Modifier::Static(_) => 2,
+        Modifier::Final(_) => 3,
+        Modifier::Abstract(_) => 4,
+        Modifier::Readonly(_) => 5,
+    };
+    let mut seen = [false; 6];
+    modifiers.iter().find(|modifier| {
+        let at = kind(modifier);
+        std::mem::replace(&mut seen[at], true)
+    })
+}
+
+pub(super) const STATIC_PARAMETER: &str =
+    "PHP rejects the static modifier on a parameter (P2R-130)";
+
+/// True for a parameter with a `static` modifier, which Mago's parser accepts and PHP
+/// rejects (P2R-130).
+pub(super) fn static_parameter(parameter: &FunctionLikeParameter<'_>) -> bool {
+    parameter
+        .modifiers
+        .iter()
+        .any(|m| matches!(m, Modifier::Static(_)))
 }
 
 /// The variables PHP declares in every scope, which a parameter may not take as its name.

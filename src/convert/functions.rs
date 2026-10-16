@@ -115,6 +115,15 @@ impl Converter<'_> {
             .iter()
             .zip(metadata.parameters.iter())
         {
+            // Mago's parser accepts a modifier on any parameter; PHP only on a constructor's.
+            if let Some(modifier) = parameter.modifiers.first() {
+                self.refuse(
+                    modifier,
+                    "PHP rejects a modifier on the parameter of a function (P2R-31)",
+                );
+                converted = false;
+                continue;
+            }
             let declared = meta.get_type_metadata().map(|t| &t.type_union);
             match self.parameter(parameter, declared, taken, &parameters) {
                 Some(signature) => parameters.push(signature),
@@ -425,14 +434,20 @@ impl Converter<'_> {
         let key = self.function_key(function);
         let signature = self.functions.get(&key)?.clone();
         let statements: Vec<&Statement<'_>> = function.body.statements.iter().collect();
-        Some(self.function_lines(key, &function.name, &statements, &signature, |_, _| {}))
+        Some(self.function_lines(
+            Some(key),
+            &function.name,
+            &statements,
+            &signature,
+            |_, _| {},
+        ))
     }
 
     /// The lines of a function with `signature` and the body `statements`, after which
     /// `tail` adds its own lines in the same scope (P2R-30, P2R-391).
     pub(super) fn function_lines(
         &mut self,
-        key: Vec<u8>,
+        key: Option<Vec<u8>>,
         name: &LocalIdentifier<'_>,
         statements: &[&Statement<'_>],
         signature: &Signature,
@@ -446,7 +461,7 @@ impl Converter<'_> {
             Variables::with_parameters(&signature.parameters, &copied),
         );
         self.variables.owned_checks = checks.iter().map(|check| check.span).collect();
-        let outer_function = self.current_function.replace(key);
+        let outer_function = std::mem::replace(&mut self.current_function, key);
         let outer_calls = std::mem::take(&mut self.self_calls);
         let sites = self.site_types(statements.iter().copied(), signature.returns.as_ref());
         self.variables.list_types = sites.lists;

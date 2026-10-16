@@ -121,6 +121,14 @@ impl Converter<'_> {
             );
             return None;
         }
+        // Mago's parser accepts a modifier on any parameter; PHP only on a constructor's.
+        if let Some(modifier) = parameter.modifiers.first() {
+            self.refuse(
+                modifier,
+                "PHP rejects a modifier on the parameter of a function (P2R-31)",
+            );
+            return None;
+        }
         if matches {
             if !matches!(parameter.hint, Some(Hint::Array(_))) {
                 self.refuse(

@@ -8,7 +8,7 @@ use mago_syntax::cst::*;
 use mago_syntax::walker::Walker;
 
 use super::control::emit;
-use super::{Converter, ParameterSignature, Signature, helpers, throws};
+use super::{Converter, ParameterSignature, Signature, classes, helpers, throws};
 use crate::names;
 use crate::printer::{self, RExpr};
 use crate::types::RustType;
@@ -23,8 +23,10 @@ pub(super) struct ExceptionClass {
     pub(super) parent: String,
     /// The index of its parent when the input declares the parent.
     parent_index: Option<usize>,
+    /// Its place in the input, which orders the arms of `is_a` (P2R-390).
+    order: usize,
     /// True when it declares a constructor.
-    constructor: bool,
+    pub(super) constructor: bool,
     /// The Rust name its constructor's function takes, which variables and parameters may
     /// not take (P2R-31, P2R-391).
     pub(super) rust_name: Option<String>,
@@ -66,7 +68,7 @@ impl Converter<'_> {
             .collect();
         loop {
             let mut grew = false;
-            for (key, parent_key, declaration) in &candidates {
+            for (order, (key, parent_key, declaration)) in candidates.iter().enumerate() {
                 if self.exceptions.iter().any(|known| &known.key == key) {
                     continue;
                 }
@@ -94,6 +96,7 @@ impl Converter<'_> {
                     name,
                     parent,
                     parent_index,
+                    order,
                     constructor,
                     rust_name,
                     function: None,
@@ -104,6 +107,16 @@ impl Converter<'_> {
                 break;
             }
         }
+    }
+
+    /// The name and parent of each exception class, in source order (P2R-390).
+    pub(super) fn exception_pairs(&self) -> Vec<(String, String)> {
+        let mut classes: Vec<&ExceptionClass> = self.exceptions.iter().collect();
+        classes.sort_by_key(|class| class.order);
+        classes
+            .iter()
+            .map(|class| (class.name.clone(), class.parent.clone()))
+            .collect()
     }
 
     /// The fully qualified PHP name of a declaration, as written, without the leading
@@ -280,7 +293,7 @@ impl Converter<'_> {
             );
             return None;
         }
-        if self.body_throws(rest.iter().copied(), None) {
+        if self.body_throws(statements.iter().copied(), None) {
             self.refuse(
                 &constructor.name,
                 "the constructor of an exception class may not throw (P2R-391)",
@@ -288,11 +301,15 @@ impl Converter<'_> {
             return None;
         }
         let name = self.exceptions[index].name.clone();
-        let key = self.exceptions[index].key.clone();
         self.uses_exceptions = true;
         let node = last_expression(last);
+        // No key: a call of a PHP function whose key equals the class's is no self call.
         Some(
-            self.function_lines(key, &declaration.name, rest, &signature, |this, body| {
+            self.function_lines(None, &declaration.name, rest, &signature, |this, body| {
+                // An endless loop before it leaves the call unreached (P2R-40).
+                if this.unreachable(last) {
+                    return;
+                }
                 if let Some(exception) = this.new_exception(Some(&call.argument_list), node, &name)
                 {
                     body.push(emit(
@@ -321,6 +338,8 @@ impl Converter<'_> {
                 modifier,
                 "an exception class may be final, and no other modifier is supported (P2R-390)",
             );
+        } else if let Some(modifier) = classes::doubled_modifier(&declaration.modifiers) {
+            self.refuse(modifier, classes::DOUBLED_MODIFIER);
         }
         if let Some(implements) = &declaration.implements {
             self.refuse(
@@ -328,6 +347,7 @@ impl Converter<'_> {
                 "an exception class that implements an interface is not supported (P2R-390)",
             );
         }
+        let mut constructors = 0;
         for member in declaration.members.iter() {
             let constructor = matches!(member, ClassLikeMember::Method(method)
                 if method.name.value.eq_ignore_ascii_case(b"__construct"));
@@ -336,6 +356,12 @@ impl Converter<'_> {
                     member,
                     "an exception class may hold only a constructor (P2R-390)",
                 );
+            } else {
+                constructors += 1;
+                // PHP rejects a second one, in any letter case; Mago does not report it.
+                if constructors > 1 {
+                    self.refuse(member, "a class can have one constructor only (P2R-130)");
+                }
             }
         }
         if let Some(parent) = self.exceptions[index].parent_index {
@@ -382,11 +408,19 @@ impl Converter<'_> {
                     modifier,
                     "the constructor of an exception class may be public and final, and no other modifier is supported (P2R-391)",
                 );
+            } else if let Some(modifier) = classes::doubled_modifier(&constructor.modifiers) {
+                self.refuse(modifier, classes::DOUBLED_MODIFIER);
+            }
+            for parameter in constructor.parameter_list.parameters.iter() {
+                if classes::doubled_modifier(&parameter.modifiers).is_some() {
+                    self.refuse(parameter, classes::DOUBLED_MODIFIER);
+                } else if classes::static_parameter(parameter) {
+                    self.refuse(parameter, classes::STATIC_PARAMETER);
+                }
             }
             if let Some(hint) = &constructor.return_type_hint {
                 self.refuse(hint, "PHP rejects a return type on a constructor (P2R-391)");
             }
-            // A hook runs when the constructor sets the property, which the function skips.
             if let Some(parameter) = constructor
                 .parameter_list
                 .parameters
@@ -395,13 +429,13 @@ impl Converter<'_> {
             {
                 self.refuse(
                     parameter,
-                    "a property hook is not supported, and PHP rejects one on a readonly property (P2R-130)",
+                    "a property hook runs when the constructor sets the property, which the function does not do (P2R-391)",
                 );
             }
             if constructor.ampersand.is_some() {
                 self.refuse(
                     &constructor.name,
-                    "a method that returns by reference is not supported (P2R-135)",
+                    "the constructor of an exception class may not return by reference (P2R-391)",
                 );
             }
             if let Some(attributes) = constructor.attribute_lists.first() {
@@ -430,7 +464,7 @@ impl Converter<'_> {
         if extra {
             self.refuse(
                 node,
-                "a throw converts only with the arguments message and code (P2R-212)",
+                "an exception converts only with the arguments message and code (P2R-212, P2R-391)",
             );
             return None;
         }

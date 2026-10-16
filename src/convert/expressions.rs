@@ -585,7 +585,7 @@ impl Converter<'_> {
     /// The default of `parameter`, converted at its declaration, for a call that leaves
     /// it out, passed as an argument for that parameter is: `&[]`, `&mut []`, `Vec::new()`
     /// or `Some(&[])` by the parameter's form (P2R-143, P2R-168).
-    fn default_argument(&self, parameter: &ParameterSignature) -> Option<RExpr> {
+    pub(super) fn default_argument(&self, parameter: &ParameterSignature) -> Option<RExpr> {
         let (expr, ty) = parameter.default.clone()?;
         let declared = &parameter.ty;
         // A member literal goes into its variant owned, and the variant is lent (P2R-231).

@@ -1013,14 +1013,9 @@ impl<'c> Converter<'c> {
         }
         // The exception struct follows the shapes in the crate root, and the items of one
         // file (P2R-210).
-        let exception = self.uses_exceptions.then(|| {
-            let input: Vec<(String, String)> = self
-                .exceptions
-                .iter()
-                .map(|class| (class.name.clone(), class.parent.clone()))
-                .collect();
-            throws::exception_lines(&input)
-        });
+        let exception = self
+            .uses_exceptions
+            .then(|| throws::exception_lines(&self.exception_pairs()));
         if self.library {
             let mut root = Vec::new();
             for (name, lines) in shapes {

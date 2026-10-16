@@ -8,7 +8,7 @@ use mago_syntax::walker::Walker;
 use super::control::emit;
 use super::exceptions::Thrown;
 use super::lists::unparenthesized;
-use super::{Context, Converter, Mode, ParameterSignature};
+use super::{Context, Converter, Mode, ParameterSignature, classes};
 use crate::names;
 use crate::printer::{self, RExpr, Raise};
 use crate::types::{self, RustType};
@@ -522,16 +522,18 @@ impl Converter<'_> {
                     Expression::Identifier(identifier) => {
                         let key = self.identifier_key(identifier);
                         match self.thrown_class(&key) {
-                            Some(Thrown::BuiltIn(name)) => Some((name.to_owned(), None)),
-                            Some(Thrown::Input(class)) => {
-                                Some((class.name.clone(), class.function.clone()))
-                            }
+                            Some(Thrown::BuiltIn(name)) => Some((name.to_owned(), None, false)),
+                            Some(Thrown::Input(class)) => Some((
+                                class.name.clone(),
+                                class.function.clone(),
+                                class.constructor,
+                            )),
                             None => None,
                         }
                     }
                     _ => None,
                 };
-                let Some((class, function)) = class else {
+                let Some((class, function, constructor)) = class else {
                     self.record_refused(throw.exception);
                     self.refuse(
                         throw.exception,
@@ -543,12 +545,11 @@ impl Converter<'_> {
                 if let Some(function) = function {
                     let arguments = match &new.argument_list {
                         Some(list) => self.arguments(list, &function.parameters, throw.exception),
+                        // Mago reports a parameter without a default (P2R-11).
                         None => function
                             .parameters
                             .iter()
-                            .map(|parameter| {
-                                parameter.default.as_ref().map(|(value, _)| value.clone())
-                            })
+                            .map(|parameter| self.default_argument(parameter))
                             .collect(),
                     };
                     let Some(arguments) = arguments else {
@@ -557,6 +558,11 @@ impl Converter<'_> {
                     };
                     self.uses_exceptions = true;
                     return Some(RExpr::Call(function.rust_name.clone(), arguments));
+                }
+                // The constructor has no function, and its own problem says why.
+                if constructor {
+                    self.record_refused(throw.exception);
+                    return None;
                 }
                 let exception =
                     self.new_exception(new.argument_list.as_ref(), throw.exception, &class);
@@ -929,6 +935,16 @@ impl Converter<'_> {
                 self.refuse(
                     variable,
                     format!("{name} is already the Rust name of a function or variable (P2R-31)"),
+                );
+                fine = false;
+            }
+            // In a function the binding would not be PHP's superglobal, which it overwrites.
+            if let Some(variable) = &clause.variable
+                && classes::SUPERGLOBALS.contains(&variable.name)
+            {
+                self.refuse(
+                    variable,
+                    "a catch variable named like a superglobal is not supported (P2R-214)",
                 );
                 fine = false;
             }

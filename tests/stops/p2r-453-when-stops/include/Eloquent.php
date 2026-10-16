@@ -140,4 +140,23 @@ final class Builder
     {
         return new Collection([]);
     }
+
+    /**
+     * As Laravel's, so the converter refuses a when link before it, not Mago.
+     *
+     * @return TModel
+     */
+    public function findOrFail(int $id): Model
+    {
+        throw new \LogicException('not used');
+    }
+
+    /**
+     * @param array<string, mixed> $attributes
+     * @return TModel
+     */
+    public function create(array $attributes): Model
+    {
+        throw new \LogicException('not used');
+    }
 }

@@ -22,6 +22,6 @@ input.php:192:32: a when whose value is an object or an enum case without null, 
 input.php:201:13: no migration creates the table ghosts of this model (P2R-401)
 input.php:211:96: an enum case's value or name in the callback of when is not supported yet (P2R-451, P2R-453)
 input.php:219:99: this model takes no struct (P2R-401), so a property read of it does not convert
-input.php:225:12: Could not infer a precise return type for function `App\beforeFind`. Saw type `mixed`. (mixed-return-statement)
-input.php:230:12: Could not infer a precise return type for function `App\beforeCreate`. Saw type `mixed`. (mixed-return-statement)
+input.php:225:12: this class has no method of that name (P2R-153)
+input.php:230:12: this class has no method of that name (P2R-153)
 input.php:239:12: Returned type `Illuminate\Database\Eloquent\Collection<int, App\Code|Illuminate\Database\Eloquent\Model>` is less specific than the declared return type `Illuminate\Database\Eloquent\Collection<int, App\Code>` for function `App\unlessForm`. (less-specific-return-statement)

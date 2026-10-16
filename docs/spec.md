@@ -238,7 +238,7 @@ requirement IDs.
   the same stdout bytes, the same output file bytes and the same stderr
   bytes.
 - **P2R-07** Only the constructs that sections 3 to 5, 11 to 19 and 21 to
-  43 list as converting may convert. Any other construct MUST stop the conversion,
+  44 list as converting may convert. Any other construct MUST stop the conversion,
   which means it is reported as a problem under P2R-03. Examples that stop
   in version 1 (section 16 converts `namespace`, `use` and class
   constants, and section 17 two casts):
@@ -616,7 +616,7 @@ requirement IDs.
   stderr MUST equal `expected.txt`, its stdout MUST be empty, no output file
   may be created, and every file in the folder MUST be unchanged.
 - **P2R-75** Every requirement ID from P2R-07 to P2R-49 and from P2R-100 to
-  P2R-423 MUST appear in the name of at least one case or stop folder. A
+  P2R-431 MUST appear in the name of at least one case or stop folder. A
   test MUST check this from the folder names.
 - **P2R-76** One command named in the README MUST rewrite every `expected.rs`
   and `expected.txt` from the current tool output; CI MUST NOT run it. A
@@ -706,7 +706,7 @@ Each milestone gets its own requirements in this file when its work starts.
   of the same behaviour (section 42), then `sole()`, `firstOrFail()` and
   `findOrFail()` with Laravel's exceptions (section 43), with a database
   behind it later;
-  unions as list values; values
+  unions as shape fields (section 44); unions as list values; values
   of interface types, interface inheritance and class inheritance;
   closures.
   `SouthAfricanIDValidator` calls `StringManipulation::isValidDate`, which
@@ -2277,8 +2277,9 @@ types (`int|string $id`, `bool|array{...}|string|null`), and reads a
 nullable object with `?->` (`$this->gender?->value`). Every member of such
 a union is a type the tool already converts, so the union becomes a
 generated Rust enum with one variant per member. A union that Mago only
-infers inside a body (the type of `$c ? 1 : 'a'`) keeps P2R-22, and a union
-inside a list or a shape field waits for a later slice.
+infers inside a body (the type of `$c ? 1 : 'a'`) keeps P2R-22, a union
+inside a list waits for a later slice, and section 44 converts a union as
+a shape field.
 
 - **P2R-230** A declared type MUST map to a generated enum, the union enum
   below, when its Mago type has two or more members, other than `null`,
@@ -2309,8 +2310,8 @@ inside a list or a shape field waits for a later slice.
   the input, whichever the tool meets first (P2R-131, P2R-200); a class that holds itself through
   a union enum other than through a list (P2R-130), because rustc rejects
   a type of infinite size; a union type as a list element type, a shape
-  field type or the member of another union (a later slice; the value
-  type of a declared map converts by P2R-250); a declared
+  field type outside P2R-430 or the member of another union (a later
+  slice; the value type of a declared map converts by P2R-250); a declared
   type whose written PHP type holds `float` and not `int` while its Mago
   type holds `int` (`@param int|string` on `float|string`), because PHP
   stores the int as a float; the stops of P2R-25; and a written type that
@@ -2576,8 +2577,9 @@ key order, which Mago does not keep (P2R-200).
   new variable that a copy (`$x = $m;`) or a call of a declared return type
   starts, and as the value of another map, a `foreach` value included.
   Only a map type with no declared origin, such as the type of an array
-  literal or of a `@var` docblock, keeps P2R-22. These stop the conversion: a union as a list element type or a
-  shape field type, and a map as a member of a union outside P2R-270; a
+  literal or of a `@var` docblock, keeps P2R-22. These stop the conversion: a union as a list element type, a
+  union as a shape field type outside P2R-430, and a map as a member of a
+  union outside P2R-270; a
   value of the union type that is not a member value (P2R-231).
 - **P2R-251** `is_int($v)`, `is_float($v)`, `is_bool($v)` and `is_string($v)`
   (also written `\is_string`), with one positional argument whose Rust type
@@ -4321,6 +4323,41 @@ them.
   does not apply, with the reason of P2R-410; and these forms where a
   call that throws cannot stand (P2R-213), such as the default of `??`.
 
+## 44. Unions as fields of array shapes (milestone 2, slice 34)
+
+Two Data classes of the app (`SetAdministrationConfigurationValuesDto`
+and `SetAccountingSoftwareEnvironmentConfigurationValuesDto`) declare
+`array<array-key, array{key: string, value: string|bool|int}>`: a map of
+shapes whose `value` field is a union, which P2R-230 and P2R-250 stop.
+This section gives such a field the union enum of P2R-230, so a shape
+holds a union as a class property does, and a read of the field narrows
+by the tests of section 26. A union as a list element type, or as a
+member of another union, still stops.
+
+- **P2R-430** A field of a shape (P2R-200) whose value type has two or
+  more members, other than `null`, of different Rust types MUST take the
+  union enum `U` of P2R-230 for that value type as its Rust type, or
+  `Option<U>` with a `null` member, when a declared type (P2R-230) names
+  the shape: as the whole type, as a member of a union, as the value type
+  of a declared map (P2R-250), as the element type of a declared list, or
+  as the type of a field of such a shape. The members, the variant names,
+  the name of `U` and the stops of P2R-230 apply to the field's value
+  type. A shape that Mago gives a read or a copy of such a shape (a
+  variable, a parameter, a `foreach` value, a list element) maps to the
+  same struct when each member of its field's Mago type is a member of
+  `U`, so a field type that Mago narrows keeps `U`, as a read of a union
+  property keeps it (P2R-232). A shape with a union field that no declared
+  type names (the type Mago gives an array literal in a local variable)
+  keeps P2R-22.
+- **P2R-431** A value for such a field in a shape literal (P2R-202) MUST
+  convert as a value into a place of type `U` or `Option<U>` (P2R-231),
+  `U::V(value)` for a member value, and a read `$s['k']` of the field
+  (P2R-203) gives a value of type `U` or `Option<U>` that behaves as a
+  read of a union property (P2R-232): it copies with `.clone()`, lends as
+  `&U`, goes into a place of its own union, and takes the tests of P2R-251
+  and P2R-233; a variable that holds it takes the binding of P2R-252.
+  Every other use stops by P2R-232, as for any union value.
+
 ## Spec checklist
 
 - [x] No `[NEEDS CLARIFICATION]` markers left. Decided in review: problems
@@ -4329,7 +4366,7 @@ them.
   takes its element type from the same variable or the declared type it
   flows into (P2R-21); a file of only functions becomes a library (P2R-33).
 - [x] Every requirement is testable: P2R-07 to P2R-49 and P2R-100 to
-  P2R-423 by case and stop folders (P2R-75 enforces this), P2R-01 to P2R-06
+  P2R-431 by case and stop folders (P2R-75 enforces this), P2R-01 to P2R-06
   by error folders and tests, P2R-50 to P2R-52 by P2R-71, the rest by CI or
   a file in the
   repository. Stated review concerns (P2R-05 partial write, P2R-72 case

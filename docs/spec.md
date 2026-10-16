@@ -238,7 +238,7 @@ requirement IDs.
   the same stdout bytes, the same output file bytes and the same stderr
   bytes.
 - **P2R-07** Only the constructs that sections 3 to 5, 11 to 19 and 21 to
-  45 list as converting may convert. Any other construct MUST stop the conversion,
+  46 list as converting may convert. Any other construct MUST stop the conversion,
   which means it is reported as a problem under P2R-03. Examples that stop
   in version 1 (section 16 converts `namespace`, `use` and class
   constants, and section 17 two casts):
@@ -616,7 +616,7 @@ requirement IDs.
   stderr MUST equal `expected.txt`, its stdout MUST be empty, no output file
   may be created, and every file in the folder MUST be unchanged.
 - **P2R-75** Every requirement ID from P2R-07 to P2R-49 and from P2R-100 to
-  P2R-443 MUST appear in the name of at least one case or stop folder. A
+  P2R-453 MUST appear in the name of at least one case or stop folder. A
   test MUST check this from the folder names.
 - **P2R-76** One command named in the README MUST rewrite every `expected.rs`
   and `expected.txt` from the current tool output; CI MUST NOT run it. A
@@ -708,6 +708,7 @@ Each milestone gets its own requirements in this file when its work starts.
   behind it later;
   unions as shape fields (section 44); Laravel's collections as lists,
   read in order, with `get()` and `all()` on the store (section 45);
+  conditional filters with `when()` on store queries (section 46);
   unions as list values; values
   of interface types, interface inheritance and class inheritance;
   closures.
@@ -2974,7 +2975,8 @@ This section converts a closure only as such a callback.
 - **P2R-300** An arrow function (`fn(T $x): R => expr`, with or without
   `static` and the return type) MUST convert to a Rust closure
   `|x: T| expr` where it is the callback argument of P2R-301 or P2R-302,
-  and nowhere else. It takes exactly one parameter, a new variable of the
+  and nowhere else; as the callback of a `when` link it converts to
+  store conditions instead (P2R-451). It takes exactly one parameter, a new variable of the
   parameter type of P2R-24 (`&str` for a string), which only its body
   reads, and which hides a variable of the same PHP name of the enclosing
   body there, as in PHP; for P2R-30 and P2R-31 it is a variable of the
@@ -4232,8 +4234,8 @@ relations and every other query method still stop.
   P2R-413 refuses, with a message that names the condition at the call,
   key or value it concerns; and a query held in a variable (`$q =
   M::query();`), because each form is one whole chain. Section 43 adds
-  `sole()`, `firstOrFail()` and `findOrFail()`, and section 45 `get()`
-  and `all()`.
+  `sole()`, `firstOrFail()` and `findOrFail()`, section 45 `get()` and
+  `all()`, and section 46 `when()` links.
 
 ## 43. A missing or doubled row as Laravel's exceptions (milestone 2, slice 33)
 
@@ -4465,6 +4467,72 @@ otherwise than an array (`empty($c)` is false for an empty collection).
   property, a variable that holds one, or a call of the input that
   returns one.
 
+## 46. Conditional filters with when() (milestone 2, slice 36)
+
+Seven list queries of the app build their filters as
+`M::query()->when($value, function (Builder $query, $value): void {
+$query->where('c', $value); })->get()`, and Mago types each chain as
+`mixed`: Laravel's `when()` returns `$this|TWhenReturnType`, and a
+callback without a return value gives that type no meaning. A throwaway
+spike that told Mago `when()` returns `$this` and let such links through
+the store chain cleared four of the seven files (the other three read
+models without a store) and made no other file stop. This section tells
+Mago that type and converts the links to conditions of the store.
+
+- **P2R-450** Before Mago analyses the input, when an included file,
+  never the input (P2R-340), declares Laravel's trait
+  `Illuminate\Support\Traits\Conditionable` with a method `when`, the
+  tool MUST give Mago, as a patch of that trait would, a `when()` that
+  keeps Laravel's parameters and its template `TWhenParameter`, so a
+  callback's second parameter takes the value's type, and that returns
+  `$this`. Laravel's `when()` returns the callback's result, or `$this`
+  when that result is `null`; for the callbacks of P2R-451 (no return
+  value, or the builder that `$query->where(..)` gives back) that is the
+  same builder. Every other use of `when()` stops (P2R-135, P2R-153, or
+  the rules of section 45 on a collection), so the told type lets no
+  other form convert.
+- **P2R-451** In a chain of P2R-413, P2R-421 or P2R-441, a link
+  `->when($value, <callback>)` MAY stand anywhere between `M::query()` and
+  the last call, among the `where` links; `first()`, `sole()` and
+  `firstOrFail()` then need one or more `where` or `when` links. Such a
+  link converts when all of these hold:
+  - It has two positional arguments, neither named nor unpacked.
+  - `$value` is a variable, a parameter or a property read of one (it is
+    read once per row, as a `where` value is, P2R-413), of a type that
+    P2R-452 gives a truthiness rule; a closure as `$value` stops,
+    because Laravel calls it.
+  - The callback is a closure `function (Builder $query, T $value): void
+    { .. }`, with or without `static`, whose body is one or more
+    statements `$query->where('<c>', <v>);`, or an arrow function
+    `fn (Builder $query, T $value) => $query->where('<c>', <v>)`, whose
+    body is one or more chained `where` calls on its first parameter.
+    The callback has one or two parameters, none by reference, variadic
+    or with a default, and no `use` list; the first parameter is
+    untyped or Eloquent's `Builder`, and the second, which may be left
+    out, is untyped or of the Rust type of `$value` without `null`.
+  - Each `where` follows P2R-413, except that its value is a literal, the
+    callback's second parameter, or a property read of that parameter
+    (`$administration->id`), which stands for `$value`.
+- **P2R-452** Each `when` link MUST convert to one more condition of the
+  store closure of P2R-413, joined with `&&` in source order: a row
+  passes when `$value` is falsy by PHP's rules, or when every `where` of
+  the callback holds with the second parameter bound to `$value`. Falsy
+  are `null`, `false`, `0`, `0.0` and `-0.0`, `""`, `"0"` and an empty
+  list; any other int, float (`NAN` included), string, list, model,
+  struct or enum case is truthy. An `Option<T>` value converts to
+  `v.is_none_or(|v| <falsy> || <conditions>)`, with `v` lent as an
+  argument is (P2R-101, P2R-204), and any other value to `<falsy> ||
+  <conditions>`. The binding's name follows the closure-name rule of
+  P2R-413.
+- **P2R-453** These stop the conversion: `when()` with one or three
+  arguments (Laravel then gives a proxy or calls a default callback), a
+  named or unpacked argument, `unless()`, a value of another type (a
+  map, a shape, a union, a collection) or another form, and a callback
+  of any other form: another statement or expression in the body, a
+  `return`, a `where` with an operator or a closure, a call on another
+  variable, a value that reads a variable of the enclosing body, or a
+  written parameter type of another class.
+
 ## Spec checklist
 
 - [x] No `[NEEDS CLARIFICATION]` markers left. Decided in review: problems
@@ -4473,7 +4541,7 @@ otherwise than an array (`empty($c)` is false for an empty collection).
   takes its element type from the same variable or the declared type it
   flows into (P2R-21); a file of only functions becomes a library (P2R-33).
 - [x] Every requirement is testable: P2R-07 to P2R-49 and P2R-100 to
-  P2R-443 by case and stop folders (P2R-75 enforces this), P2R-01 to P2R-06
+  P2R-453 by case and stop folders (P2R-75 enforces this), P2R-01 to P2R-06
   by error folders and tests, P2R-50 to P2R-52 by P2R-71, the rest by CI or
   a file in the
   repository. Stated review concerns (P2R-05 partial write, P2R-72 case

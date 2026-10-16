@@ -153,8 +153,13 @@ that with Composer's autoloader PHP declares such a class only when
 execution reaches it. Section 37 (Spatie's `Optional`) was written on
 16 Oct 2026; it changes P2R-07, P2R-168, P2R-333 and the roadmap of
 section 10. Section 38 (interfaces of the input as traits) was written
-on 16 Oct 2026; it changes P2R-07, P2R-33, P2R-110, P2R-130, P2R-175,
-P2R-220 and the roadmap of section 10.
+on 16 Oct 2026; it changes P2R-07, P2R-33, P2R-110, P2R-130, P2R-172,
+P2R-173, P2R-174, P2R-175, P2R-220, the intro of section 23 and the
+roadmap of section 10. Its spec reviewers found that an enum method takes
+its value where a class method borrows, that PHP matches method names
+ignoring letter case where Rust names differ, that PHP rejects several
+interface forms that Mago's analyser does not report, and that a trait
+method meets the methods Rust's prelude gives every type.
 
 php2rust converts typed PHP source into normal, readable Rust (`Vec`,
 `String`, `i64`), without AI. It reads PHP with the Mago crates, uses Mago's
@@ -796,7 +801,8 @@ Sections 3 to 9 apply to nullable values unless this section says otherwise.
   MUST be an int literal, with or without unary minus, or a string literal,
   converted by P2R-49. These stop the conversion:
   - an enum declaration after a statement outside functions other than the
-    P2R-12 `declare`, a function, enum or class declaration: PHP
+    P2R-12 `declare`, a function, enum, class, interface (P2R-370) or
+    trait (P2R-280) declaration: PHP
     declares an enum only when execution reaches it, so an earlier use dies
     with `Class "E" not found`;
   - an enum with `implements` other than of the interfaces of P2R-371, or
@@ -1564,12 +1570,12 @@ Rust module. One input file still converts as sections 1 to 17 say.
   name in the global namespace, as PHP falls back to it (the helpers file
   of a framework).
 - **P2R-172** The crate MUST hold one Rust module for each PHP namespace
-  that declares an enum, class or function, and for each namespace between
-  the root and such a namespace. In this section namespace names compare
-  ignoring ASCII letter case, as PHP compares them. The crate root is the
-  file `lib.rs`, for the root namespace: the longest namespace that the
-  namespace of every input file that declares an enum, class or function
-  starts with, compared segment by segment (the global namespace when they
+  that declares an enum, class, interface (P2R-370) or function, and for
+  each namespace between the root and such a namespace. In this section
+  namespace names compare ignoring ASCII letter case, as PHP compares
+  them. The crate root is the file `lib.rs`, for the root namespace: the
+  longest namespace that the namespace of every input file that declares
+  an enum, class, interface or function starts with, compared segment by segment (the global namespace when they
   share none). A namespace below the root becomes the module path of its
   segments below the root, each segment its snake_case name (P2R-30, a Rust
   keyword as a raw identifier: `r#enum`). The module `a::b` is in the file
@@ -1580,7 +1586,7 @@ Rust module. One input file still converts as sections 1 to 17 say.
   then the `pub mod` lines of its child modules, then its `use` lines
   (P2R-174), then its items: in `lib.rs` first the structs of the array
   shapes the crate uses (P2R-200) and then the exception struct
-  (P2R-210), then the enums, classes and functions of
+  (P2R-210), then the enums, classes, traits (P2R-370) and functions of
   every
   input file of that namespace, files in path order and items in source
   order, then the helpers (P2R-160) that its items call. One blank line
@@ -1603,11 +1609,12 @@ Rust module. One input file still converts as sections 1 to 17 say.
   `ACME\Shop\Sub`, or `App\FooBar` and `App\Foobar`, which PHP reads as one
   namespace), at the name in the namespace statement of the later file in
   path order.
-- **P2R-173** Each enum, class and function of the crate MUST have a Rust
-  name that no other enum, class or function of the crate has, in any
-  module, because a module names the items of other modules by their Rust
-  name alone (P2R-174). Two declarations whose Rust names are equal, and
-  two enums, classes or traits (P2R-280; a trait has no Rust name), or two functions, whose fully qualified names are
+- **P2R-173** Each enum, class, interface (P2R-370) and function of the
+  crate MUST have a Rust name that no other of them has, in any module,
+  because a module names the items of other modules by their Rust name
+  alone (P2R-174). Two declarations whose Rust names are equal, and two
+  enums, classes, interfaces or PHP traits (P2R-280; a PHP trait has no
+  Rust name), or two functions, whose fully qualified names are
   equal ignoring letter case, stop the conversion at each declaration, with
   the span of the whole declaration; an enum and a function of one name
   (`App\Item` and `App\item`) are apart in PHP and in Rust. The struct of an
@@ -1632,8 +1639,11 @@ Rust module. One input file still converts as sections 1 to 17 say.
   shape (P2R-200), as a type or as a struct literal (`S { .. }`), a union
   enum (P2R-230), the exception struct of P2R-210, or the `PhpDateTime`
   struct of P2R-330, also where only a helper of the module names it,
-  MUST hold `use crate::<Name>;` for it. rustfmt sorts the `use` lines
-  (P2R-190).
+  MUST hold `use crate::<Name>;` for it. A module that does not declare
+  the trait of an interface (P2R-370) and whose Rust lines name it in an
+  `impl Name for C` line, or call a method of such an `impl` block, MUST
+  hold one `use` line for that trait (P2R-372). rustfmt sorts the `use`
+  lines (P2R-190).
 - **P2R-175** A directory input converts to a library: a statement outside
   functions other than the P2R-12 `declare`, the P2R-150 `namespace` and
   `use` statements, and enum, class, trait (P2R-280) and interface
@@ -2132,8 +2142,9 @@ an array (`$result['valid']`). The interface's methods take `mixed`, and a
 docblock `@implements ArrayAccess<K, V>` names the real key and value
 types. This section converts such a class when K and V have Rust types.
 Rust's `Index` trait is not used: `offsetGet` may throw (P2R-212), and
-`Index` cannot return a `Result`. Element access on such an object, user
-interfaces and inheritance are later slices.
+`Index` cannot return a `Result`. Element access on such an object and
+inheritance are later slices; section 38 converts the input's own
+interfaces.
 
 - **P2R-220** A class, readonly or not, whose only interface is
   `ArrayAccess` (resolved as PHP resolves it, P2R-151) MUST convert as
@@ -3456,62 +3467,91 @@ needs the check to narrow the type, waits for a later section.
 
 ## 38. Interfaces of the input as traits (milestone 2, slice 28)
 
-The Laravel app declares 9 interfaces of its own: `Labelable`, which an
-enum implements, and service and processor interfaces, which classes
-implement. A PHP interface lists methods that every class that
-implements it must declare, and a Rust trait does the same. This section
-converts such an interface to a trait, and the methods of a class or
-enum that implements it to an `impl` block of that trait. A value whose
-type is an interface needs `dyn` or a generic, and waits for a later
-section, as do an interface that extends another, its constants and its
-static methods.
+The Laravel app declares 9 interfaces of its own, all in
+`App\Interfaces`: `Labelable`, which an enum implements, and service,
+processor and file-system interfaces, which classes implement. A PHP
+interface lists methods that every class that implements it must
+declare, and a Rust trait does the same. This section converts such an
+interface to a trait, and the methods of a class or enum that implements
+it to an `impl` block of that trait. A value whose type is an interface
+needs `dyn` or a generic, and waits for a later section, as do an
+interface that extends another, its constants and its static methods.
 
-- **P2R-370** An interface declared at the top level, whose body holds
-  only methods that are public (written `public` or with no visibility)
-  and not static, each with a declared return type, with no `extends`
-  and no attribute, MUST convert to `pub trait Name { ... }` with one line
-  `fn m(&self, p: T) -> R;` per method, in source order. The trait takes
-  the Rust name a class of that name takes, and its methods the names
-  methods take (P2R-131); a parameter takes the type and form of a method
-  parameter (P2R-24, P2R-132, P2R-201, P2R-232), the return the Rust type
-  of a method's return, with none for `void`, and docblock types count as
-  they do for a method (P2R-23). The trait stands where a class of that
-  name would (P2R-33), and in a directory input in its file's module
-  (P2R-172). These stop: a constant, a property or a static method in the
-  interface; `extends`; an attribute (P2R-07); a parameter with a default,
-  by reference or variadic; a parameter or return type with no Rust type
-  (P2R-22), also `self`, `static` and `never`; a trait whose Rust name is
-  the name of another enum, class, trait or function of the output or a
-  name the output uses (P2R-111, P2R-131, P2R-173); two methods with the
-  same Rust name; and an interface declared inside another statement. An
-  interface declared in an included file (P2R-340) is not one of the
-  input.
-- **P2R-371** A class or enum that implements one or more interfaces
-  that P2R-370 converts, and no other interface, MUST convert as it would
-  without `implements` (sections 14 to 16), except that each of its
-  methods that one of those interfaces declares (by name, in any letter
-  case) is written without `pub` in an `impl Name for C { ... }` block,
-  one block per interface in the order of the `implements` list, after
-  the class's or enum's own `impl` block; its body converts as before.
-  The method's Rust signature MUST be the trait's: the same number of
-  parameters, each with the trait's type and form, and the trait's return
-  type. These stop: a method whose Rust signature differs (PHP accepts a
-  wider parameter type, a narrower return type or an added optional
-  parameter); a method that changes its object (`&mut self`, P2R-143) or
-  throws (P2R-211); a method that two of the interfaces declare;
-  `ArrayAccess` (P2R-220) or an interface not of the input beside them;
-  and such a class or enum after a statement outside functions, which PHP
-  declares only when execution reaches it (P2R-110, P2R-130). PHP rejects
-  a class that lacks a method of its interface, and Mago reports it
-  (P2R-11).
+- **P2R-370** An interface declared at the top level, with no `extends`
+  and no attribute, whose body holds only methods, each with at most one
+  modifier, `public`, no body, a declared return type and a name that
+  does not start with `__`, MUST convert to `pub trait Name { ... }` with
+  one line `fn m(&self, p: T) -> R;` per method, in source order. The
+  receiver is `self` instead when only enums implement the interface,
+  because an enum method takes its value (P2R-155), and an interface that
+  both an enum and a class implement stops. The trait takes the Rust name
+  a class of that name takes, and its methods the names methods take
+  (P2R-131); a parameter takes the type and form of a method parameter
+  (P2R-24, P2R-132, P2R-201, P2R-232), a parameter of a changing type its
+  shared form (`&C`, `&[C]`, P2R-143), the return the Rust type of a
+  method's return, with none for `void`, and docblock types count as they
+  do for a method (P2R-23). The trait stands where a class of that name
+  would (P2R-33); in a directory input it stands in its file's module,
+  which P2R-172 makes for a namespace of interfaces only. These stop:
+  a constant, a property or a static method in the interface; `extends`;
+  an attribute (P2R-07); a method modifier other than one `public`, a
+  method body, a by-reference return and a name that starts with `__`
+  (P2R-130, P2R-155), which PHP rejects or treats in its own way and
+  Mago's analyser does not report; a parameter with a default, by
+  reference or variadic; a parameter or return type with no Rust type
+  (P2R-22), also `self`, `static` and `never`; a method named like one
+  that a trait of Rust's prelude gives the output's types (`to_owned`,
+  `clone_into`, `into`, `try_into`, `eq`, `ne`), where only an inherent
+  method wins, and `new` or `clone` (P2R-131); two methods whose names are
+  equal ignoring letter case (P2R-131); an interface whose name PHP
+  reserves or has as a class-like (P2R-111), whose Rust name is that of
+  another enum, class, interface or function of the output, a name the
+  output uses (P2R-111, P2R-131, P2R-173) or a trait of Rust's prelude
+  (`AsMut`, `AsRef`, `Clone`, `Copy`, `Default`, `DoubleEndedIterator`,
+  `Drop`, `Eq`, `ExactSizeIterator`, `Extend`, `Fn`, `FnMut`, `FnOnce`,
+  `From`, `FromIterator`, `Future`, `Into`, `IntoFuture`,
+  `IntoIterator`, `Iterator`, `Ord`, `PartialEq`, `PartialOrd`, `Send`,
+  `Sized`, `Sync`, `ToString`, `TryFrom`, `TryInto`, `Unpin`), whose
+  methods the output calls; and an
+  interface declared inside another statement. No array shape or union
+  takes a trait's name (P2R-200, P2R-230). An interface declared in an
+  included file (P2R-340) is not one of the input.
+- **P2R-371** A class or enum whose `implements` list names one or more
+  interfaces that P2R-370 converts, and no other interface, MUST convert
+  as it would without `implements` (sections 14 to 16 and 36), except
+  that each of its methods that one of those interfaces declares (by
+  name, in any letter case) is written without `pub` in an
+  `impl Name for C { ... }` block, one block per interface in the order
+  of the `implements` list, after the class's or enum's own `impl` block;
+  its body converts as before. A method without a docblock takes the
+  types of the interface method's docblock, as Mago gives them. The
+  method's Rust name MUST be the trait method's, and its Rust signature
+  the trait's: the same number of parameters, each with the trait's type
+  and form, and the trait's return type; parameter names, the `_` of an
+  unused parameter (P2R-35), `mut` on a parameter the body writes and a
+  default on the class side do not count. These stop: a method whose Rust
+  name or Rust signature differs (PHP matches names ignoring letter case,
+  and accepts a wider parameter type, a narrower return type or an added
+  optional parameter); a method that is static, changes its object
+  (`&mut self`, P2R-143) or throws (P2R-211); a method that two of the
+  interfaces declare; a class or enum that declares no method of the name
+  of a method of one of its interfaces, which the tool checks itself,
+  because Mago does not report a missing `from`, `tryFrom` or `cases` on
+  an enum; an interface that one `implements` list names twice, which PHP
+  rejects and Mago does not report; `ArrayAccess` (P2R-220) or an
+  interface not of the input beside them; and such a class or enum after
+  a statement outside functions, which PHP declares only when execution
+  reaches it (P2R-110, P2R-130).
 - **P2R-372** A call of such a method on a value of the class or enum
   MUST convert as other method calls do (P2R-135, P2R-155). In a
-  directory input, a module that holds such a call and not the trait
-  names the trait in a `use` line, as it names other items of the crate
-  (P2R-174). The interface's name anywhere else stops, as the name of a
-  class that does not convert does: as the type of a parameter, property,
-  return value or variable, also in a docblock (P2R-22), with
-  `instanceof`, `::class` or a static call.
+  directory input, a module that does not declare the trait and whose
+  Rust lines name it in an `impl` line or call a method of its `impl`
+  blocks holds one `use` line for it, and no other module does (P2R-174);
+  a call in a `default` arm that P2R-121 leaves out is no call. The
+  interface's name anywhere else stops, as the name of a class that does
+  not convert does: as the type of a parameter, property, return value or
+  variable, also in a docblock (P2R-22), with `instanceof`, `::class` or a
+  static call.
 
 ## Spec checklist
 

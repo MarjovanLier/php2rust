@@ -79,3 +79,15 @@ final class Legacy extends Model
 final class Orphaned extends Model
 {
 }
+
+// A class of a PHP extension, which may not be loaded, and an observer whose parent is
+// built into PHP.
+#[ObservedBy(\Redis::class)]
+final class Extension extends Model
+{
+}
+
+#[ObservedBy(\App\Observers\BuiltinChild::class)]
+final class BuiltinParent extends Model
+{
+}

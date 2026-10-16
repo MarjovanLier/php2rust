@@ -1,7 +1,8 @@
 <?php
 
 // A small stand-in for Eloquent with Laravel's ObservedBy attribute and observers that have
-// a retrieved method in each form method_exists finds (P2R-461). Only the types matter.
+// a retrieved method in each form method_exists finds, and two forms only Mago's lookup
+// finds (P2R-461). Only the types matter.
 
 namespace Illuminate\Database\Eloquent\Attributes;
 

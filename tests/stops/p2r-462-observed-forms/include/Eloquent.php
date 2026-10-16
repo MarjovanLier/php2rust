@@ -39,3 +39,9 @@ interface Watcher
 final class Orphan extends MissingBase
 {
 }
+
+// Its parent is built into PHP, which Mago's stubs cannot tell from a class of an extension
+// that PHP may not load.
+final class BuiltinChild extends \ArrayObject
+{
+}

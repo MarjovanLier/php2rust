@@ -122,6 +122,67 @@ function allColumns(): Collection
     return Code::all(['name']);
 }
 
+// isEmpty(), isNotEmpty() and first() as a statement, whose unused result rustc refuses.
+/**
+ * @param Collection<int, Code> $codes
+ */
+function unused(Collection $codes): int
+{
+    $codes->isEmpty();
+    return 0;
+}
+
+// first() of a collection of DateTime (P2R-442).
+/**
+ * @param \Illuminate\Support\Collection<int, \DateTime> $dates
+ */
+function firstDate(\Illuminate\Support\Collection $dates): bool
+{
+    return $dates->first() instanceof \DateTime;
+}
+
+// A nullable element type, a single type argument, and a collection inside a list, a
+// shape or another collection (P2R-440).
+/**
+ * @param \Illuminate\Support\Collection<int, ?int> $numbers
+ */
+function nullable(\Illuminate\Support\Collection $numbers): int
+{
+    return 0;
+}
+
+/**
+ * @param Collection<Code> $codes
+ */
+function single(Collection $codes): int
+{
+    return 0;
+}
+
+/**
+ * @param list<\Illuminate\Support\Collection<int, string>> $groups
+ */
+function listed(array $groups): int
+{
+    return 0;
+}
+
+/**
+ * @param array{names: \Illuminate\Support\Collection<int, string>} $shape
+ */
+function shaped(array $shape): int
+{
+    return 0;
+}
+
+/**
+ * @param \Illuminate\Support\Collection<int, \Illuminate\Support\Collection<int, string>> $groups
+ */
+function nested(\Illuminate\Support\Collection $groups): int
+{
+    return 0;
+}
+
 // A collection made other than by the store (P2R-443).
 /**
  * @return Collection<int, Code>

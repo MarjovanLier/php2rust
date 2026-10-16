@@ -4620,7 +4620,7 @@ run an observer method stopped.
   more `X::class` without keys, each naming a class (not an interface,
   trait or enum) that the input or an included file declares together
   with its parent classes, interfaces and traits at any depth, none of
-  them one of PHP's built-in classes (Mago's stubs also name classes of
+  them built into PHP, a class, interface or trait alike (Mago's stubs also name classes of
   extensions that PHP may not load, such as `\Redis`, and Laravel then
   throws on the first use), as PHP
   loads them when Laravel boots the model (Mago reports a missing one in

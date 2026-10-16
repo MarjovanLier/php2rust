@@ -159,7 +159,9 @@ roadmap of section 10. Its spec reviewers found that an enum method takes
 its value where a class method borrows, that PHP matches method names
 ignoring letter case where Rust names differ, that PHP rejects several
 interface forms that Mago's analyser does not report, and that a trait
-method meets the methods Rust's prelude gives every type.
+method meets the methods Rust's prelude gives every type. Section 39
+(laravel-data's request hooks left out) was written on 16 Oct 2026; it
+changes P2R-07, P2R-350, P2R-351 and the roadmap of section 10.
 
 php2rust converts typed PHP source into normal, readable Rust (`Vec`,
 `String`, `i64`), without AI. It reads PHP with the Mago crates, uses Mago's
@@ -209,7 +211,7 @@ requirement IDs.
   the same stdout bytes, the same output file bytes and the same stderr
   bytes.
 - **P2R-07** Only the constructs that sections 3 to 5, 11 to 19 and 21 to
-  38 list as converting may convert. Any other construct MUST stop the conversion,
+  39 list as converting may convert. Any other construct MUST stop the conversion,
   which means it is reported as a problem under P2R-03. Examples that stop
   in version 1 (section 16 converts `namespace`, `use` and class
   constants, and section 17 two casts):
@@ -660,8 +662,9 @@ Each milestone gets its own requirements in this file when its work starts.
   `SouthAfricanIDValidator` calls (section 34); then, for a Laravel
   application, the classes of Composer's `vendor/` folder read for their
   types only (section 35), Spatie's `Data` classes as plain structs
-  (section 36), their `Optional` properties (section 37) and later their
-  `from()` and `toArray()`, and the framework's other forms; the input's
+  (section 36), their `Optional` properties (section 37), their request
+  hooks left out (section 39) and later their `from()` and `toArray()`,
+  and the framework's other forms; the input's
   own interfaces as traits (section 38); unions as list values; values
   of interface types, interface inheritance and class inheritance;
   closures.
@@ -3342,8 +3345,8 @@ parent to a later section.
   that name; a method whose name, in any letter case, is a method of
   `Data` in Mago's codebase, because PHP checks an override against the
   parent and Mago does not catch every form (the names of its `@method`
-  tags count too, which stops some methods PHP accepts, such as a static
-  `rules()`); a class whose parent, as Mago knows it, names a trait or
+  tags count too, other than the hooks that P2R-380 leaves out); a class
+  whose parent, as Mago knows it, names a trait or
   interface that no included file declares (an `--include` of
   `Data.php` alone), because then the methods of `Data` are not all
   known; a class whose parent, as Mago knows it, extends another class,
@@ -3373,8 +3376,9 @@ parent to a later section.
   named arguments after the positional ones and each name once: PHP
   compiles the arguments as constant expressions and rejects other
   forms, such as a call or `static::class`, when it compiles the file,
-  and Mago does not report them all. Every other attribute there, and
-  one with another argument, stops (P2R-07), and an attribute group
+  and Mago does not report them all; P2R-382 allows `new` of an included
+  class too. Every other attribute there, and one with another argument,
+  stops (P2R-07), and an attribute group
   (`#[A, B]`) that holds an attribute that stops, stops as a whole.
 
 ## 37. Spatie's Optional in a Data class (milestone 2, slice 27)
@@ -3548,6 +3552,46 @@ interface that extends another, its constants and its static methods.
   not convert does: as the type of a parameter, property, return value or
   variable, also in a docblock (P2R-22), with `instanceof`, `::class` or a
   static call.
+
+## 39. laravel-data's request hooks left out (milestone 2, slice 29)
+
+When laravel-data builds a `Data` object from a request, it validates
+and authorises it through static methods the class may declare: the
+seven that its `ValidateableData` trait names in `@method` tags
+(`rules`, `messages`, `attributes`, `stopOnFirstFailure`, `redirect`,
+`redirectRoute` and `errorBag`), and `authorize`, which its
+`AuthorizedDataPipe` looks for. None has a real method in `Data`, only
+laravel-data calls them (through `app()->call`), and `from()`, which runs
+them, stops (P2R-350). 12 of the 60 `Data` classes of the Laravel app
+declare `rules()` or `authorize()`, whose bodies use Laravel's
+validation rules and `Gate`. This section leaves them out, as P2R-351
+leaves out the validation attributes, and it leaves out two more forms
+of those attributes that the app uses.
+
+- **P2R-380** In a class that P2R-350 converts, a method whose name, in
+  any letter case, is one of those eight, and that is `public` and
+  `static`, MUST be left out with its signature and body: nothing of it
+  enters the Rust output, the tool reports no problem inside it, also no
+  Mago finding (P2R-11), and P2R-350's stop for a method named like a
+  method of `Data` does not apply to it. A call of it in the input stops,
+  as a call of a method the class does not declare does (P2R-153). Such a
+  method that is not `public` and `static` still stops by P2R-350, and so
+  does an override of a real method of `Data` (`withValidator`,
+  `prepareForPipeline`), which PHP checks against the parent when it
+  loads the class.
+- **P2R-381** The attributes of P2R-351, with its argument forms, MUST
+  also be left out on a class with no parent and no interface, on the
+  class and on the promoted parameters of its constructor: laravel-data
+  reads them only on a class it builds, which extends one of its own
+  classes, and PHP builds an attribute only when reflection reads it.
+- **P2R-382** An argument of such an attribute MAY also be
+  `new C(...)`, where `C` resolves to a class that an included file
+  declares and each argument of `new` has one of the forms of P2R-351;
+  the attribute is left out with it. PHP accepts `new` in an attribute
+  argument as a constant expression and runs it only when reflection
+  builds the attribute (`newInstance()`), which never runs in the
+  converted code. `new` of any other class, or with another argument,
+  stops (P2R-07).
 
 ## Spec checklist
 

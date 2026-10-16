@@ -1,13 +1,26 @@
 <?php
 
-// A stand-in for spatie/laravel-data whose Data has real methods named like five hooks,
-// one in a trait, one renamed from a trait and one in an interface under an @method tag
-// of Data, which version 4.18.0 does not have.
+// A stand-in for spatie/laravel-data whose Data has real methods named like six hooks:
+// one in a trait, one that Data renames from a trait, one that its trait renames from
+// another trait and one in an interface under an @method tag of Data, which version
+// 4.18.0 does not have.
 
 namespace Spatie\LaravelData\Concerns;
 
+trait Deep
+{
+    public static function check(): bool
+    {
+        return true;
+    }
+}
+
 trait Bags
 {
+    use Deep {
+        check as stopOnFirstFailure;
+    }
+
     public function errorBag(): string
     {
         return 'default';

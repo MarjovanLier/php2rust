@@ -4,3 +4,4 @@ input.php:20:28: Spatie\LaravelData\Data has a method of this name, and overridi
 input.php:26:28: Spatie\LaravelData\Data has a method of this name, and overriding it is not supported (P2R-350)
 input.php:33:28: Spatie\LaravelData\Data has a method of this name, and overriding it is not supported (P2R-350)
 input.php:39:28: Spatie\LaravelData\Data has a method of this name, and overriding it is not supported (P2R-350)
+input.php:45:28: Spatie\LaravelData\Data has a method of this name, and overriding it is not supported (P2R-350)

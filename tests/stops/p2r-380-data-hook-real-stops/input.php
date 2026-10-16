@@ -40,4 +40,10 @@ final class Account extends Data
     {
         return 'account';
     }
+
+    // And over one that a trait of Data renames from another trait.
+    public static function stopOnFirstFailure(): bool
+    {
+        return false;
+    }
 }

@@ -42,6 +42,9 @@ final class More extends Data
         public string $d,
         #[Unique(table: "\u{110000}")]
         public string $e,
+        // PHP warns about an octal escape above \377 when it compiles the file.
+        #[Unique(table: "\400")]
+        public string $f,
     ) {}
 }
 

@@ -84,7 +84,7 @@ final class Bare extends Data
     }
 }
 
-// PHP rejects these modifiers on a method when it loads the class.
+// PHP rejects these modifiers on a method when it compiles the file.
 final class Modified extends Data
 {
     public readonly static function rules(): array
@@ -142,6 +142,40 @@ final class Parameters extends Data
     }
 }
 
+// A hook's signature keeps to forms PHP always compiles; PHP rejects or deprecates these
+// when it compiles the file, and Mago reports none of them.
+final class Signatures extends Data
+{
+    public static function rules(?mixed $a = null): array
+    {
+        return [];
+    }
+
+    public static function messages(iterable|array $a = []): array
+    {
+        return [];
+    }
+
+    public static function attributes(string $a = PHP_EOL . 'x'): array
+    {
+        return [];
+    }
+
+    public static function redirect(int ...$a): string
+    {
+        return 'home';
+    }
+
+    public static function redirectRoute(int $a = null): string
+    {
+        return 'home';
+    }
+
+    public static function errorBag(): ?void
+    {
+    }
+}
+
 // Mago reports these under a code that a left-out hook drops.
 final class Reserved extends Data
 {
@@ -167,6 +201,40 @@ final class Reserved extends Data
     public static function redirect(): string
     {
         return \static::make();
+    }
+}
+
+// PHP removed, deprecates or warns about these when it compiles the file.
+final class Deprecated extends Data
+{
+    public static function rules(): array
+    {
+        return [(integer) '1', (double) '2'];
+    }
+
+    public static function messages(): array
+    {
+        $x = 'a';
+        return ["n${x}" => 'b'];
+    }
+
+    public static function attributes(): array
+    {
+        switch (1) {
+            case 1;
+                return [];
+        }
+        return [];
+    }
+
+    public static function redirect(): string
+    {
+        return `date`;
+    }
+
+    public static function errorBag(): string
+    {
+        return "\400";
     }
 }
 

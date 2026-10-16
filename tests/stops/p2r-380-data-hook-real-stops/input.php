@@ -27,4 +27,17 @@ final class Account extends Data
     {
         return 'account';
     }
+
+    // And over the real method of its interface.
+    /** @return array<string, string> */
+    public static function messages(int $a = 0): array
+    {
+        return [];
+    }
+
+    // And over a trait method that Data renames to redirect.
+    public static function redirect(int $a = 0): string
+    {
+        return 'account';
+    }
 }

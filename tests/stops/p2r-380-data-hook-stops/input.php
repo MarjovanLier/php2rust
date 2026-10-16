@@ -113,7 +113,64 @@ final class Modified extends Data
     }
 }
 
-// The docblock is not part of the hook.
+// PHP rejects these parameters when it compiles the file, and Mago reports none of them.
+final class Parameters extends Data
+{
+    public static function rules(int $this = 0): array
+    {
+        return [];
+    }
+
+    public static function messages(int|static $s = 0): array
+    {
+        return [];
+    }
+
+    public static function attributes(public string $x = 'a'): array
+    {
+        return [];
+    }
+
+    public static function redirect(int $a = 0, int $a = 1): string
+    {
+        return 'home';
+    }
+
+    public static function errorBag(int|INT $n = 0): string
+    {
+        return 'bag';
+    }
+}
+
+// Mago reports these under a code that a left-out hook drops.
+final class Reserved extends Data
+{
+    public static function rules(): array
+    {
+        return [new \self()];
+    }
+
+    public static function messages(): array
+    {
+        function inner(): void
+        {
+        }
+
+        return [];
+    }
+
+    public static function attributes(): array
+    {
+        return \parent::make();
+    }
+
+    public static function redirect(): string
+    {
+        return \static::make();
+    }
+}
+
+// A finding on the docblock stops: it is not part of the hook.
 final class Documented extends Data
 {
     /** @return NoSuchClass */

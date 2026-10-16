@@ -26,9 +26,11 @@ final class Plain
     public function __construct(
         #[Unique(table: 'plain', ignore: new Administration(name: 'a', code: 'b'))]
         public string $label,
+        #[Rule(new NoSqlInjectionRule())]
+        public string $kind,
     ) {}
 }
 
 $administration = new Administration('Main', 'M1');
-$plain = new Plain('p');
-echo $administration->name, ' ', $administration->code, ' ', $plain->label, "\n";
+$plain = new Plain('p', 'k');
+echo $administration->name, ' ', $administration->code, ' ', $plain->label, $plain->kind, "\n";

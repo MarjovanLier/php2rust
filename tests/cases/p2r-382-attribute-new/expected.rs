@@ -18,23 +18,26 @@ impl Administration {
 #[derive(Debug)]
 pub struct Plain {
     pub label: String,
+    pub kind: String,
 }
 
 impl Plain {
-    pub fn new(label: &str) -> Plain {
+    pub fn new(label: &str, kind: &str) -> Plain {
         Plain {
             label: label.to_string(),
+            kind: kind.to_string(),
         }
     }
 }
 
 fn main() {
     let administration = Administration::new("Main", "M1");
-    let plain = Plain::new("p");
+    let plain = Plain::new("p", "k");
     print!("{}", administration.name);
     print!(" ");
     print!("{}", administration.code);
     print!(" ");
     print!("{}", plain.label);
+    print!("{}", plain.kind);
     print!("\n");
 }

@@ -28,6 +28,23 @@ final class Forms extends Data
     ) {}
 }
 
+// More forms that stop: PHP rejects a spread and an escape such as \u{110000}.
+final class More extends Data
+{
+    public function __construct(
+        #[Unique(table: 't', ignore: new static('x'))]
+        public string $a,
+        #[Unique(table: 't', ignore: new parent('x'))]
+        public string $b,
+        #[Unique(table: 't', ignore: new RouteParameterReference(...['x']))]
+        public string $c,
+        #[Unique(table: 't', ignore: new RouteParameterReference(routeParameter: 'x', routeParameter: 'y'))]
+        public string $d,
+        #[Unique(table: "\u{110000}")]
+        public string $e,
+    ) {}
+}
+
 // A Mago finding on it still stops.
 final class Unknown extends Data
 {

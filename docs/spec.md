@@ -4506,11 +4506,14 @@ links to conditions of the store.
   `->when($value, <callback>)` MAY stand anywhere between `M::query()` and
   the last call, among the `where` links; `first()`, `sole()` and
   `firstOrFail()` then need one or more `where` or `when` links. These
-  links convert only where P2R-450 told Mago the type of `when()`. Such a
+  links convert only where P2R-450 told Mago the type of `when()` and
+  Eloquent's builder takes `when()` from that trait, not from a method
+  it declares itself (which may treat the value otherwise). Such a
   link converts when all of these hold:
   - It has two positional arguments, neither named nor unpacked.
-  - `$value` is a variable, a parameter or a property read of one (it is
-    read once per row, as a `where` value is, P2R-413), of a type that
+  - `$value` is a variable, a parameter or a property read of such a
+    value (`$filter->name`, `$this->filter->name`; it is read once per
+    row, as a `where` value is, P2R-413), of a type that
     P2R-452 gives a truthiness rule; a closure as `$value` stops,
     because Laravel calls it.
   - The callback is a closure `function (Builder $query, T $value): void
@@ -4554,7 +4557,14 @@ links to conditions of the store.
   is the word `type`) and neither of the closure's names `row` and
   `text` of P2R-413; and it is `_` when
   nothing reads it (a model, struct or enum case with no `where` whose
-  value reads the second parameter).
+  value reads the second parameter). The callback's parameters are no
+  variables of the enclosing function for P2R-30, P2R-31 and P2R-160:
+  the first has no Rust form, and the binding takes its name by this
+  rule alone. Because the binding avoids every word the conditions read,
+  a function they call included, it can hide only a variable or function
+  that nothing inside the closure reads; the idiom
+  `->when($name, fn ($q, $name) => ..)` names the binding after the
+  value on purpose.
 - **P2R-453** These stop the conversion: `when()` with one or three
   arguments (Laravel then gives a proxy or calls a default callback), a
   named or unpacked argument, `unless()`, a value of another type (a

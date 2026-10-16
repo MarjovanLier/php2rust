@@ -129,12 +129,6 @@ function objectMember(object|int $v): int
     return 1;
 }
 
-/** @param array{a: int|string} $s */
-function shapeField(array $s): int
-{
-    return 1;
-}
-
 function sameClass(Cat|\Cat $v): int
 {
     return 1;

@@ -3,21 +3,13 @@
 declare(strict_types=1);
 
 /**
- * A union stays out of lists and shape fields.
+ * A union stays out of lists (section 44 lets it into shape fields).
  *
  * @param list<int|string> $l
  */
 function unionList(array $l): int
 {
     return count($l);
-}
-
-/**
- * @param array{a: int|string} $s
- */
-function unionField(array $s): int
-{
-    return 1;
 }
 
 /**

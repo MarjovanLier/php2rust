@@ -174,6 +174,11 @@ final class Signatures extends Data
     public static function errorBag(): ?void
     {
     }
+
+    // PHP deprecates a return by reference from a void function.
+    public static function &authorize(): void
+    {
+    }
 }
 
 // Mago reports these under a code that a left-out hook drops.
@@ -235,6 +240,63 @@ final class Deprecated extends Data
     public static function errorBag(): string
     {
         return "\400";
+    }
+}
+
+// PHP deprecates these too, in a closure and in a predefined variable.
+final class AlsoDeprecated extends Data
+{
+    public static function rules(): array
+    {
+        $check = static fn (int $a = null): bool => $a === null;
+        return [$check()];
+    }
+
+    public static function messages(): array
+    {
+        $join = static fn (string $a = 'x', string $b): string => $a . $b;
+        return [$join('a', 'b')];
+    }
+
+    public static function attributes(): array
+    {
+        return [$http_response_header ?? []];
+    }
+
+    public static function redirect(): string
+    {
+        return "\u{110000}";
+    }
+
+    public static function errorBag(): string
+    {
+        declare(ticks=1);
+        return 'bag';
+    }
+
+    public static function stopOnFirstFailure(?integer $a = null): bool
+    {
+        return true;
+    }
+}
+
+// PHP rejects a class-like declared inside a method; an anonymous class brings members the
+// tool does not check.
+final class Nested extends Data
+{
+    public static function rules(): array
+    {
+        interface Helper
+        {
+        }
+
+        return [];
+    }
+
+    public static function messages(): array
+    {
+        return [new class {
+        }];
     }
 }
 

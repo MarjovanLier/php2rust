@@ -4261,14 +4261,17 @@ them.
   the three stops, as `new` of another class does (P2R-212), because
   `MultipleRecordsFoundException` builds its message from a count and
   Laravel names the model of a `ModelNotFoundException` with
-  `setModel(..)`, which the struct does not hold.
+  `setModel(..)`, which the struct does not hold; `RecordsNotFoundException`
+  stops with them, although it takes `RuntimeException`'s arguments,
+  because no form of P2R-421 throws it.
 - **P2R-421** These forms on a model whose store applies (P2R-410) MUST
   convert to a call of the store that throws (P2R-211), converted by
   P2R-213 (`?` in a function that throws, `unwrap_or_else(|e|
   e.uncaught())` in `fn main()`, a `break 'throw` in a `try` body). For
-  P2R-211, P2R-213 and P2R-214 each form on a model with a struct is a
-  call that throws, also where it stops because the store does not
-  apply:
+  P2R-211, P2R-213 and P2R-214 each form on a model with a struct (the
+  `where` chain ended by `sole()` or `firstOrFail()` without arguments,
+  or `findOrFail` with any arguments) is a call that throws, also where
+  it then stops on the store, an argument or a `where` value:
   - The `where` chain of P2R-413 ended by `->sole()` without arguments
     converts to `M::store_sole(|row: &M| ..)`, with the closure of
     P2R-413, which gives a copy of the one matching row as `M`. With no
@@ -4304,7 +4307,8 @@ them.
   only uses are these forms holds no other public function. A form of
   P2R-421 makes the output hold the struct of P2R-210, with the three
   classes of P2R-420, even where no `throw` or `catch` converts.
-- **P2R-423** These stop, by P2R-135 and P2R-153: `sole()` or
+- **P2R-423** These stop, by P2R-135 and P2R-153, or by Mago's finding
+  (P2R-11) where Laravel's `__callStatic` gives `mixed`: `sole()` or
   `firstOrFail()` with an argument (a list of columns, which Laravel
   loads alone); `findOrFail` with an argument of another type, a second
   argument, or a named or unpacked argument; `sole()` or `firstOrFail()`

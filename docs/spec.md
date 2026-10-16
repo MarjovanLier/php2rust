@@ -3386,11 +3386,12 @@ needs the check to narrow the type, waits for a later section.
   (P2R-174). A parameter of that type is borrowed as `&PhpOptional<T>`,
   its value cloned where it is stored, as a union is (P2R-232), and it
   cannot be assigned, as an object parameter cannot (P2R-132). A read of
-  a property of that type keeps that type also where Mago narrows it
-  (after `instanceof Optional`, a check against `null` or a write), as
-  P2R-104 and P2R-232 say for an `Option` and a union; a read of a
-  variable or parameter that Mago narrows stops, because its type
-  changes (P2R-34), as P2R-361 says for a write. This holds only
+  a property, variable or parameter of that type that Mago narrows
+  (after `instanceof Optional`, a check against `null` or a write)
+  stops: a property read with the problem of P2R-362, also as the
+  operand of a second `instanceof Optional`, and a variable or parameter
+  read because its type changes (P2R-34), as P2R-361 says for a write.
+  This holds only
   when an included file declares `Optional` with the shape of 4.18.0: a
   class that is not abstract, with no parent, interface, trait, property
   or constant, none of the methods PHP calls by itself (P2R-350), and a
@@ -3403,8 +3404,9 @@ needs the check to narrow the type, waits for a later section.
   not take whole; with `T` a `DateTime` together with `false` or
   `null`, because P2R-330 makes `None` mean `false`; with `T` a class
   that changes its objects or holds one (P2R-141), which is never
-  cloned; as a list or map element or a shape field; and a class that holds itself through
-  `PhpOptional`, as through `?C` (P2R-130). A class or
+  cloned; with `T` a list of a nullable class type (`list<?C>`, P2R-204);
+  as a list or map element or a shape field; and a class that holds
+  itself through `PhpOptional`, as through `?C` (P2R-130). A class or
   enum whose Rust name is `PhpOptional` stops (P2R-111, P2R-131),
   because the helper takes that name.
 - **P2R-361** Where a value of type `PhpOptional<T>` is due (an argument,
@@ -3413,7 +3415,8 @@ needs the check to narrow the type, waits for a later section.
   case, to `\Spatie\LaravelData\Optional` and without arguments, MUST
   convert to `PhpOptional::Absent`, the call to `create()` only where
   Mago types it as `Optional` alone, as the declared return type of
-  4.18.0 gives; a value that goes where `T` is
+  4.18.0 gives, with its body trusted to make a new `Optional` and do
+  nothing else, as 4.18.0's does; a value that goes where `T` is
   declared to `PhpOptional::Present(v)`, converted as for a place of type
   `T` (P2R-25, P2R-26, P2R-102: an int is a float for `float|Optional`, a
   `?T` value goes into `Present` of `T|Optional|null` as it is); `null`
@@ -3430,8 +3433,10 @@ needs the check to narrow the type, waits for a later section.
   (P2R-122). These stop: `new Optional` or
   `Optional::create()` anywhere else, because its PHP type is `Optional`
   alone; `new Optional(...)` with an argument, which PHP runs; a value of
-  another `PhpOptional` type; and the arms of `?:` (P2R-180) and the
-  default of `??` in such a place.
+  another `PhpOptional` type; `new Optional` or `Optional::create()` as
+  an arm of `?:` (P2R-180) or as the default of `??` in such a place,
+  while a `?:` or `??` of `T` values goes into `Present` as one `T`
+  value; and the default of a declared property of that type.
 - **P2R-362** `$v instanceof Optional` on a value of type `PhpOptional<T>`,
   with a name that PHP resolves, in any letter case, to
   `\Spatie\LaravelData\Optional`, MUST convert to

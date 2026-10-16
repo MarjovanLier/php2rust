@@ -233,3 +233,10 @@ class ThrowsInBody extends \Exception
 
 $shadowed = 'x';
 echo $shadowed, "\n";
+
+// A throw of a class whose constructor stops adds no problem, also in a try body.
+try {
+    throw new ChangesItem(new Item(1));
+} catch (ChangesItem $e) {
+    echo "caught\n";
+}

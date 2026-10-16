@@ -1,0 +1,7 @@
+input.php:16:21: this class has no property of that name (P2R-134)
+input.php:22:5: a write to an attribute of a model is not supported (P2R-404)
+input.php:27:5: a write to an attribute of a model is not supported (P2R-404)
+input.php:32:5: a write to an attribute of a model is not supported (P2R-404)
+input.php:37:12: new of a model is not supported, because this section creates no model (P2R-404)
+input.php:42:12: this class has no method of that name (P2R-135)
+input.php:47:5: this class has no method of that name (P2R-153)

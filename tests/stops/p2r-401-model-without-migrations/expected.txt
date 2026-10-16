@@ -1,0 +1,2 @@
+input.php:10:13: a model needs --migrations, which declare the columns of its table (P2R-401)
+input.php:16:12: this class has no property of that name (P2R-134)

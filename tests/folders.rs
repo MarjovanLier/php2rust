@@ -57,6 +57,11 @@ fn tool(args: &[&str], dir: &Path) -> Output {
     if dir.join("include").is_dir() {
         args.extend(["--include", "include"]);
     }
+    // A folder with a directory `migrations/` reads it for the models' columns (P2R-73,
+    // P2R-400).
+    if dir.join("migrations").is_dir() {
+        args.extend(["--migrations", "migrations"]);
+    }
     run(env!("CARGO_BIN_EXE_php2rust"), &args, dir)
 }
 

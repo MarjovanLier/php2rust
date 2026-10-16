@@ -67,7 +67,10 @@ impl Converter<'_> {
                 unit.statements.iter().any(|statement| {
                     matches!(
                         statement,
-                        Statement::Enum(_) | Statement::Class(_) | Statement::Function(_)
+                        Statement::Enum(_)
+                            | Statement::Class(_)
+                            | Statement::Interface(_)
+                            | Statement::Function(_)
                     )
                 })
             })
@@ -201,6 +204,7 @@ impl Converter<'_> {
                     Statement::Function(function) => (&function.name, true),
                     Statement::Enum(declaration) => (&declaration.name, false),
                     Statement::Class(declaration) => (&declaration.name, false),
+                    Statement::Interface(declaration) => (&declaration.name, false),
                     // A trait writes nothing, so only its PHP name can clash (P2R-280).
                     Statement::Trait(declaration) => {
                         by_key
@@ -306,6 +310,11 @@ impl Converter<'_> {
             {
                 text.push('\n');
                 text.push_str(crate::types::DATE_TIME);
+            }
+            // A call of a trait method needs the trait in scope (P2R-372).
+            for (_, name) in self.trait_uses.iter().filter(|(owner, _)| *owner == module) {
+                text.push('\n');
+                text.push_str(name);
             }
             let uses: Vec<Vec<String>> = used_items(&text, &others)
                 .into_iter()

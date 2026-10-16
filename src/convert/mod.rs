@@ -42,6 +42,7 @@ mod flow;
 mod foreach;
 mod functions;
 mod helpers;
+mod interfaces;
 mod lists;
 mod maps;
 mod matching;
@@ -156,6 +157,7 @@ fn analyse(
             match statement {
                 Statement::Enum(Enum { name, .. })
                 | Statement::Class(Class { name, .. })
+                | Statement::Interface(Interface { name, .. })
                 | Statement::Trait(Trait { name, .. }) => {
                     let full = names.resolve(name).unwrap_or(name.value);
                     if codebase.get_class_like(full).is_some() {
@@ -507,6 +509,11 @@ struct Converter<'c> {
     type_names: TypeNames,
     /// The readonly classes of the file in source order (P2R-130).
     classes: Vec<classes::ClassInfo>,
+    /// The input's own interfaces in source order, which become traits (P2R-370).
+    interfaces: Vec<interfaces::InterfaceInfo>,
+    /// The modules that call a method of a trait, with the trait's Rust name, which each
+    /// names in a `use` line (P2R-372).
+    trait_uses: BTreeSet<(usize, String)>,
     /// The class and method whose body is converting, by index (P2R-135).
     current_method: Option<(usize, usize)>,
     /// The class or enum whose body is converting, which `self` and `static` name
@@ -577,6 +584,8 @@ impl<'c> Converter<'c> {
             enums: Vec::new(),
             type_names: TypeNames::default(),
             classes: Vec::new(),
+            interfaces: Vec::new(),
+            trait_uses: BTreeSet::new(),
             current_method: None,
             current_class: None,
             current_function: None,
@@ -738,6 +747,8 @@ impl<'c> Converter<'c> {
         if self.library {
             self.duplicates(units, &module_of);
         }
+        // An enum or class reads the interfaces it implements as it registers (P2R-371).
+        self.register_interface_names(&program);
         self.register_enums(&program);
         self.register_class_names(&program);
         self.register(&program);
@@ -861,6 +872,17 @@ impl<'c> Converter<'c> {
                             }
                             // Its constants go into each class that uses it (P2R-280).
                             Statement::Trait(declaration) => self.check_trait(declaration),
+                            // PHP declares an interface without `extends` before any
+                            // statement runs (P2R-370).
+                            Statement::Interface(declaration) => {
+                                let key = self.name_key(&declaration.name, declaration.name.value);
+                                if let Some(index) = self.interfaces.iter().position(|i| i.key == key) {
+                                    let name = self.interfaces[index].rust_name.clone();
+                                    owners.insert(name, (module, crates::ItemKind::Type));
+                                    let item = self.interface_item(declaration, index);
+                                    items.push(item);
+                                }
+                            }
                             _ if self.library => self.refuse(
                                 other,
                                 "a directory converts to a library, which has no statements outside functions (P2R-175)",
@@ -887,7 +909,7 @@ impl<'c> Converter<'c> {
         self.finish_variables(&mut main);
         // Every enum method converts before any enum is written, because a method can use
         // the helpers of any enum (P2R-115, P2R-155).
-        let methods: Vec<Vec<Vec<String>>> = enum_slots
+        let methods: Vec<enums::EnumMethods> = enum_slots
             .iter()
             .map(|&(module, _, _, declaration)| {
                 self.current_module = module;

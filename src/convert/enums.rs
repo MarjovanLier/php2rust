@@ -98,11 +98,15 @@ impl Converter<'_> {
                 self.type_names.without_cases(&info.rust_name);
             }
             // Its methods and constants live with those of the classes (P2R-155).
-            self.classes.push(ClassInfo::new(
-                info.key.clone(),
-                info.rust_name.clone(),
-                true,
-            ));
+            let mut class = ClassInfo::new(info.key.clone(), info.rust_name.clone(), true);
+            if let Some(Some(Ok(interfaces))) = declaration
+                .implements
+                .as_ref()
+                .map(|implements| self.input_interfaces(&self.implemented(implements)))
+            {
+                class.interfaces = interfaces;
+            }
+            self.classes.push(class);
             self.enums.push(info);
         }
     }
@@ -152,10 +156,14 @@ impl Converter<'_> {
             self.refuse(attributes, "attributes are not supported (P2R-07)");
         }
         if let Some(implements) = &declaration.implements {
-            self.refuse(
-                implements,
-                "an enum that implements an interface is not supported (P2R-110)",
-            );
+            match self.input_interfaces(&self.implemented(implements)) {
+                Some(Ok(_)) => {}
+                Some(Err(message)) => self.refuse(implements, message),
+                None => self.refuse(
+                    implements,
+                    "an enum that implements an interface is not supported (P2R-110)",
+                ),
+            }
         }
         let backing = match &declaration.backing_type_hint {
             None => None,
@@ -513,13 +521,17 @@ impl Converter<'_> {
     }
 
     /// The lines of the methods the enum `declaration` declares, in source order, each
-    /// converted as a method of its class-like entry (P2R-155).
-    pub(super) fn enum_methods(&mut self, declaration: &Enum<'_>) -> Vec<Vec<String>> {
+    /// converted as a method of its class-like entry (P2R-155): those of its own `impl`
+    /// block, and those of the trait of each interface it implements (P2R-371).
+    pub(super) fn enum_methods(&mut self, declaration: &Enum<'_>) -> EnumMethods {
         let key = self.name_key(&declaration.name, declaration.name.value);
         let Some(class) = self.classes.iter().position(|c| c.key == key) else {
-            return Vec::new();
+            return (Vec::new(), Vec::new());
         };
+        self.check_missing(&declaration.name, &declaration.members, class);
         let mut methods = Vec::new();
+        let mut traits: Vec<Vec<Vec<String>>> =
+            vec![Vec::new(); self.classes[class].interfaces.len()];
         for member in declaration.members.iter() {
             let ClassLikeMember::Method(method) = member else {
                 continue;
@@ -527,15 +539,34 @@ impl Converter<'_> {
             let Some(at) = self.method_index(class, method.name.value) else {
                 continue;
             };
-            methods.extend(self.method(method, class, at));
+            let slot = self.trait_slot(class, at);
+            if let Some(interface) = self.trait_of(class, at) {
+                self.check_trait_method(method, class, at, interface);
+            }
+            if let Some(lines) = self.method(method, class, at) {
+                match slot {
+                    Some(slot) => traits[slot].push(lines),
+                    None => methods.push(lines),
+                }
+            }
         }
-        methods
+        (methods, traits)
+    }
+
+    /// The keys of the interfaces an `implements` list names (P2R-371).
+    pub(super) fn implemented(&self, implements: &Implements<'_>) -> Vec<Vec<u8>> {
+        implements
+            .types
+            .iter()
+            .map(|identifier| self.identifier_key(identifier))
+            .collect()
     }
 
     /// The Rust lines of the enum at `index`: the enum, then one `impl` block with its
     /// constants, the helpers the file uses and its `methods`, written once every use is
     /// known (P2R-110, P2R-115, P2R-157).
-    pub(super) fn enum_item(&mut self, index: usize, methods: Vec<Vec<String>>) -> Vec<String> {
+    pub(super) fn enum_item(&mut self, index: usize, methods: EnumMethods) -> Vec<String> {
+        let (methods, traits) = methods;
         let info = &self.enums[index];
         let open = format!("pub enum {} {{", info.rust_name);
         let mut lines = vec!["#[derive(Clone, Copy, Debug, PartialEq, Eq)]".to_owned()];
@@ -556,7 +587,12 @@ impl Converter<'_> {
         let class = self.classes.iter().position(|c| c.key == key);
         let constants = class.map(|c| self.constant_lines(c)).unwrap_or_default();
         let functions: Vec<Vec<String>> = helpers.into_iter().chain(methods).collect();
+        // The trait impl blocks follow its own `impl` block (P2R-371).
+        let impls = class
+            .map(|c| self.trait_impls(c, traits))
+            .unwrap_or_default();
         if constants.is_empty() && functions.is_empty() {
+            lines.extend(impls);
             return lines;
         }
         lines.push(String::new());
@@ -574,9 +610,14 @@ impl Converter<'_> {
             lines.extend(function);
         }
         lines.push("}".to_owned());
+        lines.extend(impls);
         lines
     }
 }
+
+/// The method lines of an enum: those of its own `impl` block, and those of each trait it
+/// implements, in the order of its `implements` list (P2R-371).
+pub(super) type EnumMethods = (Vec<Vec<String>>, Vec<Vec<Vec<String>>>);
 
 /// The helpers the file uses, in the order `name`, `value`, `from`, `try_from`, `cases`,
 /// each as its lines (P2R-115).

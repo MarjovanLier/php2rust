@@ -35,6 +35,9 @@ pub struct TypeNames {
     /// True when an included file declares Spatie's `Optional` with the shape of
     /// laravel-data 4.18 (P2R-360).
     pub optional: bool,
+    /// The Rust names of the traits of the input's interfaces, which no shape or union may
+    /// take (P2R-370).
+    pub traits: HashSet<String>,
 }
 
 impl TypeNames {
@@ -51,10 +54,11 @@ impl TypeNames {
     /// Gathers the shape `fields` under `name`; false when another shape, enum or class
     /// has that name (P2R-200, P2R-335).
     pub fn add_shape(&self, name: &str, fields: Vec<ShapeField>) -> bool {
-        if self
-            .names
-            .values()
-            .any(|ty| matches!(ty, RustType::Enum(n) | RustType::Class(n) if n == name))
+        if self.traits.contains(name)
+            || self
+                .names
+                .values()
+                .any(|ty| matches!(ty, RustType::Enum(n) | RustType::Class(n) if n == name))
         {
             return false;
         }
@@ -408,12 +412,13 @@ pub fn declared_type(union: &TUnion, enums: &TypeNames) -> Result<RustType, Stri
     }
     let rust_name = members.iter().map(variant).collect::<Vec<_>>().join("Or");
     if enums.shapes.borrow().contains_key(&rust_name)
+        || enums.traits.contains(&rust_name)
         || enums
             .values()
             .any(|ty| matches!(ty, RustType::Enum(n) | RustType::Class(n) if *n == rust_name))
     {
         return Err(format!(
-            "{rust_name}, the Rust name of this union, is the name of an enum, class or shape (P2R-230)"
+            "{rust_name}, the Rust name of this union, is the name of an enum, class, trait or shape (P2R-230)"
         ));
     }
     let mut unions = enums.unions.borrow_mut();

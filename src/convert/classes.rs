@@ -44,6 +44,8 @@ pub(super) struct ClassInfo {
     /// The template arguments K and V of `ArrayAccess`, for a class that implements it
     /// (P2R-220).
     pub(super) array_access: Option<(TUnion, TUnion)>,
+    /// The input's own interfaces it implements, in the order of `implements` (P2R-371).
+    pub(super) interfaces: Vec<usize>,
     pub(super) constants: Vec<ConstantInfo>,
     /// The PHP names of the constants it declares that were refused, whose reads stop
     /// without a second problem.
@@ -63,6 +65,7 @@ impl ClassInfo {
             methods: Vec::new(),
             is_enum,
             array_access: None,
+            interfaces: Vec::new(),
             constants: Vec::new(),
             refused_constants: Vec::new(),
         }
@@ -80,7 +83,7 @@ impl ClassInfo {
 
 pub(super) struct MethodInfo {
     /// The lowercase PHP name: PHP method names ignore letter case (P2R-131).
-    key: Vec<u8>,
+    pub(super) key: Vec<u8>,
     /// The parameters without `$this`.
     pub(super) signature: Signature,
     /// `Mut` for a method that changes its object, `&mut self` (P2R-143).
@@ -168,6 +171,7 @@ impl Converter<'_> {
             all.extend(members.iter());
             self.constants(&all, index);
         }
+        self.interface_members(program, &taken);
         for index in 0..self.classes.len() {
             self.check_containment(program, index);
         }
@@ -668,6 +672,19 @@ impl Converter<'_> {
             .iter()
             .map(|identifier| self.identifier_key(identifier))
             .collect();
+        match self.input_interfaces(&keys) {
+            Some(Ok(interfaces)) => {
+                if let Some(index) = self.class_index(declaration) {
+                    self.classes[index].interfaces = interfaces;
+                }
+                return;
+            }
+            Some(Err(message)) => {
+                self.refuse(implements, message);
+                return;
+            }
+            None => {}
+        }
         if keys != [b"arrayaccess".to_vec()] {
             self.refuse(
                 implements,
@@ -1119,12 +1136,26 @@ impl Converter<'_> {
         index: usize,
         taken: &HashSet<String>,
     ) {
-        let codebase = self.codebase;
         let class = self.name_key(name, name.value);
         let is_enum = self.classes[index].is_enum;
+        let methods = self.method_infos(&class, members, Some(index), is_enum, taken);
+        self.classes[index].methods = methods;
+    }
+
+    /// The signatures of the methods in `members` of the class-like whose key is `class`:
+    /// a class or enum entry `owner`, or an interface for `None` (P2R-135, P2R-370).
+    pub(super) fn method_infos(
+        &mut self,
+        class: &[u8],
+        members: &Sequence<'_, ClassLikeMember<'_>>,
+        owner: Option<usize>,
+        is_enum: bool,
+        taken: &HashSet<String>,
+    ) -> Vec<MethodInfo> {
+        let codebase = self.codebase;
         let mut methods: Vec<MethodInfo> = Vec::new();
         // A `self::Case` default names this class or enum (P2R-168).
-        let outer = self.current_class.replace(index);
+        let outer = std::mem::replace(&mut self.current_class, owner);
         for member in members.iter() {
             let ClassLikeMember::Method(method) = member else {
                 continue;
@@ -1171,7 +1202,7 @@ impl Converter<'_> {
                 );
                 continue;
             }
-            let Some(metadata) = codebase.get_method(&class, method.name.value) else {
+            let Some(metadata) = codebase.get_method(class, method.name.value) else {
                 self.refuse(
                     &method.name,
                     "Mago has no signature for this method (P2R-23)",
@@ -1210,9 +1241,12 @@ impl Converter<'_> {
                 }
                 let declared = meta.get_type_metadata().map(|t| &t.type_union);
                 let mixed = declared.is_some_and(TUnion::is_mixed);
-                let declared = self
-                    .templated(index, method, Some(parameters.len()), declared)
-                    .cloned();
+                let declared = match owner {
+                    Some(index) => self
+                        .templated(index, method, Some(parameters.len()), declared)
+                        .cloned(),
+                    None => declared.cloned(),
+                };
                 // K and V are never mixed, so a mixed type that is gone was replaced.
                 if mixed && !declared.as_ref().is_some_and(TUnion::is_mixed) {
                     templated.push(parameters.len());
@@ -1232,7 +1266,10 @@ impl Converter<'_> {
                 .return_type_metadata
                 .as_ref()
                 .map(|t| &t.type_union);
-            let declared = self.templated(index, method, None, declared).cloned();
+            let declared = match owner {
+                Some(index) => self.templated(index, method, None, declared).cloned(),
+                None => declared.cloned(),
+            };
             let returns = self.return_type(
                 method.return_type_hint.as_ref(),
                 &method.name,
@@ -1257,7 +1294,7 @@ impl Converter<'_> {
             }
         }
         self.current_class = outer;
-        self.classes[index].methods = methods;
+        methods
     }
 
     /// The constants of the class or enum at `index`, from its `members`, which start with
@@ -1725,6 +1762,10 @@ impl Converter<'_> {
         };
         lines.push(emit(2, literal));
         lines.push("    }".to_owned());
+        // A method an interface declares goes into that interface's trait (P2R-371).
+        self.check_missing(&declaration.name, &declaration.members, index);
+        let mut traits: Vec<Vec<Vec<String>>> =
+            vec![Vec::new(); self.classes[index].interfaces.len()];
         for member in declaration.members.iter() {
             let ClassLikeMember::Method(method) = member else {
                 continue;
@@ -1732,12 +1773,22 @@ impl Converter<'_> {
             let Some(at) = self.method_index(index, method.name.value) else {
                 continue;
             };
+            let slot = self.trait_slot(index, at);
+            if let Some(interface) = self.trait_of(index, at) {
+                self.check_trait_method(method, index, at, interface);
+            }
             if let Some(method_lines) = self.method(method, index, at) {
-                lines.push(String::new());
-                lines.extend(method_lines);
+                match slot {
+                    Some(slot) => traits[slot].push(method_lines),
+                    None => {
+                        lines.push(String::new());
+                        lines.extend(method_lines);
+                    }
+                }
             }
         }
         lines.push("}".to_owned());
+        lines.extend(self.trait_impls(index, traits));
         lines
     }
 
@@ -1826,8 +1877,14 @@ impl Converter<'_> {
         self.current_method = outer_method;
         self.current_class = outer_class;
         self.self_calls = outer_calls;
+        // A method of a trait impl takes the trait's visibility (P2R-371).
+        let public = if self.trait_of(class, at).is_some() {
+            ""
+        } else {
+            "pub "
+        };
         let open = format!(
-            "pub fn {}({}){} {{",
+            "{public}fn {}({}){} {{",
             signature.rust_name,
             parameters.join(", "),
             signature.returns_text()
@@ -2012,6 +2069,11 @@ impl Converter<'_> {
         // rustc counts a call of the method through any object of its class (P2R-50).
         if self.current_method == Some((index, at)) {
             self.self_calls.push(call.span());
+        }
+        // A trait method is called only where its trait is in scope (P2R-372).
+        if let Some(interface) = self.trait_of(index, at) {
+            let name = self.interfaces[interface].rust_name.clone();
+            self.trait_uses.insert((self.current_module, name));
         }
         let call = RExpr::MethodCall(Box::new(object), signature.rust_name, arguments);
         Some((

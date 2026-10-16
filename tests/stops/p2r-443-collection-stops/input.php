@@ -216,9 +216,193 @@ function counters(\Illuminate\Support\Collection $list): int
 interface Counts
 {
     /**
-     * @param \Illuminate\Support\Collection<int, Counter> $counters
+     * @param \Illuminate\Support\Collection<int, Counter> $counterList
      */
-    public function counted(\Illuminate\Support\Collection $counters): int;
+    public function counted(\Illuminate\Support\Collection $counterList): int;
+}
+
+// A union element type and a collection inside a map (P2R-440).
+/**
+ * @param \Illuminate\Support\Collection<int, int|string> $values
+ */
+function unionItems(\Illuminate\Support\Collection $values): int
+{
+    return 0;
+}
+
+/**
+ * @param array<string, \Illuminate\Support\Collection<int, string>> $groups
+ */
+function mapped(array $groups): int
+{
+    return 0;
+}
+
+// A foreach by reference, a condition, a negation and a ?: on a collection (P2R-443).
+/**
+ * @param Collection<int, Code> $codes
+ */
+function byReference(Collection $codes): int
+{
+    foreach ($codes as &$code) {
+        $code = null;
+    }
+    return 0;
+}
+
+/**
+ * @param Collection<int, Code> $codes
+ */
+function condition(Collection $codes): int
+{
+    if ($codes) {
+        return 1;
+    }
+    return 0;
+}
+
+/**
+ * @param Collection<int, Code> $codes
+ */
+function negated(Collection $codes): bool
+{
+    return !$codes;
+}
+
+/**
+ * @param Collection<int, Code> $codes
+ */
+function chosen(Collection $codes): int
+{
+    return $codes ? 1 : 0;
+}
+
+// is_scalar(), echo and a property read of a collection (P2R-443).
+/**
+ * @param Collection<int, Code> $codes
+ */
+function scalar(Collection $codes): bool
+{
+    return is_scalar($codes);
+}
+
+/**
+ * @param Collection<int, Code> $codes
+ */
+function printed(Collection $codes): void
+{
+    echo $codes;
+}
+
+/**
+ * @param Collection<int, Code> $codes
+ */
+function proxied(Collection $codes): int
+{
+    return (int) $codes->sum;
+}
+
+// Laravel's ArrayAccess on a collection (P2R-443).
+/**
+ * @param Collection<int, Code> $codes
+ */
+function indexed(Collection $codes): Code
+{
+    return $codes[0];
+}
+
+/**
+ * @param Collection<int, Code> $codes
+ */
+function appended(Collection $codes, Code $code): int
+{
+    $codes[] = $code;
+    return 1;
+}
+
+// first() with a default or a named argument, and isNotEmpty() and first() as statements.
+/**
+ * @param Collection<int, Code> $codes
+ */
+function firstOr(Collection $codes, Code $fallback): Code
+{
+    return $codes->first(null, $fallback);
+}
+
+/**
+ * @param Collection<int, Code> $codes
+ */
+function firstNamed(Collection $codes): ?Code
+{
+    return $codes->first(callback: null);
+}
+
+/**
+ * @param Collection<int, Code> $codes
+ */
+function unusedNot(Collection $codes): int
+{
+    $codes->isNotEmpty();
+    return 0;
+}
+
+/**
+ * @param Collection<int, Code> $codes
+ */
+function unusedFirst(Collection $codes): int
+{
+    $codes->first();
+    return 0;
+}
+
+// collect() and a static method of a collection class (P2R-443).
+/**
+ * @return \Illuminate\Support\Collection<int, string>
+ */
+function collected(): \Illuminate\Support\Collection
+{
+    return \Illuminate\Support\collect(['a']);
+}
+
+/**
+ * @return \Illuminate\Support\Collection<int, string>
+ */
+function madeStatic(): \Illuminate\Support\Collection
+{
+    return \Illuminate\Support\Collection::make(['a']);
+}
+
+// A where with an operator before get(), and get() and all() on a model whose table a
+// migration seeds, which stop with the reason of P2R-410 (P2R-441).
+/**
+ * @return Collection<int, Code>
+ */
+function operator(): Collection
+{
+    return Code::query()->where('name', '=', 'a')->get();
+}
+
+final class Seed extends Model
+{
+    protected $fillable = ['label'];
+
+    public $timestamps = false;
+}
+
+/**
+ * @return Collection<int, Seed>
+ */
+function seededAll(): Collection
+{
+    return Seed::all();
+}
+
+/**
+ * @return Collection<int, Seed>
+ */
+function seededGet(): Collection
+{
+    return Seed::query()->get();
 }
 
 // A collection made other than by the store (P2R-443).

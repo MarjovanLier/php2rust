@@ -10,15 +10,63 @@ namespace Illuminate\Support;
 /**
  * @template TKey of array-key
  * @template TValue
- * @implements \IteratorAggregate<TKey, TValue>
+ * @param array<TKey, TValue> $items
+ * @return Collection<TKey, TValue>
  */
-class Collection implements \Countable, \IteratorAggregate
+function collect(array $items = []): Collection
+{
+    return new Collection($items);
+}
+
+/**
+ * @template TKey of array-key
+ * @template TValue
+ * @implements \IteratorAggregate<TKey, TValue>
+ * @implements \ArrayAccess<TKey, TValue>
+ */
+class Collection implements \Countable, \IteratorAggregate, \ArrayAccess
 {
     /**
      * @param array<TKey, TValue> $items
      */
     public function __construct(protected array $items = [])
     {
+    }
+
+    /**
+     * @param array<TKey, TValue> $items
+     * @return static
+     */
+    public static function make(array $items = []): static
+    {
+        return new static($items);
+    }
+
+    public function offsetExists(mixed $offset): bool
+    {
+        return isset($this->items[$offset]);
+    }
+
+    /**
+     * @return TValue
+     */
+    public function offsetGet(mixed $offset): mixed
+    {
+        return $this->items[$offset];
+    }
+
+    public function offsetSet(mixed $offset, mixed $value): void
+    {
+        if ($offset === null) {
+            $this->items[] = $value;
+        } else {
+            $this->items[$offset] = $value;
+        }
+    }
+
+    public function offsetUnset(mixed $offset): void
+    {
+        unset($this->items[$offset]);
     }
 
     public function count(): int
@@ -31,18 +79,25 @@ class Collection implements \Countable, \IteratorAggregate
         return $this->items === [];
     }
 
+    public function isNotEmpty(): bool
+    {
+        return $this->items !== [];
+    }
+
     /**
+     * @template TDefault
      * @param (callable(TValue): bool)|null $callback
-     * @return TValue|null
+     * @param TDefault $default
+     * @return TValue|TDefault
      */
-    public function first(?callable $callback = null): mixed
+    public function first(?callable $callback = null, mixed $default = null): mixed
     {
         foreach ($this->items as $item) {
             if ($callback === null || $callback($item)) {
                 return $item;
             }
         }
-        return null;
+        return $default;
     }
 
     /**

@@ -177,7 +177,8 @@ method, a set visibility wider than its property's visibility and
 parameter named like a superglobal anywhere, not only in a hook. It
 also changes P2R-135, P2R-140 and P2R-380. Section 41 (Eloquent models
 from migrations) was written on 16 Oct 2026; it changes P2R-07, P2R-73,
-P2R-75, P2R-82, the checklist and the roadmap of section 10. Its spec
+P2R-75, P2R-82, P2R-130, P2R-350, the checklist and the roadmap of
+section 10. Its spec
 reviewers found that the app's migrations seed rows with `DB::table`,
 call `uuid()` without a name and write `: void` on their closures, that
 an accessor, a `casts()` method or an observer changes what an attribute
@@ -997,7 +998,8 @@ Sections 3 to 9 apply to nullable values unless this section says otherwise.
   stops.
   These stop the conversion:
   - `extends` (other than the `Spatie\LaravelData\Data` of P2R-350; an
-    exception class of P2R-390 follows section 40 instead),
+    exception class of P2R-390 follows section 40 and a model of P2R-401
+    follows section 41 instead),
     `implements` (other than the `ArrayAccess` of P2R-220 and the
     interfaces of P2R-371),
     `abstract`, a trait other than one of constants (P2R-280), a property that is not
@@ -3390,7 +3392,8 @@ parent to a later section.
   P2R-130. A list of parents stops, because PHP rejects it and Mago's
   parser accepts it. Only that direct parent
   qualifies; a class that extends such a class, or extends anything
-  else, still stops (P2R-130), and so does a `readonly` one, which PHP
+  else other than the parents of P2R-390 and P2R-401, still stops
+  (P2R-130), and so does a `readonly` one, which PHP
   rejects because `Data` is not readonly. Everything the parent brings
   stops: a call of a method that the class does not declare itself
   (`$dto->toArray()` by P2R-135, `Dto::from()` by P2R-153), a read of
@@ -3824,36 +3827,46 @@ by itself, because the files that read a model also create or query one,
 and its gain is typed attribute reads.
 
 - **P2R-400** The option `--migrations <DIR>`, given at most once, MUST
-  read as migrations the regular files directly in the directory whose
-  names match `*_*.php`, as Laravel does, in byte order of the names
+  read as migrations the regular files and the symlinks to one directly
+  in the directory whose
+  names match `*_*.php`, as Laravel does (a name that starts with `.`
+  does not match, as in PHP's `glob()`), in byte order of the names
   without `.php`. Migrations never enter Mago: the tool parses them and
   resolves their names only, and prints no Mago finding about them. A
   migration's last top-level statement is `return new class extends
   Migration { .. };`, where `Migration` resolves to
   `\Illuminate\Database\Migrations\Migration`, and its class has a public
   method `up()` without parameters, with or without the return type
-  `void`, and no method `shouldRun()`, which Laravel asks before it runs
-  `up()`; its other members are not read (a `$connection` naming another
+  `void`, no method `shouldRun()`, which Laravel asks before it runs
+  `up()`, and no two methods or properties of one name, which PHP
+  rejects; its other members are not read (a `$connection` naming another
   database included), and `down()` is not read. `Schema` stands for
   `\Illuminate\Support\Facades\Schema` and `DB` for
   `\Illuminate\Support\Facades\DB`, each also by Laravel's global alias
   (`\DB`). A migration changes rows only, and is skipped, when every call
-  in its class, `down()` aside, is a chain of calls on `DB::table(..)`,
-  `DB::raw(..)`, `now()`, `date(..)`, `count(..)`, `now()` of Carbon
-  (`Carbon\Carbon`, `Carbon\CarbonImmutable` or
-  `Illuminate\Support\Carbon`) or a call on `$this` of a method the
-  class declares, and it holds no `new`, partial application, `include`,
-  `require`, `eval` or `exit`. The statements of each other `up()` change a set
+  in its class, `down()` aside, is one of these: `DB::table(..)`,
+  `DB::raw(..)`, `now()` or `now()` of Carbon (`Carbon\Carbon`,
+  `Carbon\CarbonImmutable` or `Illuminate\Support\Carbon`), or a chain
+  of calls on one of them that does not call `getConnection()`, which
+  runs any statement (`now()->toDateTimeString()`); `date(..)` or
+  `count(..)`; or a call on `$this` of a method the class declares other
+  than `down()`. It holds no `new`, partial
+  application, `include`, `require`, `eval` or `exit`. A macro that the
+  app adds to the query builder is a call of the chain too, which the
+  tool cannot see into (review concern). The statements of each other `up()` change a set
   of tables, file after file, in order:
   - `Schema::create('<t>', <closure>);` creates table `t`, and
     `Schema::table('<t>', <closure>);` changes it.
   - `if (! Schema::hasTable('<t>')) { Schema::create('<t>', <closure>); }`
     creates `t` when no table `t` exists, known or unknown, and otherwise
-    does nothing; after a form that made tables unknown, a table that
-    the tool has not seen may exist, so the guard makes `t` unknown.
-  - A statement that is a chain on `DB::table('<t>')`, whatever its
-    arguments hold (`DB::raw(..)` too), changes rows, not columns, and is
-    skipped.
+    does nothing; after a statement or file that made every table
+    unknown (the last item below), a table that the tool has not seen
+    may exist, so the guard makes `t` unknown.
+  - A statement that is a chain on `DB::table('<t>')` that does not call
+    `getConnection()`, and whose arguments call only the forms above
+    that change rows (`DB::raw(..)`, `now()`) and nothing on `$this`,
+    changes rows, not columns, and is skipped; a `chunk(..)` callback
+    that calls `Schema` makes it another statement.
   - Any other statement (`DB::statement(..)`, `DB::unprepared(..)`, a
     call of a helper method) makes every table that exists at that point
     unknown; a table created after it is known. A file that cannot be
@@ -3892,7 +3905,7 @@ and its gain is typed attribute reads.
   (the column may hold null), `nullable(false)` (it may not),
   `default(..)`, `unsigned()`, `constrained(..)`, `cascadeOnDelete()`,
   `nullOnDelete()`, `restrictOnDelete()`, `cascadeOnUpdate()`,
-  `onDelete(..)`, `onUpdate(..)`, `unique()`, `index()`, `after(..)`,
+  `onDelete(..)`, `onUpdate(..)`, `unique()`, `index()`, `primary()`, `after(..)`,
   `comment(..)`, `useCurrent()` and `useCurrentOnUpdate()` keep the
   column's type. After `foreignId` or `foreignIdFor`, a modifier after
   `constrained(..)` belongs to the foreign key, as in Laravel, so
@@ -3908,17 +3921,20 @@ and its gain is typed attribute reads.
   columns of a table keep the order in which they were first declared;
   `after()` does not move them. Any other form makes its table unknown:
   another method or modifier, a column name that is not a string
-  literal, a column declared again without `change()`, a `change()` or
+  literal, a named or unpacked argument in the chain (`id(column:
+  'code_id')`), a column declared again without `change()`, a `change()` or
   drop of a column the table does not have, `Schema::create` of a table
   that exists, and `Schema::table` of one that does not. None of these is
   a problem of its own: a model of an unknown table stops (P2R-401), and
   its message names the form with the migration's path, the directory as
   given on the command line joined to the file name by one `/` (as
   P2R-171 forms an input path), and its line. A
-  directory that does not exist or cannot be listed exits 2 with its
+  path that does not exist, is not a directory or cannot be listed exits 2 with its
   reason (P2R-04), as P2R-340 does for an include path, and so does a
   second `--migrations`. The option does not take its files out of a
   directory input, so a migrations directory belongs outside the input.
+  The tool does not read a schema dump (`database/schema`) or the
+  migrations of a package, which Laravel also runs (review concern).
 - **P2R-401** A class declared at the top level is a model when its
   `extends` names one class that PHP resolves to
   `\Illuminate\Database\Eloquent\Model` and a file that `--include` reads
@@ -3931,9 +3947,9 @@ and its gain is typed attribute reads.
   before each capital letter that follows another character, then lower
   case: `VATRate` gives `v_a_t_rate`) with the last word in the plural:
   `y` after a consonant becomes `ies`, a word ending in `s`, `x`, `z`,
-  `ch` or `sh` gains `es`, and any other gains `s`. The tool knows only
-  these rules. Laravel's pluralizer has more (`person` gives `people`,
-  `software` stays, `quiz` gives `quizzes`), so a model whose table
+  `ch` or `sh` gains `es`, and any other gains `s`. Laravel's pluralizer
+  differs on some words (`person` gives `people`, `software` and `data`
+  stay, `waltz` gives `waltzs`), so a model whose table
   Laravel names otherwise finds no table of this rule's name and stops,
   unless `$table` names its table; it converts wrongly only when the
   migrations create both names, and Laravel then reads the other table.
@@ -3957,15 +3973,19 @@ and its gain is typed attribute reads.
   `SoftDeletes` (resolving to
   `\Illuminate\Database\Eloquent\Factories\HasFactory` and
   `\Illuminate\Database\Eloquent\SoftDeletes`), and `public $timestamps
-  = true;` or `false`, which changes only date columns; these are left
-  out. A method stops the conversion and still leaves the struct to the
-  code that reads the model, with or without attributes on it (such as
-  `#[Override]`), because it does not change what an attribute read
-  gives, unless it is an accessor or mutator (a name `get<Name>Attribute`
-  or `set<Name>Attribute`), has a declared return type that PHP resolves
-  to `\Illuminate\Database\Eloquent\Casts\Attribute`, or overrides a
-  method of `Model` or of a trait it uses at any depth (`booted`,
-  `getAttribute`), other than `getRouteKeyName`. Everything else stops the
+  = true;` or `false`, which decides whether `created_at` and
+  `updated_at` read as dates (P2R-402); these are left out. A method stops the conversion and still leaves the struct to the
+  code that reads the model, with or without `#[\Override]` on it,
+  because it does not change what an attribute read gives, unless it is
+  an accessor or mutator (a name `get<Name>Attribute` or
+  `set<Name>Attribute`), has a declared return type that names
+  `\Illuminate\Database\Eloquent\Casts\Attribute`, also inside `?` or a
+  union, has a name that starts with `boot` or `initialize` (Laravel runs
+  boot<Trait> and initialize<Trait> when it boots or builds the model),
+  has any other attribute (such as `#[Boot]` or `#[Initialize]`, which
+  Laravel runs the same way), or overrides a method of `Model` or of a
+  trait it uses at any depth (`booted`, `getAttribute`), other than
+  `getRouteKeyName`. Everything else stops the
   model and leaves it without a struct, because PHP may read an attribute
   through it differently: such a method, a constant, another property or
   trait; an attribute on the class (P2R-07), such as `#[ObservedBy]`,
@@ -3976,7 +3996,13 @@ and its gain is typed attribute reads.
   takes the struct away, or at the model's name for a reason of its
   table, whose message names the form with its migration's path and
   line, or that no migration creates the table; each read of a model
-  without a struct stops by P2R-404. A Mago finding in the model's
+  without a struct stops by P2R-404. A modifier written twice
+  (P2R-130), a second property of one name and a second method of one
+  name in any letter case, which PHP rejects and Mago does not report,
+  stop the conversion. These checks see the `Model` that `--include`
+  gives, as P2R-350's see `Data`: a stand-in that declares fewer
+  properties or methods than the framework hides a column named like
+  one of the others and an override of it. A Mago finding in the model's
   declaration, its name included, stops the conversion by P2R-11 and
   leaves the struct (`@use HasFactory<XFactory>` needs `--include` of
   the factory classes).
@@ -3986,7 +4012,14 @@ and its gain is typed attribute reads.
   migrations (a date or a boolean column too), keeping its nullability,
   because Laravel applies a cast before its date handling. Every
   other cast (a date cast, `'encrypted'`, `'decimal:2'`, a class such as
-  an enum or a custom cast) leaves the column out of the struct.
+  an enum or a custom cast) leaves the column out of the struct. A
+  column `id` without a cast of its own reads as cast `'int'`, because
+  Laravel casts the key of an incrementing model to its key type, which
+  is `int` for every model that keeps a struct (`$table->uuid('id')`
+  gives `i64`). Without a cast of its own, `created_at` and `updated_at`
+  (unless `$timestamps` is `false`) and, in a model that uses
+  `SoftDeletes`, `deleted_at` read as dates whatever the column method
+  (`unsignedInteger('created_at')`), so they are left out.
 - **P2R-403** Before Mago analyses the input, the tool MUST tell Mago each
   field of a model as a property that PHP reads through `__get`, as a
   `@property` tag in the model's docblock would, of the PHP type of the
@@ -4032,6 +4065,9 @@ and its gain is typed attribute reads.
   that targets a `switch`, `goto` into a loop, `[] = [1]`, an
   assignment to `$GLOBALS`, a static variable
   declared twice or an attribute that PHP
-  rejects there, because the tool does not read that body) are the only
+  rejects there, because the tool does not read that body, and in P2R-400
+  a macro of the query builder in a chain on `DB::table(..)`, whose body
+  the tool does not read, and a schema dump or package migrations that
+  create tables the tool does not see) are the only
   parts not checked mechanically.
 - [x] No speculative features: later milestones carry no requirements yet.

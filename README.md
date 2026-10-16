@@ -48,8 +48,8 @@ an Eloquent model (a class that extends `Illuminate\Database\Eloquent\Model`, re
 `vendor/` with `--include`) becomes a struct of its columns and `$model->column` a field
 read. Only columns of a known Rust type become fields (ints, strings, and casts to
 `integer`, `string` or `boolean`); dates, decimals, uncast booleans and other casts are
-left out. A model with an accessor, a `casts()` cast the struct cannot hold, an observer
-or another member that may change what a read gives gets no struct. Creating, querying
+left out. A model with an accessor, a `casts()` method that is not a literal map, an
+observer or another member that may change what a read gives gets no struct. Creating, querying
 and saving models still stop the conversion. Migrations are never converted.
 
 With a directory, php2rust analyses all its `.php` files together, so a class of one file
@@ -75,7 +75,7 @@ its callback takes the matches as an `IndexMap`.
 |---|---|
 | 0 | Converted. |
 | 1 | The file holds PHP that php2rust does not convert yet. Each problem is printed as `path:line:column: message`. Nothing is written. |
-| 2 | The arguments are wrong, the file cannot be read, is not UTF-8 or is not valid PHP, rustfmt cannot be run, fails on the output or changes its own layout when run again, or the output cannot be written. For a directory: no `-o`, an `-o` directory that exists or sits inside the input, or no `.php` file. An `--include` path that does not exist, is neither a file nor a directory, or holds a directory that cannot be listed. A `--migrations` directory that does not exist or cannot be listed, or a second `--migrations`. Nothing is written. |
+| 2 | The arguments are wrong, the file cannot be read, is not UTF-8 or is not valid PHP, rustfmt cannot be run, fails on the output or changes its own layout when run again, or the output cannot be written. For a directory: no `-o`, an `-o` directory that exists or sits inside the input, or no `.php` file. An `--include` path that does not exist, is neither a file nor a directory, or holds a directory that cannot be listed. A `--migrations` path that does not exist, is not a directory or cannot be listed, or a second `--migrations`. Nothing is written. |
 
 The output compiles with no warnings under `rustc --edition 2024 -D warnings` (given the
 `indexmap` crate for map output and the `regex` crate for pattern output), and
@@ -613,7 +613,7 @@ php2rust refuses some valid PHP that version 1 converts in other forms:
 The tests need PHP 8.5 on `PATH` and the Rust toolchain pinned in
 `rust-toolchain.toml` (`rustup toolchain install` installs it). Each folder under
 `tests/cases`, `tests/stops` and `tests/errors` is one test, and `cargo test` also checks
-that each requirement from P2R-07 to P2R-49 and from P2R-100 to P2R-399 starts the name of
+that each requirement from P2R-07 to P2R-49 and from P2R-100 to P2R-409 starts the name of
 a case or stop folder.
 To rewrite every
 `expected.rs` and `expected.txt` from the current output:

@@ -3836,7 +3836,8 @@ and its gain is typed attribute reads.
   migration's last top-level statement is `return new class extends
   Migration { .. };`, with only `declare` and `use` statements and
   inline text (a byte order mark) before it, because Laravel runs any
-  other code when it requires the file;
+  other code when it requires the file, and inline text only in a file
+  without `declare`, which PHP refuses after such text;
   `Migration` resolves to
   `\Illuminate\Database\Migrations\Migration`, and its class has a public
   method `up()` without parameters, with or without the return type

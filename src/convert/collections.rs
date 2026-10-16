@@ -10,19 +10,20 @@ use crate::types::{self, COLLECTIONS, RustType};
 pub(super) const COLLECTION_USE: &str = "a collection converts only in a foreach without a key, in count(), and in the methods count(), isEmpty(), isNotEmpty() and first() without arguments (P2R-442, P2R-443)";
 
 impl Converter<'_> {
-    /// True when an included file, never the input, declares Laravel's
-    /// `Illuminate\Support\Collection`, and the Eloquent collection too when anything
-    /// declares it (P2R-340, P2R-440).
-    pub(super) fn included_collections(&self) -> bool {
-        let included = |name: &[u8]| {
-            self.codebase.get_class_like(name).map(|class| {
-                !self
-                    .files
-                    .iter()
-                    .any(|analysed| analysed.file == class.span.file_id)
+    /// The lowercase names of Laravel's collection classes that an included file, never
+    /// the input, declares (P2R-340, P2R-440).
+    pub(super) fn included_collections(&self) -> Vec<&'static [u8]> {
+        COLLECTIONS
+            .into_iter()
+            .filter(|name| {
+                self.codebase.get_class_like(name).is_some_and(|class| {
+                    !self
+                        .files
+                        .iter()
+                        .any(|analysed| analysed.file == class.span.file_id)
+                })
             })
-        };
-        included(COLLECTIONS[0]) == Some(true) && included(COLLECTIONS[1]) != Some(false)
+            .collect()
     }
 
     /// True when `call` is `isEmpty()`, `isNotEmpty()` or `first()` on a collection value,

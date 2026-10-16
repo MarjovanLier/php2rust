@@ -366,6 +366,28 @@ impl Converter<'_> {
                         }
                     }
                 }
+                // A method of an interface declares its types as a class method does
+                // (P2R-141, P2R-370).
+                Statement::Interface(declaration) => {
+                    let key = self.name_key(&declaration.name, declaration.name.value);
+                    let Some(info) = self.interfaces.iter().find(|i| i.key == key) else {
+                        continue;
+                    };
+                    for member in declaration.members.iter() {
+                        let ClassLikeMember::Method(method) = member else {
+                            continue;
+                        };
+                        let name = method.name.value.to_ascii_lowercase();
+                        if let Some(found_method) = info.methods.iter().find(|m| m.key == name) {
+                            self.nullable_in(
+                                &method.parameter_list,
+                                method.return_type_hint.as_ref(),
+                                &found_method.signature,
+                                &mut found,
+                            );
+                        }
+                    }
+                }
                 // An enum method follows the rules for functions (P2R-155).
                 Statement::Enum(declaration) => {
                     let key = self.name_key(&declaration.name, declaration.name.value);
@@ -2494,7 +2516,7 @@ const UNION_MEMBER: &str =
     "a property read or method call on a value of a union type is not supported (P2R-232)";
 
 /// The problem of a nullable or union type that holds a changing type (P2R-141, P2R-230).
-pub(super) const NULLABLE_CHANGING: &str = "a nullable, union or map type that holds objects whose class changes them is not supported (P2R-141, P2R-240)";
+pub(super) const NULLABLE_CHANGING: &str = "a nullable, union, map or collection type that holds objects whose class changes them is not supported (P2R-141, P2R-240, P2R-440)";
 
 /// The problem of a declared property without a type or a default (P2R-140).
 const NEEDS_DEFAULT: &str = "a declared property needs a type and a default value (P2R-140)";

@@ -36,8 +36,9 @@ pub struct TypeNames {
     /// True when an included file declares Spatie's `Optional` with the shape of
     /// laravel-data 4.18 (P2R-360).
     pub optional: bool,
-    /// True when an included file declares Laravel's collection classes (P2R-440).
-    pub collections: bool,
+    /// The lowercase names of Laravel's collection classes that an included file declares
+    /// (P2R-440).
+    pub collections: Vec<&'static [u8]>,
     /// The Rust names of the traits of the input's interfaces, which no shape or union may
     /// take (P2R-370).
     pub traits: HashSet<String>,
@@ -889,7 +890,7 @@ fn atomic_type(atomic: &TAtomic, enums: &TypeNames, declared: bool) -> Option<Ru
             match enums.get(&key) {
                 Some(ty) => Some(ty.clone()),
                 None if key == b"datetime" => Some(RustType::DateTime),
-                None if enums.collections && COLLECTIONS.contains(&key.as_slice()) => {
+                None if enums.collections.contains(&key.as_slice()) => {
                     collection_type(found, enums, declared)
                 }
                 None => None,

@@ -214,7 +214,8 @@ fn analyse(
         Default::default(),
     );
     let plugins = PluginRegistry::new();
-    let mut problems: Vec<Problem> = Vec::new();
+    // Each Mago finding with its code, which P2R-380 reads.
+    let mut found: Vec<(Problem, Option<&str>)> = Vec::new();
     let mut analysed: Vec<Analysed<'_>> = Vec::new();
     for (((file, program), names), path) in files.iter().zip(&programs).zip(&resolved).zip(&shown) {
         let analyzer = Analyzer::new(
@@ -235,14 +236,20 @@ fn analyse(
         // the tool reports duplicates itself (P2R-173).
         // A finding whose span lies in an included file, such as a parent class, has no
         // input line to print (P2R-340).
-        problems.extend(
+        found.extend(
             result
                 .issues
                 .iter()
                 .filter(|issue| reported(issue))
                 .filter(|issue| !library || issue.code.as_deref() != Some("duplicate-definition"))
-                .filter_map(mago_problem)
-                .filter(|problem| !included_ids.contains(&problem.file)),
+                .filter_map(|issue| {
+                    let code = LEFT_OUT_CODES
+                        .iter()
+                        .find(|code| issue.code.as_deref() == Some(**code))
+                        .copied();
+                    mago_problem(issue).map(|problem| (problem, code))
+                })
+                .filter(|(problem, _)| !included_ids.contains(&problem.file)),
         );
         analysed.push(Analysed {
             file: file.id,
@@ -265,6 +272,18 @@ fn analyse(
     converter.built_in_functions = built_in_functions;
     converter.library = library;
     let written = converter.program(&units);
+    let mut problems: Vec<Problem> = found
+        .into_iter()
+        .filter(|(problem, code)| {
+            code.is_none()
+                || !converter.left_out.iter().any(|span| {
+                    span.file_id == problem.file
+                        && span.start.offset <= problem.start
+                        && problem.end <= span.end.offset
+                })
+        })
+        .map(|(problem, _)| problem)
+        .collect();
     problems.append(&mut converter.problems);
     if problems.is_empty() {
         Ok(written)
@@ -303,6 +322,16 @@ fn flattened<'a>(program: &Program<'a>) -> Vec<Statement<'a>> {
 fn short_name(key: &[u8]) -> &[u8] {
     key.rsplit(|byte| *byte == b'\\').next().unwrap_or(key)
 }
+
+/// The Mago findings that a left-out hook drops: a name or type that no file declares, which
+/// PHP checks only when the line runs, and a signature that does not match the `@method`
+/// tag of `Data`, which PHP never checks (P2R-380).
+const LEFT_OUT_CODES: [&str; 4] = [
+    "non-existent-class",
+    "non-existent-method",
+    "mixed-method-access",
+    "incompatible-parameter-count",
+];
 
 /// Mago findings that refuse the conversion (P2R-11).
 fn reported(issue: &Issue) -> bool {
@@ -530,6 +559,9 @@ struct Converter<'c> {
     built_in_functions: HashSet<Vec<u8>>,
     /// The spans of the `default` arm results left out of the output (P2R-121).
     dropped_defaults: Vec<Span>,
+    /// The spans of the laravel-data hooks left out, inside which the Mago findings of
+    /// `LEFT_OUT_CODES` go too (P2R-380).
+    left_out: Vec<Span>,
     /// The foreach loops that iterate by `&mut` or over a copy (P2R-146).
     loops: modes::Loops,
     /// The variables of the body being converted: a function, or `fn main()`.
@@ -593,6 +625,7 @@ impl<'c> Converter<'c> {
             built_in_classes: HashSet::new(),
             built_in_functions: HashSet::new(),
             dropped_defaults: Vec::new(),
+            left_out: Vec::new(),
             loops: modes::Loops::default(),
             variables: Variables::default(),
             helpers: BTreeSet::new(),

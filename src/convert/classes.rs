@@ -46,6 +46,9 @@ pub(super) struct ClassInfo {
     pub(super) array_access: Option<(TUnion, TUnion)>,
     /// The input's own interfaces it implements, in the order of `implements` (P2R-371).
     pub(super) interfaces: Vec<usize>,
+    /// True for a class that extends Spatie's `Data`, whose request hooks are left out
+    /// (P2R-350, P2R-380).
+    data: bool,
     pub(super) constants: Vec<ConstantInfo>,
     /// The PHP names of the constants it declares that were refused, whose reads stop
     /// without a second problem.
@@ -66,6 +69,7 @@ impl ClassInfo {
             is_enum,
             array_access: None,
             interfaces: Vec::new(),
+            data: false,
             constants: Vec::new(),
             refused_constants: Vec::new(),
         }
@@ -506,23 +510,106 @@ impl Converter<'_> {
     }
 
     /// True when the attribute is one of laravel-data's, which only the methods of `Data`
-    /// read, with arguments PHP accepts when it compiles the file (P2R-351).
+    /// read, with arguments PHP accepts when it compiles the file (P2R-351, P2R-382).
     fn data_attribute(&self, attribute: &Attribute<'_>) -> bool {
         self.identifier_key(&attribute.name)
             .starts_with(b"spatie\\laraveldata\\attributes\\")
-            && plain_arguments(attribute)
+            && attribute.argument_list.as_ref().is_none_or(|list| {
+                self.plain_arguments(
+                    list.arguments.iter().map(|argument| match argument {
+                        PartialArgument::Positional(positional) => {
+                            Some(Argument::Positional(positional.clone()))
+                        }
+                        PartialArgument::Named(named) => Some(Argument::Named(named.clone())),
+                        _ => None,
+                    }),
+                    true,
+                )
+            })
+    }
+
+    /// True when every argument is a string or int literal or `Name::class`, named ones
+    /// last and each name once, or with `new_allowed`, `new C` of a class name with such
+    /// arguments. `None` is a placeholder of a partial call. PHP compiles attribute
+    /// arguments as constant expressions and rejects other forms, such as a call, when it
+    /// compiles the file; Mago does not report them all (P2R-351, P2R-382).
+    fn plain_arguments<'b>(
+        &self,
+        arguments: impl Iterator<Item = Option<Argument<'b>>>,
+        new_allowed: bool,
+    ) -> bool {
+        let mut names: Vec<&[u8]> = Vec::new();
+        for argument in arguments {
+            let value = match argument {
+                Some(Argument::Positional(positional)) => {
+                    if !names.is_empty() || positional.ellipsis.is_some() {
+                        return false;
+                    }
+                    positional.value
+                }
+                Some(Argument::Named(named)) => {
+                    if names.contains(&named.name.value) {
+                        return false;
+                    }
+                    names.push(named.name.value);
+                    named.value
+                }
+                None => return false,
+            };
+            let plain = match value {
+                Expression::Literal(Literal::String(_) | Literal::Integer(_)) => true,
+                Expression::Access(Access::ClassConstant(access)) => {
+                    matches!(access.class, Expression::Identifier(_))
+                        && matches!(&access.constant, ClassLikeConstantSelector::Identifier(constant)
+                            if constant.value.eq_ignore_ascii_case(b"class"))
+                }
+                // PHP runs it only when reflection reads the arguments (P2R-382).
+                Expression::Instantiation(new) if new_allowed => {
+                    matches!(new.class, Expression::Identifier(_))
+                        && new.argument_list.as_ref().is_none_or(|list| {
+                            self.plain_arguments(list.arguments.iter().cloned().map(Some), false)
+                        })
+                }
+                _ => false,
+            };
+            if !plain {
+                return false;
+            }
+        }
+        true
+    }
+
+    /// True for a method of a `Data` class named like a hook, in any letter case, that no
+    /// interface of the class declares, which is P2R-371's, and that `Data` has no real
+    /// method of, only an `@method` tag or nothing, which P2R-350 checks (P2R-380). It
+    /// reads Mago's codebase, because the interfaces' own methods are read after the
+    /// classes.
+    fn hook_name(&self, class: usize, method: &Method<'_>) -> bool {
+        self.classes[class].data
+            && named_like_hook(method)
+            && !self.classes[class].interfaces.iter().any(|&interface| {
+                self.codebase
+                    .method_exists(&self.interfaces[interface].key, method.name.value)
+            })
+            && self
+                .codebase
+                .get_declaring_method(b"Spatie\\LaravelData\\Data", method.name.value)
+                .is_none_or(|parent| parent.flags.is_magic_method())
     }
 
     /// Refuses everything a class of these slices may not hold (P2R-130, P2R-140).
     fn class_shape(&mut self, declaration: &Class<'_>) {
         let data = self.extends_data(declaration);
-        // The first group that holds an attribute this class may not leave out.
+        let index = self.class_index(declaration);
+        if let Some(index) = index {
+            self.classes[index].data = data;
+        }
+        // The first group that holds an attribute this class may not leave out (P2R-381).
         if let Some(attributes) = declaration.attribute_lists.iter().find(|list| {
-            !data
-                || !list
-                    .attributes
-                    .iter()
-                    .all(|attribute| self.data_attribute(attribute))
+            !list
+                .attributes
+                .iter()
+                .all(|attribute| self.data_attribute(attribute))
         }) {
             self.refuse(attributes, "attributes are not supported (P2R-07)");
         }
@@ -597,6 +684,7 @@ impl Converter<'_> {
             .class_index(declaration)
             .is_some_and(|index| self.classes[index].array_access.is_some());
         let mut constructors = 0;
+        let mut hooks: Vec<Vec<u8>> = Vec::new();
         for member in declaration.members.iter() {
             let method = match member {
                 ClassLikeMember::Method(method) => method,
@@ -618,6 +706,21 @@ impl Converter<'_> {
                     continue;
                 }
             };
+            if index.is_some_and(|index| self.hook_name(index, method)) {
+                if !hook_form(method) {
+                    self.refuse(&method.name, DATA_HOOK);
+                } else if hooks.contains(&lowercase(method)) {
+                    // PHP rejects it when it loads the class, and Mago does not report it.
+                    self.refuse(
+                        &method.name,
+                        "PHP rejects a second method of this name in one class (P2R-380)",
+                    );
+                } else {
+                    hooks.push(lowercase(method));
+                    self.left_out.push(method.span());
+                }
+                continue;
+            }
             let overrides =
                 array_access && ARRAY_ACCESS_METHODS.contains(&lowercase(method).as_slice());
             self.method_shape(method, overrides);
@@ -627,10 +730,7 @@ impl Converter<'_> {
                     .codebase
                     .method_exists(b"Spatie\\LaravelData\\Data", method.name.value)
             {
-                self.refuse(
-                    &method.name,
-                    "Spatie\\LaravelData\\Data has a method of this name, and overriding it is not supported (P2R-350)",
-                );
+                self.refuse(&method.name, DATA_METHOD);
             }
             // PHP rejects a parameter that narrows the interface's mixed, and Mago does
             // not report it.
@@ -848,13 +948,11 @@ impl Converter<'_> {
                 )
             } else if parameter.ampersand.is_some() || parameter.ellipsis.is_some() {
                 Some("a promoted property cannot be by reference or variadic (P2R-130)")
-            } else if !parameter.attribute_lists.is_empty()
-                && !(data
-                    && parameter
-                        .attribute_lists
-                        .iter()
-                        .flat_map(|list| list.attributes.iter())
-                        .all(|attribute| self.data_attribute(attribute)))
+            } else if !parameter
+                .attribute_lists
+                .iter()
+                .flat_map(|list| list.attributes.iter())
+                .all(|attribute| self.data_attribute(attribute))
             {
                 Some("attributes are not supported (P2R-07)")
             } else if data && DATA_PROPERTIES.contains(&&parameter.variable.name[1..]) {
@@ -1160,7 +1258,11 @@ impl Converter<'_> {
             let ClassLikeMember::Method(method) = member else {
                 continue;
             };
-            if is_constructor(method) || method.name.value.starts_with(b"__") {
+            // A hook is left out, or class_shape refuses its form (P2R-380).
+            if is_constructor(method)
+                || method.name.value.starts_with(b"__")
+                || owner.is_some_and(|class| self.hook_name(class, method))
+            {
                 continue;
             }
             let Some(rust_name) = self.rust_name(method.name.value, &method.name) else {
@@ -2198,42 +2300,46 @@ pub(super) const IMPLICIT_METHODS: [&str; 8] = [
 const DATA_PROPERTY: &str =
     "Spatie\\LaravelData\\Data already declares a property of this name (P2R-350)";
 
-/// True when every argument of `attribute` is a string or int literal or `Name::class`,
-/// named ones last and each name once. PHP compiles attribute arguments as constant
-/// expressions and rejects other forms, such as a call, when it compiles the file; Mago
-/// does not report them all (P2R-351).
-fn plain_arguments(attribute: &Attribute<'_>) -> bool {
-    let Some(list) = &attribute.argument_list else {
-        return true;
-    };
-    let mut names: Vec<&[u8]> = Vec::new();
-    list.arguments.iter().all(|argument| {
-        let value = match argument {
-            PartialArgument::Positional(positional) => {
-                if !names.is_empty() || positional.ellipsis.is_some() {
-                    return false;
-                }
-                positional.value
-            }
-            PartialArgument::Named(named) => {
-                if names.contains(&named.name.value) {
-                    return false;
-                }
-                names.push(named.name.value);
-                named.value
-            }
-            _ => return false,
-        };
-        match value {
-            Expression::Literal(Literal::String(_) | Literal::Integer(_)) => true,
-            Expression::Access(Access::ClassConstant(access)) => {
-                matches!(access.class, Expression::Identifier(_))
-                    && matches!(&access.constant, ClassLikeConstantSelector::Identifier(constant)
-                        if constant.value.eq_ignore_ascii_case(b"class"))
-            }
-            _ => false,
-        }
-    })
+/// The problem of a method named like a method of `Data` (P2R-350).
+const DATA_METHOD: &str = "Spatie\\LaravelData\\Data has a method of this name, and overriding it is not supported (P2R-350)";
+
+/// The problem of a method named like a hook of laravel-data in another form (P2R-380).
+const DATA_HOOK: &str = "laravel-data calls a method of this name as a public static method; another form, or an attribute on it, is not supported (P2R-380)";
+
+/// The static methods that laravel-data calls on a `Data` class it builds from a request,
+/// in lowercase (P2R-380).
+const DATA_HOOKS: [&[u8]; 8] = [
+    b"rules",
+    b"messages",
+    b"attributes",
+    b"stoponfirstfailure",
+    b"redirect",
+    b"redirectroute",
+    b"errorbag",
+    b"authorize",
+];
+
+/// True for a method named like a hook of laravel-data, in any letter case (P2R-380).
+fn named_like_hook(method: &Method<'_>) -> bool {
+    DATA_HOOKS.contains(&lowercase(method).as_slice())
+}
+
+/// True for a public static method with a body and no attribute, the only form of a hook
+/// that is left out (P2R-380). PHP checks an attribute such as `#[\Override]` when it
+/// loads the class.
+fn hook_form(method: &Method<'_>) -> bool {
+    matches!(method.body, MethodBody::Concrete(_))
+        && method.attribute_lists.is_empty()
+        && method
+            .modifiers
+            .iter()
+            .any(|modifier| matches!(modifier, Modifier::Static(_)))
+        && !method.modifiers.iter().any(|modifier| {
+            matches!(
+                modifier,
+                Modifier::Protected(_) | Modifier::Private(_) | Modifier::Abstract(_)
+            )
+        })
 }
 
 /// True for a class declared `readonly` (P2R-130).

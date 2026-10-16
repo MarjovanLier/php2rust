@@ -37,6 +37,20 @@ impl Converter<'_> {
             }
             _ => return None,
         };
+        // Mago accepts a write to a column it was told of; this section writes no model.
+        if let Expression::Access(Access::Property(access)) = unparenthesized(chain)
+            && self.model_object(access.object)
+        {
+            if let Some(value) = value {
+                self.record_refused(value);
+            }
+            self.record_refused(chain);
+            self.refuse(
+                expression,
+                "a write to an attribute of a model is not supported (P2R-404)",
+            );
+            return Some(None);
+        }
         let problem = match (chain_shape(chain), operator) {
             (Err(message), _) => Some(message),
             (Ok(()), None) => {

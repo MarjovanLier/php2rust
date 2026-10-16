@@ -50,6 +50,8 @@ pub(super) struct ClassInfo {
     /// True for a class that extends Spatie's `Data`, whose request hooks are left out
     /// (P2R-350, P2R-380).
     data: bool,
+    /// True for an Eloquent model, a struct of its columns with no `impl` block (P2R-401).
+    pub(super) model: bool,
     pub(super) constants: Vec<ConstantInfo>,
     /// The PHP names of the constants it declares that were refused, whose reads stop
     /// without a second problem.
@@ -71,6 +73,7 @@ impl ClassInfo {
             array_access: None,
             interfaces: Vec::new(),
             data: false,
+            model: false,
             constants: Vec::new(),
             refused_constants: Vec::new(),
         }
@@ -144,7 +147,13 @@ impl Converter<'_> {
             let key = self.name_key(&declaration.name, declaration.name.value);
             self.type_names
                 .insert(key.clone(), RustType::Class(rust_name.clone()));
-            self.classes.push(ClassInfo::new(key, rust_name, false));
+            let mut class = ClassInfo::new(key, rust_name, false);
+            // A model's properties are the columns of its table (P2R-401).
+            if let Some(fields) = self.model_fields(&class.key) {
+                class.model = true;
+                class.fields = fields;
+            }
+            self.classes.push(class);
         }
     }
 
@@ -160,6 +169,15 @@ impl Converter<'_> {
             .collect();
         for statement in program.statements.iter() {
             let (name, members) = match statement {
+                // A model has no members to read; its checks are its own (P2R-401).
+                Statement::Class(declaration)
+                    if self
+                        .class_index(declaration)
+                        .is_some_and(|index| self.classes[index].model) =>
+                {
+                    self.model_shape(declaration);
+                    continue;
+                }
                 Statement::Class(declaration) => {
                     if self.class_index(declaration).is_some() {
                         self.class_shape(declaration);
@@ -2197,6 +2215,14 @@ impl Converter<'_> {
             self.refuse(node, message);
             return None;
         };
+        if self.classes[index].model {
+            self.record_refused(node);
+            self.refuse(
+                node,
+                "new of a model is not supported, because this section creates no model (P2R-404)",
+            );
+            return None;
+        }
         // The refused constructor parameter is the problem reported for the class.
         if !self.classes[index].complete {
             self.record_refused(node);

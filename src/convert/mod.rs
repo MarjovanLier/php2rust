@@ -27,6 +27,7 @@ use mago_syntax::parser::parse_file;
 use crate::printer::{self, RExpr};
 use crate::problem::{self, Origin, Problem};
 use crate::types::{RustType, TypeNames};
+pub use models::Migration;
 use variables::Variables;
 
 mod booleans;
@@ -47,6 +48,7 @@ mod interfaces;
 mod lists;
 mod maps;
 mod matching;
+mod models;
 mod modes;
 mod nulls;
 mod nullsafe;
@@ -90,13 +92,18 @@ pub struct Included {
 }
 
 /// Converts one PHP file. `path` is the input path as given on the command line.
-pub fn convert(path: &str, source: Vec<u8>, included: Vec<Included>) -> Result<String, Failure> {
+pub fn convert(
+    path: &str,
+    source: Vec<u8>,
+    included: Vec<Included>,
+    migrations: Option<Vec<Migration>>,
+) -> Result<String, Failure> {
     let input = Input {
         shown: path.to_owned(),
         name: path.to_owned(),
         source,
     };
-    let mut written = analyse(vec![input], false, included)?;
+    let mut written = analyse(vec![input], false, included, migrations)?;
     Ok(written.remove(0).1)
 }
 
@@ -105,8 +112,9 @@ pub fn convert(path: &str, source: Vec<u8>, included: Vec<Included>) -> Result<S
 pub fn convert_crate(
     inputs: Vec<Input>,
     included: Vec<Included>,
+    migrations: Option<Vec<Migration>>,
 ) -> Result<Vec<(String, String)>, Failure> {
-    analyse(inputs, true, included)
+    analyse(inputs, true, included, migrations)
 }
 
 /// Parses, analyses and converts the input files together: Mago scans every file into one
@@ -116,6 +124,7 @@ fn analyse(
     inputs: Vec<Input>,
     library: bool,
     included: Vec<Included>,
+    migrations: Option<Vec<Migration>>,
 ) -> Result<Vec<(String, String)>, Failure> {
     let shown: Vec<String> = inputs.iter().map(|input| input.shown.clone()).collect();
     let files: Vec<File> = inputs
@@ -208,6 +217,13 @@ fn analyse(
             PHPVersion::PHP85,
         ));
     }
+    // Mago learns the columns of each model before it populates the codebase (P2R-403).
+    let units: Vec<(&[Statement<'_>], &ResolvedNames<'_>)> = flats
+        .iter()
+        .map(Vec::as_slice)
+        .zip(resolved.iter())
+        .collect();
+    let models = models::find(&units, &mut codebase, migrations.as_deref(), &included_ids);
     populate_codebase(
         &mut codebase,
         &mut SymbolReferences::new(),
@@ -268,6 +284,7 @@ fn analyse(
         })
         .collect();
     let mut converter = Converter::new(&codebase, analysed);
+    converter.models = models;
     converter.type_names.optional = converter.included_optional();
     converter.built_in_classes = built_in_classes;
     converter.built_in_functions = built_in_functions;
@@ -607,6 +624,8 @@ struct Converter<'c> {
     statement: Option<Span>,
     /// The keys of the traits a class or enum of the input uses (P2R-280).
     used_traits: HashSet<Vec<u8>>,
+    /// The Eloquent models of the input, with their fields or why they have none (P2R-401).
+    models: Vec<models::Model>,
 }
 
 impl<'c> Converter<'c> {
@@ -648,6 +667,7 @@ impl<'c> Converter<'c> {
             shape_maps: Vec::new(),
             statement: None,
             used_traits: HashSet::new(),
+            models: Vec::new(),
         }
     }
 
@@ -931,7 +951,11 @@ impl<'c> Converter<'c> {
                                 if let Some(index) = self.class_index(declaration) {
                                     let name = self.classes[index].rust_name.clone();
                                     owners.insert(name, (module, crates::ItemKind::Type));
-                                    let item = self.class_item(declaration, index);
+                                    let item = if self.classes[index].model {
+                                        self.model_item(index)
+                                    } else {
+                                        self.class_item(declaration, index)
+                                    };
                                     items.push(item);
                                 }
                             }

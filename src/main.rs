@@ -26,6 +26,10 @@ struct Cli {
     /// such as Composer's vendor folder; they are not converted. May be given more than once.
     #[arg(long = "include", value_name = "PATH")]
     include: Vec<PathBuf>,
+    /// Read the Laravel migrations in this directory for the columns of the models' tables;
+    /// they are not converted.
+    #[arg(long = "migrations", value_name = "DIR")]
+    migrations: Option<PathBuf>,
 }
 
 fn main() -> ExitCode {
@@ -34,8 +38,12 @@ fn main() -> ExitCode {
         Ok(included) => included,
         Err(reason) => return invalid(reason),
     };
+    let migrations = match cli.migrations.as_deref().map(migration_files).transpose() {
+        Ok(migrations) => migrations,
+        Err(reason) => return invalid(reason),
+    };
     if cli.input.is_dir() {
-        return convert_directory(&cli.input, cli.output.as_deref(), included);
+        return convert_directory(&cli.input, cli.output.as_deref(), included, migrations);
     }
     let path = cli.input.display().to_string();
     let source = match fs::read(&cli.input) {
@@ -50,7 +58,7 @@ fn main() -> ExitCode {
     {
         return invalid(reason);
     }
-    let rust = match convert::convert(&path, source, included) {
+    let rust = match convert::convert(&path, source, included, migrations) {
         Ok(rust) => laid_out(&path, vec![("out.rs".to_owned(), rust)], "out.rs"),
         Err(failure) => Err(failure),
     };
@@ -87,6 +95,7 @@ fn convert_directory(
     input: &Path,
     output: Option<&Path>,
     included: Vec<convert::Included>,
+    migrations: Option<Vec<convert::Migration>>,
 ) -> ExitCode {
     let Some(output) = output else {
         return invalid(format!(
@@ -141,7 +150,7 @@ fn convert_directory(
             source,
         });
     }
-    match convert::convert_crate(inputs, included)
+    match convert::convert_crate(inputs, included, migrations)
         .and_then(|files| laid_out(&shown, files, "lib.rs"))
     {
         Ok(files) => match write_crate(output, &files) {
@@ -212,6 +221,50 @@ fn included_files(paths: &[PathBuf]) -> Result<Vec<convert::Included>, String> {
         }
     }
     Ok(included)
+}
+
+/// The migrations of `--migrations`: the regular files directly in the directory whose
+/// names match `*_*.php`, as Laravel reads them, in byte order of the names without `.php`.
+/// A file that cannot be read or is not UTF-8 has no source (P2R-400).
+fn migration_files(dir: &Path) -> Result<Vec<convert::Migration>, String> {
+    let shown = dir.display().to_string();
+    if !dir.is_dir() {
+        return Err(format!("{shown}: the migrations directory does not exist"));
+    }
+    let entries = fs::read_dir(dir)
+        .map_err(|err| format!("{shown}: cannot read the migrations directory: {err}"))?;
+    let mut names = Vec::new();
+    for entry in entries {
+        let entry =
+            entry.map_err(|err| format!("{shown}: cannot read the migrations directory: {err}"))?;
+        let name = entry.file_name();
+        let bytes = name.as_encoded_bytes();
+        let migration = bytes
+            .strip_suffix(b".php")
+            .is_some_and(|stem| stem.contains(&b'_'));
+        if migration && entry.file_type().is_ok_and(|kind| kind.is_file()) {
+            names.push(name);
+        }
+    }
+    names.sort_by(|a, b| {
+        let stem = |name: &std::ffi::OsString| name.as_encoded_bytes().len() - ".php".len();
+        a.as_encoded_bytes()[..stem(a)].cmp(&b.as_encoded_bytes()[..stem(b)])
+    });
+    Ok(names
+        .into_iter()
+        .map(|name| {
+            let file = name.to_string_lossy();
+            let shown = if shown.ends_with('/') {
+                format!("{shown}{file}")
+            } else {
+                format!("{shown}/{file}")
+            };
+            let source = fs::read(dir.join(&name))
+                .ok()
+                .filter(|bytes| std::str::from_utf8(bytes).is_ok());
+            convert::Migration { shown, source }
+        })
+        .collect())
 }
 
 /// Adds the path below `dir` of every regular `.php` file under it to `found`, without

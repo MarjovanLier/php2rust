@@ -664,6 +664,9 @@ fn map_with(
         _ => return Err(unknown()),
     };
     let value = value(&TUnion::from_vec(values))?;
+    if matches!(value, RustType::Collection(_)) {
+        return Err(NESTED_COLLECTION.into());
+    }
     // A map of `PhpOptional` waits for a later slice (P2R-360).
     if matches!(value, RustType::Optional(_)) {
         return Err("a map of Spatie's Optional is not supported yet (P2R-360)".into());
@@ -789,6 +792,9 @@ fn shape_type(keyed: &TKeyedArray, enums: &TypeNames, declared: bool) -> Result<
                 "an array shape that holds an object is not supported yet (P2R-200)".into(),
             );
         }
+        if matches!(ty, RustType::Collection(_)) {
+            return Err(NESTED_COLLECTION.into());
+        }
         if matches!(ty, RustType::Optional(_)) {
             return Err(
                 "an array shape that holds Spatie's Optional is not supported yet (P2R-360)".into(),
@@ -911,12 +917,16 @@ fn collection_type(found: &TNamedObject, enums: &TypeNames, declared: bool) -> O
     let element = typed(element, enums, declared).ok()?;
     if matches!(
         element,
-        RustType::Option(_) | RustType::Union(_) | RustType::Optional(_)
+        RustType::Option(_) | RustType::Union(_) | RustType::Optional(_) | RustType::Collection(_)
     ) {
         return None;
     }
     Some(RustType::Collection(Box::new(element)))
 }
+
+/// The problem of a collection inside a map or a shape (P2R-440).
+const NESTED_COLLECTION: &str =
+    "a collection inside a list, a map, a shape or another collection is not supported (P2R-440)";
 
 /// `list<T>`, `non-empty-list<T>` and `list{T, T}` all give `Vec<T>`. A shape like
 /// `list{int, int}` keeps its element types in `known_elements` and `never` as its
@@ -928,8 +938,9 @@ fn list_type(list: &TList, enums: &TypeNames, declared: bool) -> Option<RustType
         return None;
     }
     let element = typed(&TUnion::from_vec(members), enums, declared).ok()?;
-    // A list of `PhpOptional` waits for a later slice (P2R-360).
-    if matches!(element, RustType::Optional(_)) {
+    // A list of `PhpOptional` waits for a later slice (P2R-360), and a collection stands
+    // inside no other type (P2R-440).
+    if matches!(element, RustType::Optional(_) | RustType::Collection(_)) {
         return None;
     }
     Some(RustType::Vec(Box::new(element)))

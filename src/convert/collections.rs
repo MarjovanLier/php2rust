@@ -4,7 +4,7 @@ use mago_syntax::cst::*;
 
 use super::Converter;
 use crate::printer::RExpr;
-use crate::types::{COLLECTIONS, RustType};
+use crate::types::{self, COLLECTIONS, RustType};
 
 /// The problem of any use of a collection value that section 45 does not convert (P2R-443).
 pub(super) const COLLECTION_USE: &str = "a collection converts only in a foreach without a key, in count(), and in the methods count(), isEmpty(), isNotEmpty() and first() without arguments (P2R-442, P2R-443)";
@@ -23,6 +23,18 @@ impl Converter<'_> {
             })
         };
         included(COLLECTIONS[0]) == Some(true) && included(COLLECTIONS[1]) != Some(false)
+    }
+
+    /// True when `call` is `isEmpty()`, `isNotEmpty()` or `first()` on a collection value,
+    /// whose Rust forms rustc warns about when nothing reads them (P2R-443).
+    pub(super) fn collection_read(&self, call: &MethodCall<'_>) -> bool {
+        let reads = matches!(&call.method, ClassLikeMemberSelector::Identifier(name)
+            if [&b"isempty"[..], b"isnotempty", b"first"].contains(&name.value.to_ascii_lowercase().as_slice()));
+        reads
+            && self
+                .expression_type(call.object)
+                .and_then(|union| types::rust_type(union, &self.type_names).ok())
+                .is_some_and(|ty| matches!(ty, RustType::Collection(_)))
     }
 
     /// `$c->count()`, `$c->isEmpty()`, `$c->isNotEmpty()` and `$c->first()` on a collection
@@ -50,6 +62,14 @@ impl Converter<'_> {
             b"count" => Some((RExpr::Len(Box::new(object)), RustType::I64)),
             b"isempty" => Some((read("is_empty"), RustType::Bool)),
             b"isnotempty" => Some((RExpr::Not(Box::new(read("is_empty"))), RustType::Bool)),
+            // `Option<PhpDateTime>` is `DateTime|false`, never `DateTime|null` (P2R-330).
+            b"first" if *element == RustType::DateTime => {
+                self.refuse(
+                    node,
+                    "first() of a collection of DateTime does not convert, because Option<PhpDateTime> stands for DateTime|false (P2R-442)",
+                );
+                None
+            }
             // Laravel's `first()` gives the first element, or null for an empty collection.
             b"first" => Some((
                 RExpr::Method(Box::new(read("first")), "cloned"),

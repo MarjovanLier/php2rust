@@ -176,6 +176,15 @@ impl Converter<'_> {
     ) {
         let converted = match expression {
             Expression::Call(Call::Function(call)) => self.call(call, expression),
+            // Rust warns that the result of these reads is unused (P2R-443).
+            Expression::Call(Call::Method(call)) if self.collection_read(call) => {
+                self.record_refused(expression);
+                self.refuse(
+                    expression,
+                    "isEmpty(), isNotEmpty() and first() of a collection do not convert as a statement (P2R-443)",
+                );
+                return;
+            }
             Expression::Call(Call::Method(call)) => self.method_call(call, expression),
             Expression::Call(Call::StaticMethod(call)) => self.static_call(call, expression),
             _ => {

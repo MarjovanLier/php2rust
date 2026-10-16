@@ -30,5 +30,8 @@ return new class extends Migration
         Schema::create('hiddens', function (Blueprint $table) {
             $table->id();
         });
+        Schema::create('peers', function (Blueprint $table) {
+            $table->id();
+        });
     }
 };

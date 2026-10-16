@@ -21,6 +21,14 @@ namespace Illuminate\Database\Eloquent;
 abstract class Model
 {
     /**
+     * As Laravel's HasEvents, which registers a retrieved listener; a model named as an
+     * observer therefore has a retrieved method.
+     */
+    public static function retrieved(mixed $callback): void
+    {
+    }
+
+    /**
      * @return Builder<static>
      */
     public static function query(): Builder

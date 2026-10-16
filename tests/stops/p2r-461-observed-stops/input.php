@@ -59,9 +59,17 @@ final class Hidden extends Model
     public $timestamps = false;
 }
 
+// Another model as the observer, which takes retrieved from Model (HasEvents).
+#[ObservedBy([Own::class])]
+final class Peer extends Model
+{
+    public $timestamps = false;
+}
+
 function reads(): bool
 {
-    return Own::find(1) === null
+    return Peer::find(1) === null
+        && Own::find(1) === null
         && Upper::query()->where('name', 'a')->first() === null
         && Inherited::find(1) === null
         && Traited::find(1) === null

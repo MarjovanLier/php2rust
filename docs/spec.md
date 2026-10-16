@@ -3595,13 +3595,14 @@ forms of those attributes that the app uses.
   `static` or `self` alone; a default is a string, int or float
   literal, `true`, `false`, or `null` on a type with `?` or no type,
   and defaults come last (P2R-168); no parameter is variadic or by
-  reference. A local class name `integer`, `boolean`, `double` or
+  reference or has an attribute. A local class name `integer`, `boolean`, `double` or
   `resource` stops, because PHP warns that it reads it as a class name.
   Other forms that PHP accepts, such as `callable` or `?self`, stop
   too. These stop with their own rules: a return by
   reference (P2R-135), a parameter named `$this` (P2R-135), `static` in
-  a parameter (P2R-154), a promoted parameter (P2R-130) and a second
-  parameter of one name. In its body these stop, because PHP
+  a parameter (P2R-154), a promoted parameter (P2R-130), a parameter
+  named like a superglobal (`$_GET`, `$GLOBALS` and the others) and a
+  second parameter of one name. In its body these stop, because PHP
   rejects, deprecates or warns about them when it compiles the file and
   Mago reports nothing or a code that is dropped here: a function
   declared inside it, in which `self` names no class; `self`, `parent`
@@ -3612,10 +3613,12 @@ forms of those attributes that the app uses.
   octal escape above `\377`; `$http_response_header`; a class,
   interface, trait or enum declared inside it, and an anonymous class,
   whose members the tool does not check; `declare`; and in a closure, a
-  `null` default on a type without null or a default before a required
-  parameter. PHP accepts the function
-  itself, `Foo\self` and `${'x'}` outside a string, so this stops more
-  than PHP rejects. Of Mago's findings inside it (P2R-11), these are
+  `null` default on a type without null, a default before a required
+  parameter or a parameter named like a superglobal. PHP accepts the function itself, `Foo\self`, `${'x'}`
+  outside a string, an anonymous class, `declare(ticks=1)` and `\400`
+  in single quotes, so this stops more than PHP rejects; the same holds
+  for `\400` in single quotes in an attribute argument or a default. Of
+  Mago's findings inside it (P2R-11), these are
   not reported: a
   class or method that does not exist, or a call on a mixed value
   (`non-existent-class`, `non-existent-method`, `mixed-method-access`),
@@ -3629,7 +3632,8 @@ forms of those attributes that the app uses.
   type that no file declares gives `non-existent-class-like`, and a
   value of a class that no file declares leads to other codes, such as
   `mixed-return-statement`, so a hook that uses Laravel converts only
-  with the framework's sources in `--include`. A call of it stops, as a
+  with the framework's sources in `--include`, and a value that Mago
+  types as `mixed` there still stops it. A call of it stops, as a
   call of a method the class
   does not declare does (P2R-135, P2R-153). A method of one of those
   names in another form stops (P2R-380), and so does a second one whose
@@ -3683,8 +3687,10 @@ forms of those attributes that the app uses.
   compile-time error, deprecation or warning in the body of a left-out
   method that Mago does not report and P2R-380 does not list, such as
   `yield` in a method that returns `array`, `unset($this)`, a closure
-  parameter named `$this` or with a default that names `static`,
-  `continue` that targets a `switch`, a static variable
+  parameter named `$this` or with a default that names `static`, a
+  closure parameter named like a variable of its `use` list, `continue`
+  that targets a `switch`, `goto` into a loop, `[] = [1]`, an
+  assignment to `$GLOBALS`, a static variable
   declared twice or an attribute that PHP
   rejects there, because the tool does not read that body) are the only
   parts not checked mechanically.

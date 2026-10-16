@@ -3377,7 +3377,8 @@ parent to a later section.
   (`ReflectionAttribute::getArguments()` or `newInstance()`), and only
   the parent's methods and Laravel's resolving of the class do that,
   which never run in the converted code. Each argument of such an
-  attribute must be a string or int literal or `Name::class`, with
+  attribute must be a string or int literal or `Name::class` (not a
+  string with an escape that PHP rejects, such as `\u{110000}`), with
   named arguments after the positional ones and each name once: PHP
   compiles the arguments as constant expressions and rejects other
   forms, such as a call or `static::class`, when it compiles the file,
@@ -3580,11 +3581,18 @@ forms of those attributes that the app uses.
   body when it has this form: its modifiers are `static` and at most one
   `public` and one `final` (no visibility means public), it has a body
   and no attribute, no interface of the class declares a method of that
-  name, and neither `Data`, as Mago knows it, nor a trait it uses has a
-  real method of that name, only an `@method` tag or nothing (Mago
-  takes a tag of `Data` over a real method of its trait). Nothing of it enters the Rust output
-  and the tool's own checks do not read it; its docblock is not part of
-  it. Of Mago's findings inside it (P2R-11), these are not reported: a
+  name, and neither `Data`, as Mago knows it, nor a trait or interface
+  of it has a real method of that name, also one that `Data` renames to
+  that name in a `use` block, only an `@method` tag or nothing (Mago
+  takes a tag of `Data` over a real method of its trait or interface). Nothing of it enters the Rust output; its docblock is not
+  part of it. The tool still checks what PHP rejects in it when it
+  compiles the file and Mago reports nothing or a code that is dropped
+  here, and these stop: a parameter named `$this` (P2R-135), `static`
+  in a parameter (P2R-154), a promoted parameter (P2R-130), a second
+  parameter of one name, a type written twice or `true|false`
+  (P2R-230), a function declared inside it, and `self`, `parent` or
+  `static` after a backslash (`new \self`). Of Mago's findings inside
+  it (P2R-11), these are not reported: a
   class or method that does not exist, or a call on a mixed value
   (`non-existent-class`, `non-existent-method`, `mixed-method-access`),
   which PHP checks only when the line runs, and a parameter count that
@@ -3593,21 +3601,23 @@ forms of those attributes that the app uses.
   checks. Every other Mago finding inside it still stops, such as
   `return;` in a method with a return type, which PHP rejects when it
   compiles the file. Some of those stop a file that PHP accepts: Mago
-  checks a parameter or return type against the tag too, and a value of
-  a class that no file declares leads to other codes, such as
+  checks a parameter or return type against the tag too, a parameter
+  type that no file declares gives `non-existent-class-like`, and a
+  value of a class that no file declares leads to other codes, such as
   `mixed-return-statement`, so a hook that uses Laravel converts only
   with the framework's sources in `--include`. A call of it stops, as a
   call of a method the class
   does not declare does (P2R-135, P2R-153). A method of one of those
   names in another form stops (P2R-380), and so does a second one whose
   name is equal ignoring letter case: laravel-data calls it as a public
-  static method, and PHP rejects an attribute such as `#[\Override]`, a
-  modifier such as `readonly` or one written twice, and a second method
-  of one name when it loads the class, which Mago does not always
-  report. When an interface of the class declares the name,
-  P2R-371 applies to the method instead, and so does P2R-350's stop for
-  the name of an `@method` tag; when `Data` or its trait has a real
-  method of the name, P2R-350's stop applies (`withValidator` and
+  static method, PHP rejects an attribute such as `#[\Override]` when it
+  loads the class, and a modifier such as `readonly` or one written
+  twice and a second method of one name when it compiles the file, and
+  Mago does not always report them. When an interface of the class
+  declares the name, P2R-371 applies to the method instead, and so does
+  P2R-350's stop for the name of an `@method` tag; when `Data` or its
+  trait or interface has a real method of the name, P2R-350's stop
+  applies (`withValidator` and
   `prepareForPipeline` are real methods of version 4.18.0, not hooks).
 - **P2R-381** The attributes of P2R-351, with its argument forms, MUST
   be left out on every class of the input, not only on a class of
@@ -3646,8 +3656,9 @@ forms of those attributes that the app uses.
   wins, which no output shows, and in P2R-361 that the included
   `create()` returns a new `Optional` and does nothing else, as 4.18.0's
   does, which Mago's metadata does not show, and in P2R-380 a PHP
-  compile-time error inside a left-out method that Mago does not report,
-  such as a parameter named twice, `unset($this)` or an attribute that
-  PHP rejects in its body, because the tool does not read that method)
-  are the only parts not checked mechanically.
+  compile-time error in the body of a left-out method that Mago does not
+  report, such as `unset($this)`, a static variable declared twice,
+  `declare` in the body or an attribute that PHP rejects there, because
+  the tool does not read that body) are the only parts not checked
+  mechanically.
 - [x] No speculative features: later milestones carry no requirements yet.

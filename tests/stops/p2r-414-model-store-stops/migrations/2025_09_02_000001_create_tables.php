@@ -59,6 +59,16 @@ return new class extends Migration
             $table->string('name');
             $table->softDeletes()->useCurrent();
         });
+        Schema::create('nulleds', function (Blueprint $table) {
+            $table->id();
+            $table->string('name');
+            $table->date('day')->default(\null);
+        });
+        Schema::create('wrappeds', function (Blueprint $table) {
+            $table->id();
+            $table->string('name');
+            $table->date('day')->default((null));
+        });
         Schema::create('lates', function (Blueprint $table) {
             $table->id();
             $table->string('name');

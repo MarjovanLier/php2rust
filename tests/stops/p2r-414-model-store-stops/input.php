@@ -73,6 +73,21 @@ final class Archived extends Model
     use SoftDeletes;
 }
 
+// default(\null) and default((null)) give no default, as default(null) does.
+final class Nulled extends Model
+{
+    protected $fillable = ['name'];
+
+    public $timestamps = false;
+}
+
+final class Wrapped extends Model
+{
+    protected $fillable = ['name'];
+
+    public $timestamps = false;
+}
+
 // useCurrent(false) gives no default.
 final class Late extends Model
 {
@@ -178,6 +193,16 @@ function stamped(): Stamped
 function flagged(): Flagged
 {
     return Flagged::create(['name' => 'a']);
+}
+
+function nulled(): Nulled
+{
+    return Nulled::create(['name' => 'a']);
+}
+
+function wrapped(): Wrapped
+{
+    return Wrapped::create(['name' => 'a']);
 }
 
 function late(): Late

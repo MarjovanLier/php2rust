@@ -4158,10 +4158,12 @@ relations and every other query method still stop.
     `useCurrent(true)` after `date(..)`, `dateTime(..)`, `timestamp(..)`
     or `softDeletes(..)`, also over a `default(..)`, give a default
     (Laravel writes no default for `useCurrent()` on another column);
-    `default(null)`, `useCurrent(false)`, `useCurrentOnUpdate()` and a
-    `default(..)`
-    after `constrained(..)`, which belongs to the foreign key, give none,
-    and `change()` keeps only the default it writes again.
+    `default(null)` (also written `\null` or `(null)`), `useCurrent(false)`,
+    `useCurrentOnUpdate()` and a
+    `default(..)` after `constrained(..)`, which belongs to the foreign
+    key, give none, and `change()` keeps only the default it writes again.
+    The last `default(..)` and the last `useCurrent(..)` of a column
+    count, and `useCurrent(false)` removes no `default(..)`.
   - The table has no column that is neither nullable nor has a default
     and is not a field (a date or decimal column), other than `id`, and
     `created_at` and `updated_at` while the model keeps its timestamps,

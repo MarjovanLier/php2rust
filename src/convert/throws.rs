@@ -598,7 +598,13 @@ impl Converter<'_> {
     /// The Rust text of a `throw`, without a `;`, which leaves: `return Err(..)`,
     /// `break 'throw ..` or `..uncaught()` (P2R-212).
     pub(super) fn throw_text(&mut self, throw: &Throw<'_>) -> Option<String> {
-        let exception = self.thrown(throw)?;
+        let Some(exception) = self.thrown(throw) else {
+            // A refused throw still leaves its try body, which then throws (P2R-214).
+            if self.raise == Some(Raise::Attempt) {
+                self.path_to_handlers(true);
+            }
+            return None;
+        };
         let text = printer::expr(&exception, false);
         match self.raise {
             Some(Raise::Propagate) => Some(format!("return Err({text})")),

@@ -238,7 +238,7 @@ requirement IDs.
   the same stdout bytes, the same output file bytes and the same stderr
   bytes.
 - **P2R-07** Only the constructs that sections 3 to 5, 11 to 19 and 21 to
-  46 list as converting may convert. Any other construct MUST stop the conversion,
+  47 list as converting may convert. Any other construct MUST stop the conversion,
   which means it is reported as a problem under P2R-03. Examples that stop
   in version 1 (section 16 converts `namespace`, `use` and class
   constants, and section 17 two casts):
@@ -619,7 +619,7 @@ requirement IDs.
   stderr MUST equal `expected.txt`, its stdout MUST be empty, no output file
   may be created, and every file in the folder MUST be unchanged.
 - **P2R-75** Every requirement ID from P2R-07 to P2R-49 and from P2R-100 to
-  P2R-453 MUST appear in the name of at least one case or stop folder. A
+  P2R-462 MUST appear in the name of at least one case or stop folder. A
   test MUST check this from the folder names.
 - **P2R-76** One command named in the README MUST rewrite every `expected.rs`
   and `expected.txt` from the current tool output; CI MUST NOT run it. A
@@ -712,6 +712,7 @@ Each milestone gets its own requirements in this file when its work starts.
   unions as shape fields (section 44); Laravel's collections as lists,
   read in order, with `get()` and `all()` on the store (section 45);
   conditional filters with `when()` on store queries (section 46);
+  models with observers, read but not created (section 47);
   unions as list values; values
   of interface types, interface inheritance and class inheritance;
   closures.
@@ -4043,8 +4044,9 @@ and its gain is typed attribute reads.
   `getRouteKeyName`. Everything else stops the
   model and leaves it without a struct, because PHP may read an attribute
   through it differently: such a method, a constant, another property or
-  trait; an attribute on the class (P2R-07), such as `#[ObservedBy]`,
-  whose observer may change a model it reads; `abstract`, `readonly` or
+  trait; an attribute on the class (P2R-07) other than the
+  `#[ObservedBy]` of P2R-460, whose forms section 47 limits because an
+  observer may change a model it reads; `abstract`, `readonly` or
   `implements`; a missing `--migrations`; a table that the migrations do
   not create or have made unknown; and a cast of a column its table does
   not have. The problem points at the member, attribute or modifier that
@@ -4588,6 +4590,55 @@ links to conditions of the store.
   variable (`$this` included), a parameter of another form, or a
   written parameter type of another class.
 
+## 47. Observed models (milestone 2, slice 37)
+
+Six models of the app (`Journal`, `JournalLine`, `JournalFileLine`,
+`SupplierDetail`, `CustomerDetail` and `FileDetail`) carry
+`#[ObservedBy([XObserver::class])]`, so P2R-401 gives them no struct and
+every read of them stops (P2R-404). Their observers declare only
+`created`, `updated` and `deleted`. Laravel 12.35.1 registers the
+observers when it boots the model: for each event that
+`getObservableEvents()` lists, it hooks the observer's method of that
+name when `method_exists` finds one, in any letter case and also when
+the observer inherits it or takes it from a trait; it throws when a
+named class does not exist. Of these events only `retrieved` fires when
+a model is read, and `creating`, `created`, `saving` and `saved` fire
+on `create()`. Laravel merges a parent's attribute only for a grandchild
+of `Model`, which P2R-401 does not admit. A throwaway spike that let the
+attribute through cleared five files and made no other file stop. This
+section gives such a model its struct and keeps every form that would
+run an observer method stopped.
+
+- **P2R-460** A model (P2R-401) MAY carry one or more attributes
+  `#[ObservedBy(<arg>)]` whose name PHP resolves to
+  `\Illuminate\Database\Eloquent\Attributes\ObservedBy`, a class that a
+  file `--include` reads declares (P2R-340), where `<arg>` is one
+  positional argument: `X::class`, or an array literal `[..]` of one or
+  more `X::class`, each naming a class that the input or an included
+  file declares (not an interface, trait or enum). The named classes are
+  the model's observers. Such a model takes its struct by P2R-401 as if
+  the attributes were absent. Any other attribute on the model, an
+  `ObservedBy` that the input declares, another argument form (a string,
+  a named or unpacked argument, `static::class`, a variable, a second
+  argument) or a class that neither declares keeps P2R-401's stop.
+- **P2R-461** On a model with observers, `create` (P2R-411) MUST stop,
+  because Laravel runs the observers' `creating`, `created`, `saving`
+  and `saved` methods, which the store does not run. Every read form of
+  sections 42 to 46 (`find`, `first`, `sole`, `firstOrFail`,
+  `findOrFail`, `get` and `all`, with their `where` and `when` links)
+  MUST stop when an observer has a method named `retrieved` in any letter
+  case, declared, inherited or taken from a trait, at any visibility, as
+  `method_exists` finds it, because Laravel runs it on every row it
+  reads. Otherwise these reads convert as on a model without observers,
+  and a read of a field of such a model's struct is a plain field read
+  (no event fires).
+- **P2R-462** These stop the conversion, each with a message that names
+  the reason: `create` on a model with observers, a read form on a model
+  whose observer has `retrieved`, and the forms of `#[ObservedBy]` that
+  P2R-460 does not admit (by P2R-401's stop of an attribute). Observers
+  that a service provider registers (`M::observe(..)`) remain the review
+  concern of P2R-410.
+
 ## Spec checklist
 
 - [x] No `[NEEDS CLARIFICATION]` markers left. Decided in review: problems
@@ -4596,7 +4647,7 @@ links to conditions of the store.
   takes its element type from the same variable or the declared type it
   flows into (P2R-21); a file of only functions becomes a library (P2R-33).
 - [x] Every requirement is testable: P2R-07 to P2R-49 and P2R-100 to
-  P2R-453 by case and stop folders (P2R-75 enforces this), P2R-01 to P2R-06
+  P2R-462 by case and stop folders (P2R-75 enforces this), P2R-01 to P2R-06
   by error folders and tests, P2R-50 to P2R-52 by P2R-71, the rest by CI or
   a file in the
   repository. Stated review concerns (P2R-05 partial write, P2R-72 case

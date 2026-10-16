@@ -1933,7 +1933,8 @@ string}`), and keeps an object that may be missing in a nullable property
   the places of the shape the tool meets second, other than a shape whose
   fields are those of the first with a `?T` field typed `T` or `null`,
   which Mago gives a shape after a check of that field against null and
-  which maps to the struct of the first (P2R-104); and a shape whose Rust
+  which maps to the struct of the first (P2R-104), and a shape that maps
+  to the struct of a shape with a union field (P2R-430); and a shape whose Rust
   name is the Rust name of an enum or class of the input (P2R-131,
   P2R-173).
 - **P2R-201** A value of a shape type MUST behave as a value of a readonly
@@ -2797,7 +2798,8 @@ the literal that built it.
   the key order would not be PHP's. A PHP caller outside the input may
   build `S` in another order; that is a known difference (P2R-60). These
   also stop: a field whose Rust type is not `V` (an `int` field where `V`
-  is `String`, a field where `V` is a union enum); a map with int keys
+  is `String`, an `int` field where `V` is the union enum `IntOrString`,
+  while a union field of type `V` (P2R-430) converts); a map with int keys
   (`IndexMap<i64, V>`), because a shape key is text; and a shape where a
   list is needed (P2R-240).
 
@@ -4340,22 +4342,33 @@ member of another union, still stops.
   `Option<U>` with a `null` member, when a declared type (P2R-230) names
   the shape: as the whole type, as a member of a union, as the value type
   of a declared map (P2R-250), as the element type of a declared list, or
-  as the type of a field of such a shape. The members, the variant names,
+  at any depth inside such a type (a field, the element of a list field,
+  the value of a map field). The members, the variant names,
   the name of `U` and the stops of P2R-230 apply to the field's value
-  type. A shape that Mago gives a read or a copy of such a shape (a
-  variable, a parameter, a `foreach` value, a list element) maps to the
-  same struct when each member of its field's Mago type is a member of
-  `U`, so a field type that Mago narrows keeps `U`, as a read of a union
-  property keeps it (P2R-232). A shape with a union field that no declared
-  type names (the type Mago gives an array literal in a local variable)
-  keeps P2R-22.
+  type, and so does P2R-200's stop of a value type that is or holds a
+  class, for each member (`array{at: Point|int}` stops); a field whose
+  type is a map with union values, or holds one, stops (P2R-250). A
+  shape that a declared type names takes its own field types, so two
+  declared shapes of one Rust name with different field types stop by
+  P2R-200, whichever the tool meets first. Any other shape type with
+  the keys of such a shape, each of whose field types fits the struct's
+  field (for a union field, the Rust type (P2R-21) of each member of its
+  Mago type a member of `U`, `null` only for `Option<U>`), maps to the
+  same struct: the type Mago gives a read or a copy of it (a variable, a
+  parameter, a `foreach` value, a list element) and the type it gives an
+  array literal in a local variable, so a field type that Mago narrows
+  keeps `U`, as a read of a union property keeps it (P2R-232), and a
+  literal's value goes into the field by P2R-431. A shape with a union
+  field whose keys no such shape has keeps P2R-22.
 - **P2R-431** A value for such a field in a shape literal (P2R-202) MUST
   convert as a value into a place of type `U` or `Option<U>` (P2R-231),
   `U::V(value)` for a member value, and a read `$s['k']` of the field
   (P2R-203) gives a value of type `U` or `Option<U>` that behaves as a
   read of a union property (P2R-232): it copies with `.clone()`, lends as
-  `&U`, goes into a place of its own union, and takes the tests of P2R-251
-  and P2R-233; a variable that holds it takes the binding of P2R-252.
+  `&U` (an `Option<U>` field as `Option<&U>` with `.as_ref()`, P2R-204),
+  goes into a place of its own union, and takes the tests of
+  P2R-251; a variable that holds it takes the binding of P2R-252 and the
+  calls of P2R-233, which stop on the read itself as on a property read.
   Every other use stops by P2R-232, as for any union value.
 
 ## Spec checklist

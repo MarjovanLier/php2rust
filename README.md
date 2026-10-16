@@ -249,6 +249,8 @@ converts:
   int key `5` and the key `'5'` are one key, as in PHP. A literal with a key on every
   element or none (keys 0, 1, 2), `$m = []`, `$m[k]`, `$m[k] = v`, `unset($m[k])`,
   `isset($m[k])`, `array_key_exists()`, `$m[k] ?? $d`, `count()` and `foreach` convert.
+  A field of a declared shape may hold a union (`array{key: string, value: string|bool|int}`
+  gives the field a `BoolOrIntOrString`), also in a declared list or map of such shapes.
   A declared map may hold a union (`array<int|string, scalar>`), and a declared union
   may hold one map (`array<string, int>|string` gives `MapOrString { Map(..), String(..)
   }`). An array shape value goes where a map with text keys is needed as
@@ -418,7 +420,8 @@ the others are findings of the Mago analyser. In short:
   value that cannot be null, on a call result, in a chain (`$a?->b->c`), on a class that
   changes its objects, on a void method or one that throws, and with an argument that is
   more than a literal, a constant, a variable or a property read.
-- A union inside a list or a shape field, a union whose PHP type and docblock type
+- A union inside a list, a union field of a shape no declared type names, a union whose
+  PHP type and docblock type
   disagree on int and float, `(string)` of a union that may hold a float, a list, a map,
   a shape or an object (outside `is_scalar($v) ? (string) $v : ..`), and a union value passed
   where another union type is needed. `is_string()` and its kin on a value that is not a
@@ -621,7 +624,7 @@ php2rust refuses some valid PHP that version 1 converts in other forms:
 The tests need PHP 8.5 on `PATH` and the Rust toolchain pinned in
 `rust-toolchain.toml` (`rustup toolchain install` installs it). Each folder under
 `tests/cases`, `tests/stops` and `tests/errors` is one test, and `cargo test` also checks
-that each requirement from P2R-07 to P2R-49 and from P2R-100 to P2R-423 starts the name of
+that each requirement from P2R-07 to P2R-49 and from P2R-100 to P2R-431 starts the name of
 a case or stop folder.
 To rewrite every
 `expected.rs` and `expected.txt` from the current output:

@@ -1,0 +1,1 @@
+input.php:24:12: when converts only as the method of Laravel's trait Conditionable, declared in an included file and not declared again by Eloquent's builder or a subclass of it, whose type the tool tells Mago (P2R-450, P2R-451)

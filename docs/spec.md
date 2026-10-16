@@ -4192,8 +4192,9 @@ relations and every other query method still stop.
   with the values, which gives a copy of the first row in creation order
   that matches every `where`, as `Option<M>`. The closure's own names
   (`row`, and `text` for a nullable `String` field) take the first suffix
-  `_1`, `_2` and so on that no value reads, so a value never reads the
-  row in place of a variable of the same name. Each `where` has two positional arguments: a string literal
+  `_1`, `_2` and so on that is no word of a value's Rust form (a
+  variable, a field, or a word of a string literal), so a value never
+  reads the row in place of a variable of the same name. Each `where` has two positional arguments: a string literal
   that names a field of the struct, and a value of the field's PHP type
   that is a variable, a literal (a negative number included) or a property
   read of one, so it reads the same each time the closure runs, once per

@@ -84,6 +84,35 @@ final class Bare extends Data
     }
 }
 
+// PHP rejects these modifiers on a method when it loads the class.
+final class Modified extends Data
+{
+    public readonly static function rules(): array
+    {
+        return [];
+    }
+
+    private(set) static function messages(): array
+    {
+        return [];
+    }
+
+    public public static function redirect(): string
+    {
+        return 'home';
+    }
+
+    public static static function errorBag(): string
+    {
+        return 'bag';
+    }
+
+    final final static function attributes(): array
+    {
+        return [];
+    }
+}
+
 // The docblock is not part of the hook.
 final class Documented extends Data
 {

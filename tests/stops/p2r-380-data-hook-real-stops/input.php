@@ -21,4 +21,10 @@ final class Account extends Data
     {
         return true;
     }
+
+    // Mago takes the @method tag of Data over the real method of its trait.
+    public static function errorBag(): string
+    {
+        return 'account';
+    }
 }

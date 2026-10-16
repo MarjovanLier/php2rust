@@ -1,3 +1,4 @@
 input.php:15:28: Spatie\LaravelData\Data has a method of this name, and overriding it is not supported (P2R-350)
 input.php:15:35: the type mixed has no Rust type (P2R-22)
 input.php:20:28: Spatie\LaravelData\Data has a method of this name, and overriding it is not supported (P2R-350)
+input.php:26:28: Spatie\LaravelData\Data has a method of this name, and overriding it is not supported (P2R-350)

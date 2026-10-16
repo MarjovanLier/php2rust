@@ -254,7 +254,7 @@ impl Converter<'_> {
         let Some(Expression::Array(array)) = sole_argument(arguments).map(unparenthesized) else {
             self.refuse(
                 node,
-                "create converts only with one array literal of the row's values (P2R-411)",
+                "create converts only with one map of the row's values written [..] (P2R-411)",
             );
             return None;
         };
@@ -2261,11 +2261,21 @@ impl Reader<'_> {
             match lower.as_slice() {
                 // A default the database stores when an insert does not name the column;
                 // Laravel writes no default for null.
+                // `\null` and `(null)` are null to PHP too.
                 b"default" if !foreign => {
-                    default = !matches!(
-                        positional_list(arguments).as_slice(),
-                        [Expression::Literal(Literal::Null(_))]
-                    );
+                    default = !match positional_list(arguments).as_slice() {
+                        [value] => match unparenthesized(value) {
+                            Expression::Literal(Literal::Null(_)) => true,
+                            Expression::ConstantAccess(constant) => {
+                                let name = constant.name.value();
+                                name.strip_prefix(b"\\")
+                                    .unwrap_or(name)
+                                    .eq_ignore_ascii_case(b"null")
+                            }
+                            _ => false,
+                        },
+                        _ => false,
+                    };
                 }
                 b"usecurrent" if !foreign => {
                     current = match positional_list(arguments).as_slice() {

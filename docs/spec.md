@@ -2068,8 +2068,8 @@ calls; the 11 Oct decision makes a `throw` an `Err` of a Rust `Result`.
 Section 40 adds exception classes that the input declares.
 
 - **P2R-210** The output MUST hold one struct for the exceptions when a
-  `throw` or `catch` converts or P2R-391 writes a function, and no
-  struct otherwise:
+  `throw` or `catch` converts, a form of P2R-421 converts or P2R-391
+  writes a function, and no struct otherwise:
   `#[derive(Clone, Debug)] pub struct PhpException { pub class: &'static
   str, pub message: String, pub code: i64 }`, with `pub fn new(class:
   &'static str, message: &str, code: i64) -> PhpException`, which stores a
@@ -2167,7 +2167,8 @@ Section 40 adds exception classes that the input declares.
   `break` or `continue` that leaves the body, and one that leaves a handler
   when a path reaches the end of the body, which Rust rejects inside a
   labelled block; a class in a `catch` that is
-  neither in P2R-210 nor an exception class of the input (P2R-392)
+  neither in P2R-210, an exception class of the input (P2R-392) nor one
+  of Laravel's classes of P2R-420
   (`Error`, `TypeError` and the input's other classes included); a clause after a catch-all, which PHP never runs; clauses of
   one `try` with different variable names; a clause that tests a class
   when no clause has a variable; a catch variable whose name the function
@@ -3743,7 +3744,10 @@ methods, such as getters, still stops.
 - **P2R-390** A class declared at the top level whose `extends` names
   one class, and whose chain of parents of the input ends at a class
   that PHP resolves to one of P2R-210, is an exception class of the
-  input. It MUST convert to no struct: its fully qualified PHP name as
+  input; one whose fully qualified name equals, in any letter case, one
+  of Laravel's classes of P2R-420 is not, and a chain that ends at one of
+  those classes does not count, so such a class stops as a class that
+  extends another (P2R-130). It MUST convert to no struct: its fully qualified PHP name as
   declared, in that letter case and without the leading backslash
   (`App\Exceptions\RoleDoesNotExistException`), joins the class tree of
   `is_a` under its parent (P2R-210), after the built-in classes under
@@ -4105,8 +4109,9 @@ relations and every other query method still stop.
   holds the model's store, a `thread_local!` list of rows inside a private
   function `store_rows`, and those of the public functions `store_create`,
   `store_find` and `store_first` that the forms below call, as decided
-  over the whole input (a directory input included); it appears only for
-  a model whose rows the input creates or finds. The store of a thread is
+  over the whole input (a directory input included), and those of
+  P2R-422; it appears only for a model whose rows the input creates or
+  finds, a form of section 43 included. The store of a thread is
   empty when the thread starts. The forms of P2R-411 to P2R-413 stop on a
   model, with the reason, unless all of these hold:
   - The struct has a field `id` of type `i64`, not nullable, whose column
@@ -4129,7 +4134,8 @@ relations and every other query method still stop.
 
   Laravel's `Model` declares neither `create` nor `find`: it forwards
   them through `__callStatic`, which Mago types as `mixed`. Before Mago
-  analyses the input, when the included `Model` declares neither, the
+  analyses the input, when the included `Model` declares none of
+  `create`, `find` and `findOrFail` (P2R-421), the
   tool MUST give it, as a patch of that vendored class would, the static
   methods `create(array<string, mixed> $attributes = []): static` and
   `find(int $id): ?static`, as `@method static` tags declare them, so a
@@ -4227,8 +4233,13 @@ the app calls `sole()` 8 times, `firstOrFail()` 11 times and
 `findOrFail()` 12 times.
 Laravel 12.35.1 answers these from the rows it reads: Eloquent's `sole()`
 reads at most two matching rows and throws `ModelNotFoundException` for
-none and `MultipleRecordsFoundException` for two, and `firstOrFail()` and
-`findOrFail()` throw `ModelNotFoundException` for none. This section
+none and `MultipleRecordsFoundException` for two, and Eloquent's
+`firstOrFail()` and `findOrFail()` throw `ModelNotFoundException` for
+none (a `Collection`'s `firstOrFail()` throws another class and stops).
+Section 42's limit on comparing strings byte for byte now also decides
+which exception `sole()` throws: under MySQL's collation `'abc'` also
+matches `'ABC'`, so the database can find two rows where the store finds
+one. This section
 converts the three forms against the store of section 42 and throws
 these exceptions as section 22 throws its own (P2R-211 to P2R-214), so a
 function that calls one throws, and a `catch` of those classes catches
@@ -4248,11 +4259,16 @@ them.
   `e.is_a("<name>")` (P2R-214), and `$e->getMessage()` and
   `$e->getCode()` read its message and code (`0`). `throw new` of one of
   the three stops, as `new` of another class does (P2R-212), because
-  their constructors take other arguments than a message and a code.
+  `MultipleRecordsFoundException` builds its message from a count and
+  Laravel names the model of a `ModelNotFoundException` with
+  `setModel(..)`, which the struct does not hold.
 - **P2R-421** These forms on a model whose store applies (P2R-410) MUST
   convert to a call of the store that throws (P2R-211), converted by
   P2R-213 (`?` in a function that throws, `unwrap_or_else(|e|
-  e.uncaught())` in `fn main()`, a `break 'throw` in a `try` body):
+  e.uncaught())` in `fn main()`, a `break 'throw` in a `try` body). For
+  P2R-211, P2R-213 and P2R-214 each form on a model with a struct is a
+  call that throws, also where it stops because the store does not
+  apply:
   - The `where` chain of P2R-413 ended by `->sole()` without arguments
     converts to `M::store_sole(|row: &M| ..)`, with the closure of
     P2R-413, which gives a copy of the one matching row as `M`. With no
@@ -4280,17 +4296,21 @@ them.
   unchanged. Laravel's `Model` declares no `findOrFail`, so the patch of
   P2R-410 MUST also give it `findOrFail(int $id): static`, as a
   `@method static` tag declares it, when the included `Model` declares
-  neither it nor `create` and `find`.
+  none of `create`, `find` and `findOrFail`.
 - **P2R-422** The `impl` block of P2R-410 MUST hold `store_sole`,
   `store_first_or_fail` and `store_find_or_fail` only when the input's
   code calls them, each returning `Result<M, PhpException>` and reading
   the store as `store_first` and `store_find` do; a model's store whose
-  only uses are these forms holds no other public function.
+  only uses are these forms holds no other public function. A form of
+  P2R-421 makes the output hold the struct of P2R-210, with the three
+  classes of P2R-420, even where no `throw` or `catch` converts.
 - **P2R-423** These stop, by P2R-135 and P2R-153: `sole()` or
   `firstOrFail()` with an argument (a list of columns, which Laravel
   loads alone); `findOrFail` with an argument of another type, a second
   argument, or a named or unpacked argument; `sole()` or `firstOrFail()`
-  after `query()` without a `where`; these forms on a model whose store
+  after `query()` without a `where`, or after a `where` called on the
+  model class without `query()` (`M::where(..)->firstOrFail()`), and
+  `where(..)->findOrFail(..)`; these forms on a model whose store
   does not apply, with the reason of P2R-410; and these forms where a
   call that throws cannot stand (P2R-213), such as the default of `??`.
 
@@ -4326,8 +4346,10 @@ them.
   passed as a string or a class's array into such a chain, in P2R-410
   observers, listeners or global scopes that a service provider
   registers on a model (`M::observe(..)`, `addGlobalScope(..)`) and
-  `Model::unguard()` there, which change what `create`, `find` and
-  `first` give, and a schema
+  `Model::unguard()` there, which change what `create`, `find`,
+  `first`, `sole`, `firstOrFail` and `findOrFail` give, a relation that
+  `Model::resolveRelationUsing(..)` registers under one of these names,
+  which `Model::__call` tries before it forwards to the query, and a schema
   dump or package migrations that
   create tables the tool does not see) are the only
   parts not checked mechanically.

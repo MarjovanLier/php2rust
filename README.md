@@ -53,8 +53,11 @@ observer or another member that may change what a read gives gets no struct.
 `M::create([..])`, `M::find($id)` and `M::query()->where('c', $v)->first()` convert against a
 store the output keeps in memory, one list of rows per model and thread that starts empty:
 a table that a migration seeds stops, and the store holds no row that a seeder or another
-process inserts, enforces no constraint and compares strings byte for byte. Other
-queries, `sole()` and saving models still stop the conversion. Migrations are never converted.
+process inserts, enforces no constraint and compares strings byte for byte. The same chains
+ended by `sole()` or `firstOrFail()`, and `M::findOrFail($id)`, throw Laravel's
+`ModelNotFoundException` or `MultipleRecordsFoundException` with Laravel's messages, which a
+`catch` of those classes catches. Other queries and saving models still stop the conversion.
+Migrations are never converted.
 
 With a directory, php2rust analyses all its `.php` files together, so a class of one file
 is known in the others, and writes one Rust module for each PHP namespace below the
@@ -617,7 +620,7 @@ php2rust refuses some valid PHP that version 1 converts in other forms:
 The tests need PHP 8.5 on `PATH` and the Rust toolchain pinned in
 `rust-toolchain.toml` (`rustup toolchain install` installs it). Each folder under
 `tests/cases`, `tests/stops` and `tests/errors` is one test, and `cargo test` also checks
-that each requirement from P2R-07 to P2R-49 and from P2R-100 to P2R-414 starts the name of
+that each requirement from P2R-07 to P2R-49 and from P2R-100 to P2R-423 starts the name of
 a case or stop folder.
 To rewrite every
 `expected.rs` and `expected.txt` from the current output:

@@ -3837,9 +3837,10 @@ and its gain is typed attribute reads.
   Migration { .. };`, where `Migration` resolves to
   `\Illuminate\Database\Migrations\Migration`, and its class has a public
   method `up()` without parameters, with or without the return type
-  `void`, no method `shouldRun()`, which Laravel asks before it runs
-  `up()`, and no two methods or properties of one name, which PHP
-  rejects; its other members are not read (a `$connection` naming another
+  `void` and with no modifier written twice, no method `shouldRun()`,
+  which Laravel asks before it runs `up()`, and no two methods,
+  properties or constants of one name, which PHP rejects; its other
+  members are not read (a `$connection` naming another
   database included), and `down()` is not read. `Schema` stands for
   `\Illuminate\Support\Facades\Schema` and `DB` for
   `\Illuminate\Support\Facades\DB`, each also by Laravel's global alias
@@ -3847,13 +3848,20 @@ and its gain is typed attribute reads.
   in its class, `down()` aside, is one of these: `DB::table(..)`,
   `DB::raw(..)`, `now()` or `now()` of Carbon (`Carbon\Carbon`,
   `Carbon\CarbonImmutable` or `Illuminate\Support\Carbon`), or a chain
-  of calls on one of them that does not call `getConnection()`, which
-  runs any statement (`now()->toDateTimeString()`); `date(..)` or
-  `count(..)`; or a call on `$this` of a method the class declares other
-  than `down()`. It holds no `new`, partial
-  application, `include`, `require`, `eval` or `exit`. A macro that the
-  app adds to the query builder is a call of the chain too, which the
-  tool cannot see into (review concern). The statements of each other `up()` change a set
+  of calls on one of them that calls neither `getConnection()`, which
+  runs any statement, nor `getProcessor()`, which runs its SQL through
+  the connection, nor a method named by an expression
+  (`now()->toDateTimeString()` qualifies); `date(..)` or `count(..)`; or
+  a call on `$this` of a method the class declares other than `down()`.
+  It holds no `new`, partial
+  application, `include`, `require`, `eval` or `exit`, and no `$this`
+  other than as the receiver of a call or property read, because
+  `[$this, 'down']` or an invokable `$this` passed to `chunk(..)` runs a
+  method without a call. A macro that the app adds to the query builder
+  or to Carbon is a call of the chain too, and a callable passed as a
+  string or a class's array (`->each('drop')`, `[C::class, 'm']`) runs
+  code without a call the tool sees; the tool cannot see into these
+  (review concern). The statements of each other `up()` change a set
   of tables, file after file, in order:
   - `Schema::create('<t>', <closure>);` creates table `t`, and
     `Schema::table('<t>', <closure>);` changes it.
@@ -3862,9 +3870,10 @@ and its gain is typed attribute reads.
     does nothing; after a statement or file that made every table
     unknown (the last item below), a table that the tool has not seen
     may exist, so the guard makes `t` unknown.
-  - A statement that is a chain on `DB::table('<t>')` that does not call
-    `getConnection()`, and whose arguments call only the forms above
-    that change rows (`DB::raw(..)`, `now()`) and nothing on `$this`,
+  - A statement that is a chain on `DB::table('<t>')` that calls none of
+    the three above, and whose arguments call only the forms above
+    that a rows-only migration may make (`DB::raw(..)`, `now()`, a
+    chain on them, `date(..)`, `count(..)`) and nothing on `$this`,
     changes rows, not columns, and is skipped; a `chunk(..)` callback
     that calls `Schema` makes it another statement.
   - Any other statement (`DB::statement(..)`, `DB::unprepared(..)`, a
@@ -3921,8 +3930,11 @@ and its gain is typed attribute reads.
   columns of a table keep the order in which they were first declared;
   `after()` does not move them. Any other form makes its table unknown:
   another method or modifier, a column name that is not a string
-  literal, a named or unpacked argument in the chain (`id(column:
-  'code_id')`), a column declared again without `change()`, a `change()` or
+  literal, an unpacked argument to the method or to `nullable(..)`, a
+  named argument where the tool reads by position (the first argument
+  of the method, the second of `foreignIdFor`, any of `nullable`:
+  `id(column: 'code_id')`; `constrained('t', indexName: 'i')` keeps the
+  table known), a column declared again without `change()`, a `change()` or
   drop of a column the table does not have, `Schema::create` of a table
   that exists, and `Schema::table` of one that does not. None of these is
   a problem of its own: a model of an unknown table stops (P2R-401), and
@@ -3946,10 +3958,11 @@ and its gain is typed attribute reads.
   = '<t>';`, or else Laravel's snake case of its short name (an `_`
   before each capital letter that follows another character, then lower
   case: `VATRate` gives `v_a_t_rate`) with the last word in the plural:
-  `y` after a consonant becomes `ies`, a word ending in `s`, `x`, `z`,
-  `ch` or `sh` gains `es`, and any other gains `s`. Laravel's pluralizer
-  differs on some words (`person` gives `people`, `software` and `data`
-  stay, `waltz` gives `waltzs`), so a model whose table
+  `y` after a consonant becomes `ies`, a word ending in `s`, `x`, `ch`
+  or `sh` gains `es`, and any other gains `s` (`waltz` gives `waltzs`, as
+  in Laravel). Laravel's pluralizer differs on some words (`person`
+  gives `people`, `software` and `data` stay, `quiz` gives `quizzes`),
+  so a model whose table
   Laravel names otherwise finds no table of this rule's name and stops,
   unless `$table` names its table; it converts wrongly only when the
   migrations create both names, and Laravel then reads the other table.
@@ -3997,8 +4010,9 @@ and its gain is typed attribute reads.
   table, whose message names the form with its migration's path and
   line, or that no migration creates the table; each read of a model
   without a struct stops by P2R-404. A modifier written twice
-  (P2R-130), a second property of one name and a second method of one
-  name in any letter case, which PHP rejects and Mago does not report,
+  (P2R-130), a second property of one name (`$table` and `$Table` are
+  two), and a second method of one name in any letter case, which PHP
+  rejects and Mago does not report,
   stop the conversion. These checks see the `Model` that `--include`
   gives, as P2R-350's see `Data`: a stand-in that declares fewer
   properties or methods than the framework hides a column named like
@@ -4067,7 +4081,9 @@ and its gain is typed attribute reads.
   declared twice or an attribute that PHP
   rejects there, because the tool does not read that body, and in P2R-400
   a macro of the query builder in a chain on `DB::table(..)`, whose body
-  the tool does not read, and a schema dump or package migrations that
+  the tool does not read, a Carbon macro on a `now()` chain, a callable
+  passed as a string or a class's array into such a chain, and a schema
+  dump or package migrations that
   create tables the tool does not see) are the only
   parts not checked mechanically.
 - [x] No speculative features: later milestones carry no requirements yet.

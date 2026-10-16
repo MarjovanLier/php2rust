@@ -166,6 +166,9 @@ roadmap of section 10. Its spec reviewers found that PHP rejects several
 forms of such a method when it loads or compiles the class, that Mago
 checks a hook against an `@method` tag that PHP never reads, and that
 PHP runs a `new` in an attribute argument only when reflection reads it.
+Section 40 (exception classes of the input) was written on 16 Oct 2026;
+it changes P2R-07, the intro of section 22, P2R-210, P2R-212, P2R-214,
+section 14 and the roadmap of section 10.
 
 php2rust converts typed PHP source into normal, readable Rust (`Vec`,
 `String`, `i64`), without AI. It reads PHP with the Mago crates, uses Mago's
@@ -215,7 +218,7 @@ requirement IDs.
   the same stdout bytes, the same output file bytes and the same stderr
   bytes.
 - **P2R-07** Only the constructs that sections 3 to 5, 11 to 19 and 21 to
-  39 list as converting may convert. Any other construct MUST stop the conversion,
+  40 list as converting may convert. Any other construct MUST stop the conversion,
   which means it is reported as a problem under P2R-03. Examples that stop
   in version 1 (section 16 converts `namespace`, `use` and class
   constants, and section 17 two casts):
@@ -669,7 +672,8 @@ Each milestone gets its own requirements in this file when its work starts.
   (section 36), their `Optional` properties (section 37), their request
   hooks left out (section 39) and later their `from()` and `toArray()`,
   and the framework's other forms; the input's
-  own interfaces as traits (section 38); unions as list values; values
+  own interfaces as traits (section 38); the input's own exception
+  classes (section 40); unions as list values; values
   of interface types, interface inheritance and class inheritance;
   closures.
   `SouthAfricanIDValidator` calls `StringManipulation::isValidDate`, which
@@ -966,7 +970,8 @@ Sections 3 to 9 apply to nullable values unless this section says otherwise.
   enum (P2R-110), so such a class after a statement outside functions
   stops.
   These stop the conversion:
-  - `extends` (other than the `Spatie\LaravelData\Data` of P2R-350),
+  - `extends` (other than the `Spatie\LaravelData\Data` of P2R-350; an
+    exception class of P2R-390 follows section 40 instead),
     `implements` (other than the `ArrayAccess` of P2R-220 and the
     interfaces of P2R-371),
     `abstract`, a trait other than one of constants (P2R-280), a property that is not
@@ -2013,11 +2018,11 @@ string}`), and keeps an object that may be missing in a nullable property
 
 Application code throws PHP's built-in exceptions and catches them around
 calls; the 11 Oct decision makes a `throw` an `Err` of a Rust `Result`.
-Exception classes that the input declares need inheritance and are a later
-slice.
+Section 40 adds exception classes that the input declares.
 
 - **P2R-210** The output MUST hold one struct for the exceptions when a
-  `throw` or `catch` converts, and no struct otherwise:
+  `throw` or `catch` converts or P2R-391 writes a function, and no
+  struct otherwise:
   `#[derive(Clone, Debug)] pub struct PhpException { pub class: &'static
   str, pub message: String, pub code: i64 }`, with `pub fn new(class:
   &'static str, message: &str, code: i64) -> PhpException`, which stores a
@@ -2067,7 +2072,8 @@ slice.
   P2R-211), a `throw` leaves its block as `return` does, and each `throw`
   and each call that throws in a `try` body is a path to its handlers
   (P2R-214). These stop the conversion: any argument other than `message`
-  and `code`, positional or named; `new` of any other class; a `throw` of
+  and `code`, positional or named; `new` of any other class than these
+  and the exception classes of the input (P2R-392); a `throw` of
   any other expression; and an exception object used in any other way
   (`new C(..)` outside a `throw` stops by P2R-133).
 - **P2R-213** A call of a function or method that throws MUST convert with
@@ -2111,8 +2117,8 @@ slice.
   `break` or `continue` that leaves the body, and one that leaves a handler
   when a path reaches the end of the body, which Rust rejects inside a
   labelled block; a class in a `catch` that is
-  not in P2R-210 (`Error`, `TypeError` and the input's own classes
-  included); a clause after a catch-all, which PHP never runs; clauses of
+  neither in P2R-210 nor an exception class of the input (P2R-392)
+  (`Error`, `TypeError` and the input's other classes included); a clause after a catch-all, which PHP never runs; clauses of
   one `try` with different variable names; a clause that tests a class
   when no clause has a variable; a catch variable whose name the function
   already uses before the `try`, because PHP overwrites it; and a read of
@@ -3665,6 +3671,67 @@ forms of those attributes that the app uses.
   the converted code, so whether `C` can be built does not change the
   output. A Mago finding on it still stops (P2R-11), and so does any
   other `new` (P2R-07).
+
+## 40. Exception classes of the input (milestone 2, slice 30)
+
+Section 22 throws and catches PHP's built-in exceptions only. The Laravel
+app declares 13 exception classes of its own in `App\Exceptions`, and
+throws them in about 40 places: some hold nothing
+(`class RoleDoesNotExistException extends \Exception {}`), others only
+a constructor that builds the message and passes it on with
+`parent::__construct($message, $code)`. This section converts those two
+forms. An exception object stays the one struct of P2R-210, so the
+properties a constructor promotes are not kept, and a class with
+methods, such as getters, still stops.
+
+- **P2R-390** A class declared at the top level whose `extends` names
+  one class that PHP resolves to a class of P2R-210, or to another
+  exception class of the input, is an exception class of the input. It
+  MUST convert to no struct: its fully qualified PHP name, without the
+  leading backslash (`App\Exceptions\RoleDoesNotExistException`), joins
+  the class tree of `is_a` under its parent (P2R-210), and `uncaught()`
+  prints that name, as PHP does. It may be `final`, and it may hold a
+  constructor (P2R-391) and nothing else. These stop: an attribute on
+  it; `abstract` or `readonly`; `implements`; any other member (a
+  method, a property, a constant, a trait use); a parent of the input
+  that is `final`; a parent of the input that the same file declares
+  after it, because PHP then declares the class only when execution
+  reaches it; and any use of the class other than `throw new` (P2R-212)
+  and a `catch` clause (P2R-392): a type that names it stops (P2R-22),
+  and so do `new` outside a `throw`, `instanceof` and a static access.
+- **P2R-391** The constructor of an exception class of the input MUST
+  convert to `pub fn <name>(<parameters>) -> PhpException`, placed
+  where the class stands, where `<name>` is the class's short name in
+  snake case (`FieldLengthInvalidException` gives
+  `field_length_invalid_exception`). Its parameters follow the rules for
+  the parameters of a function, defaults and their order included
+  (P2R-168); a promoted parameter converts as a plain parameter, because
+  only a read through the object (`$e->entity`) reads its property, and
+  that stops (P2R-214). Its body converts as the body of a function and
+  MUST end with its one `parent::__construct(..)` call, at the top level
+  of the body, which converts to `return PhpException::new("<class>",
+  message, code);` with the arguments of P2R-212. A class with a
+  constructor makes the output hold the struct of P2R-210 even when no
+  `throw` or `catch` converts. These stop: a constructor that is not
+  public or that returns by reference; a body that reads or writes
+  `$this`, holds a `return`, holds another `parent::` access or holds a
+  `throw` or a call that throws (P2R-211); a promoted parameter named
+  `message`, `code`, `file`, `line`, `previous` or `trace`, which
+  PHP's `Exception` declares; a constructor in a class whose parent of
+  the input has a constructor, and a class without a constructor whose
+  parent of the input has one, because `parent::__construct(..)` or
+  `new` would run the parent's; and a name that P2R-31 refuses for a
+  function, or that a function or another exception class of the input
+  gives.
+- **P2R-392** `throw new C(..)`, where `C` is an exception class of the
+  input, MUST convert as P2R-212 converts a class of P2R-210: for a class
+  without a constructor with `PhpException::new("<class>", message,
+  code)`, and for a class with one with `<name>(<arguments>)`, its
+  arguments converted as for a call of that function (P2R-169). A
+  `catch` clause MUST accept an exception class of the input as it
+  accepts a class of P2R-210, testing `e.is_a("<class>")` (P2R-214). In
+  a directory input, a module that names the function of P2R-391 holds a
+  `use` line for it (P2R-174).
 
 ## Spec checklist
 

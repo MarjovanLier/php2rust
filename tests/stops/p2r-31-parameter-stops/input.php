@@ -51,3 +51,13 @@ function query(): string
         return $_GET->getMessage();
     }
 }
+
+// PHP rejects $this as a catch variable.
+function self_catch(): string
+{
+    try {
+        throw new RuntimeException('m');
+    } catch (RuntimeException $this) {
+        return 'caught';
+    }
+}

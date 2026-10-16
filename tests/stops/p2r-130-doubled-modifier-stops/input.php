@@ -39,3 +39,25 @@ readonly class Shared
 {
     public static function __construct(public int $x) {}
 }
+
+// PHP rejects these modifiers too, and Mago reports none of them.
+final class Modifiers
+{
+    private int $hidden = 0;
+
+    final private int $sealed = 0;
+
+    private public(set) int $wide = 0;
+
+    public function __construct(abstract string $kind, private public(set) int $level) {}
+
+    public readonly function twice(): int
+    {
+        return $this->level * 2;
+    }
+
+    public function add(final int $n): int
+    {
+        return $this->level + $n;
+    }
+}

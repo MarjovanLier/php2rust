@@ -198,6 +198,28 @@ class EndlessLoop extends \Exception
     }
 }
 
+class AbstractPromoted extends \Exception
+{
+    public function __construct(abstract string $what = 'x', private public(set) string $who = 'y')
+    {
+        parent::__construct($what . $who);
+    }
+}
+
+final class Item
+{
+    public function __construct(public int $qty) {}
+}
+
+class ChangesItem extends \Exception
+{
+    public function __construct(Item $item)
+    {
+        $item->qty = 0;
+        parent::__construct('changed');
+    }
+}
+
 class ThrowsInBody extends \Exception
 {
     public function __construct(string $m)

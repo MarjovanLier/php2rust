@@ -831,7 +831,7 @@ pub(super) fn table_name(short: &str) -> String {
         );
     if consonant_y {
         format!("{}ies", &snake[..snake.len() - 1])
-    } else if ["s", "x", "z", "ch", "sh"]
+    } else if ["s", "x", "ch", "sh"]
         .iter()
         .any(|end| snake.ends_with(end))
     {
@@ -896,7 +896,8 @@ impl Reader<'_> {
             matches!(member, ClassLikeMember::Method(method)
                 if method.name.value.eq_ignore_ascii_case(b"shouldRun"))
         });
-        // PHP rejects a second method or property of one name, so Laravel stops there.
+        // PHP rejects a second method, property or constant of one name, so Laravel stops
+        // there; a property name starts with `$`, and a constant's gets `::`.
         let mut seen: HashSet<Vec<u8>> = HashSet::new();
         let doubled = class.members.iter().any(|member| match member {
             ClassLikeMember::Method(method) => !seen.insert(method.name.value.to_ascii_lowercase()),
@@ -904,6 +905,10 @@ impl Reader<'_> {
                 .items
                 .iter()
                 .any(|item| !seen.insert(item.variable().name.to_vec())),
+            ClassLikeMember::Constant(constant) => constant
+                .items
+                .iter()
+                .any(|item| !seen.insert([b"::", item.name.value].concat())),
             _ => false,
         });
         if should_run || doubled {
@@ -917,6 +922,7 @@ impl Reader<'_> {
                         .modifiers
                         .iter()
                         .all(|m| matches!(m, Modifier::Public(_)))
+                    && classes::doubled_modifier(&method.modifiers).is_none()
                     && method
                         .return_type_hint
                         .as_ref()
@@ -1093,9 +1099,7 @@ impl Reader<'_> {
     fn on_db_table(&self, expression: &Expression<'_>) -> bool {
         match expression {
             Expression::Call(Call::Method(call)) => {
-                let connection = matches!(&call.method, ClassLikeMemberSelector::Identifier(method)
-                    if method.value.eq_ignore_ascii_case(b"getConnection"));
-                !connection && self.on_db_table(call.object)
+                !runs_any_statement(&call.method) && self.on_db_table(call.object)
             }
             Expression::Call(Call::StaticMethod(call)) => {
                 self.facade(call.class, "db")
@@ -1199,13 +1203,26 @@ impl Reader<'_> {
         let (method, arguments) = chain[0];
         let modifiers = &chain[1..];
         let unknown = |what: &str| Err(self.reason(statement, what));
-        // A named argument (`id(column: 'code_id')`) names what the position would.
-        let plain = chain.iter().all(|(_, list)| {
-            list.arguments.iter().all(|argument| {
-                matches!(argument, Argument::Positional(positional) if positional.ellipsis.is_none())
-            })
-        });
-        if !plain {
+        // A named argument (`id(column: 'code_id')`) can bind what the tool reads by
+        // position: the column name, foreignIdFor's second argument, and nullable()'s.
+        let plain = |list: &ArgumentList<'_>, read: usize| {
+            list.arguments
+                .iter()
+                .enumerate()
+                .all(|(at, argument)| match argument {
+                    Argument::Positional(positional) => positional.ellipsis.is_none(),
+                    Argument::Named(_) => at >= read,
+                })
+        };
+        let read = if method.eq_ignore_ascii_case(b"foreignIdFor") {
+            2
+        } else {
+            1
+        };
+        let nullable_named = modifiers
+            .iter()
+            .any(|(name, list)| name.eq_ignore_ascii_case(b"nullable") && !plain(list, usize::MAX));
+        if !plain(arguments, read) || nullable_named {
             return unknown("a named or unpacked argument in a Blueprint call");
         }
         let lower = method.to_ascii_lowercase();
@@ -1437,9 +1454,7 @@ impl RowsOnly<'_, '_> {
     /// True for a call chained on `DB::table(..)`, `DB::raw(..)`, `now()` or `now()` of
     /// Carbon that does not reach the connection of a query, which runs any statement.
     fn chain(&self, call: &MethodCall<'_>) -> bool {
-        let connection = matches!(&call.method, ClassLikeMemberSelector::Identifier(method)
-            if method.value.eq_ignore_ascii_case(b"getConnection"));
-        !connection
+        !runs_any_statement(&call.method)
             && match call.object {
                 Expression::Call(Call::Method(inner)) => self.chain(inner),
                 Expression::Call(inner @ Call::StaticMethod(_)) => self.allowed(inner),
@@ -1452,9 +1467,49 @@ impl RowsOnly<'_, '_> {
     }
 }
 
+/// True for a method of a query that reaches its connection, which runs any statement
+/// (`getProcessor()` runs its SQL through it), or one named by an expression.
+fn runs_any_statement(method: &ClassLikeMemberSelector<'_>) -> bool {
+    match method {
+        ClassLikeMemberSelector::Identifier(method) => {
+            method.value.eq_ignore_ascii_case(b"getConnection")
+                || method.value.eq_ignore_ascii_case(b"getProcessor")
+        }
+        _ => true,
+    }
+}
+
+/// True for `$this`.
+fn is_this(expression: &Expression<'_>) -> bool {
+    matches!(expression, Expression::Variable(Variable::Direct(variable)) if variable.name == b"$this")
+}
+
 impl<'ast, 'arena> Walker<'ast, 'arena, bool> for RowsOnly<'_, '_> {
     fn walk_in_call(&self, call: &'ast Call<'arena>, rows: &mut bool) {
         if !self.allowed(call) {
+            *rows = false;
+        }
+    }
+
+    // `$this` as a receiver is checked by its call; anywhere else (`[$this, 'down']`, an
+    // invokable) it may run a method without a call the tool sees.
+    fn walk_method_call(&self, call: &'ast MethodCall<'arena>, rows: &mut bool) {
+        if !is_this(call.object) {
+            self.walk_expression(call.object, rows);
+        }
+        self.walk_class_like_member_selector(&call.method, rows);
+        self.walk_argument_list(&call.argument_list, rows);
+    }
+
+    fn walk_property_access(&self, access: &'ast PropertyAccess<'arena>, rows: &mut bool) {
+        if !is_this(access.object) {
+            self.walk_expression(access.object, rows);
+        }
+        self.walk_class_like_member_selector(&access.property, rows);
+    }
+
+    fn walk_in_direct_variable(&self, variable: &'ast DirectVariable<'arena>, rows: &mut bool) {
+        if variable.name == b"$this" {
             *rows = false;
         }
     }

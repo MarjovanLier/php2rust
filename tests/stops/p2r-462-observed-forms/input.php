@@ -47,3 +47,35 @@ final class Iface extends Model
 final class Two extends Model
 {
 }
+
+// self::class and parent::class, static::class, which PHP rejects in an attribute, a keyed
+// entry, array(..), and an included observer whose parent nobody declares.
+#[ObservedBy(self::class)]
+final class SelfObserved extends Model
+{
+}
+
+#[ObservedBy(parent::class)]
+final class ParentObserved extends Model
+{
+}
+
+#[ObservedBy(static::class)]
+final class StaticObserved extends Model
+{
+}
+
+#[ObservedBy(['k' => CodeObserver::class])]
+final class Keyed extends Model
+{
+}
+
+#[ObservedBy(array(CodeObserver::class))]
+final class Legacy extends Model
+{
+}
+
+#[ObservedBy(\App\Observers\Orphan::class)]
+final class Orphaned extends Model
+{
+}

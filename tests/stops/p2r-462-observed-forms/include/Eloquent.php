@@ -34,3 +34,8 @@ final class CodeObserver
 interface Watcher
 {
 }
+
+// Its parent is declared nowhere, so PHP throws when Laravel boots a model it observes.
+final class Orphan extends MissingBase
+{
+}

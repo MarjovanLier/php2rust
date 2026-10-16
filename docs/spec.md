@@ -4629,6 +4629,8 @@ links to conditions of the store.
   `Model::resolveRelationUsing(..)` registers under one of these names,
   which `Model::__call` tries before it forwards to the query, and a schema
   dump or package migrations that
-  create tables the tool does not see) are the only
+  create tables the tool does not see, and in P2R-413 that the included
+  `Model::query()` gives back Eloquent's builder itself, as Laravel's
+  does, whose `where` a subclass could declare again) are the only
   parts not checked mechanically.
 - [x] No speculative features: later milestones carry no requirements yet.

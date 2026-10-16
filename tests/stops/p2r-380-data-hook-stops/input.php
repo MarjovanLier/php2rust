@@ -140,6 +140,22 @@ final class Parameters extends Data
     {
         return 'bag';
     }
+
+    public static function authorize(int $_GET = 0): bool
+    {
+        return true;
+    }
+
+    public static function stopOnFirstFailure(#[\SensitiveParameter] bool $a = true): bool
+    {
+        return $a;
+    }
+
+    public static function redirectRoute(): string
+    {
+        $check = static fn (string $_POST): string => $_POST;
+        return $check('home');
+    }
 }
 
 // A hook's signature keeps to forms PHP always compiles; PHP rejects or deprecates these

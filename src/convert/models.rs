@@ -868,8 +868,8 @@ impl Reader<'_> {
     }
 
     /// The class and the body of `up()` of `return new class extends Migration { .. };`, the
-    /// file's last top-level statement. A class with `shouldRun()`, which Laravel asks
-    /// before it runs `up()`, is not of this form.
+    /// file's last top-level statement. A class with a method that Laravel or PHP calls
+    /// besides `up()`, or that may hide code a read runs, is not of this form.
     fn up<'p, 'a>(
         &self,
         program: &'p Program<'a>,
@@ -878,12 +878,14 @@ impl Reader<'_> {
             .statements
             .iter()
             .rfind(|statement| !matches!(statement, Statement::Noop(_)))?;
-        // Laravel runs code before the return when it requires the file.
+        // Laravel runs code before the return when it requires the file; inline text (a
+        // byte order mark, a blank line before `<?php`) only prints.
         let code = program.statements.iter().filter(|statement| {
             !matches!(
                 statement,
                 Statement::OpeningTag(_)
                     | Statement::ClosingTag(_)
+                    | Statement::Inline(_)
                     | Statement::Declare(_)
                     | Statement::Use(_)
                     | Statement::Noop(_)
@@ -906,9 +908,13 @@ impl Reader<'_> {
         if self.resolved(parent) != b"illuminate\\database\\migrations\\migration" {
             return None;
         }
+        // Laravel calls these itself (shouldRun() and getConnection() before up(), the
+        // magic methods when it builds, clones or drops the object, or reads through it).
         let should_run = class.members.iter().any(|member| {
             matches!(member, ClassLikeMember::Method(method)
-                if method.name.value.eq_ignore_ascii_case(b"shouldRun"))
+                if method.name.value.eq_ignore_ascii_case(b"shouldRun")
+                    || method.name.value.eq_ignore_ascii_case(b"getConnection")
+                    || method.name.value.starts_with(b"__"))
         });
         // PHP rejects a second method, property or constant of one name and a modifier
         // written twice, so Laravel stops there; a property name starts with `$`, and a
@@ -1514,7 +1520,8 @@ fn runs_any_statement(method: &ClassLikeMemberSelector<'_>) -> bool {
     }
 }
 
-/// Finds a closure or arrow function, which PHP 8.5 allows in a constant expression.
+/// Finds a closure, arrow function or first-class callable, which PHP 8.5 allows in a
+/// constant expression.
 struct HasClosure;
 
 impl<'ast, 'arena> Walker<'ast, 'arena, bool> for HasClosure {
@@ -1523,6 +1530,10 @@ impl<'ast, 'arena> Walker<'ast, 'arena, bool> for HasClosure {
     }
 
     fn walk_in_arrow_function(&self, _: &'ast ArrowFunction<'arena>, found: &mut bool) {
+        *found = true;
+    }
+
+    fn walk_in_partial_application(&self, _: &'ast PartialApplication<'arena>, found: &mut bool) {
         *found = true;
     }
 }

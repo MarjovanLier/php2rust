@@ -175,7 +175,9 @@ twice, a modifier on the parameter of a function, `readonly` on a
 method, a set visibility wider than its property's visibility and
 `final private` on a declared property, and that PHP rejects a
 parameter named like a superglobal anywhere, not only in a hook. It
-also changes P2R-135, P2R-140 and P2R-380.
+also changes P2R-135, P2R-140 and P2R-380. Section 41 (Eloquent models
+from migrations) was written on 16 Oct 2026; it changes P2R-07, P2R-73,
+P2R-75, the checklist and the roadmap of section 10.
 
 php2rust converts typed PHP source into normal, readable Rust (`Vec`,
 `String`, `i64`), without AI. It reads PHP with the Mago crates, uses Mago's
@@ -225,7 +227,7 @@ requirement IDs.
   the same stdout bytes, the same output file bytes and the same stderr
   bytes.
 - **P2R-07** Only the constructs that sections 3 to 5, 11 to 19 and 21 to
-  40 list as converting may convert. Any other construct MUST stop the conversion,
+  41 list as converting may convert. Any other construct MUST stop the conversion,
   which means it is reported as a problem under P2R-03. Examples that stop
   in version 1 (section 16 converts `namespace`, `use` and class
   constants, and section 17 two casts):
@@ -594,14 +596,16 @@ requirement IDs.
   before `input.php` (`-d auto_prepend_file=prepend.php`); it loads the
   files of `include/` that declare a package's classes the input names
   (P2R-350), so PHP and the tool see the same declarations, and the tool
-  never reads it.
+  never reads it. A case or stop folder that holds a directory
+  `migrations/` runs the tool with the added option `--migrations`
+  naming that directory (P2R-400).
 - **P2R-74** Each error folder `tests/errors/<slug>/` holds `args.txt` (the
   command-line arguments, one per line), an optional `input.php` and
   `expected.txt`. Run from inside the folder, the tool MUST exit 2, its
   stderr MUST equal `expected.txt`, its stdout MUST be empty, no output file
   may be created, and every file in the folder MUST be unchanged.
 - **P2R-75** Every requirement ID from P2R-07 to P2R-49 and from P2R-100 to
-  P2R-399 MUST appear in the name of at least one case or stop folder. A
+  P2R-409 MUST appear in the name of at least one case or stop folder. A
   test MUST check this from the folder names.
 - **P2R-76** One command named in the README MUST rewrite every `expected.rs`
   and `expected.txt` from the current tool output; CI MUST NOT run it. A
@@ -683,7 +687,12 @@ Each milestone gets its own requirements in this file when its work starts.
   hooks left out (section 39) and later their `from()` and `toArray()`,
   and the framework's other forms; the input's
   own interfaces as traits (section 38); the input's own exception
-  classes (section 40); unions as list values; values
+  classes (section 40); Eloquent models as structs of the columns the
+  migrations declare (section 41), then, on 16 Oct 2026 decided under the
+  same direction, their `create`, `query()->where(..)->sole()` and
+  `find()` on a store that the output holds in memory, checked against a
+  PHP stand-in of the same behaviour, with a database behind it later;
+  unions as list values; values
   of interface types, interface inheritance and class inheritance;
   closures.
   `SouthAfricanIDValidator` calls `StringManipulation::isValidDate`, which
@@ -3794,6 +3803,111 @@ methods, such as getters, still stops.
   a directory input, a module that names the function of P2R-391 holds a
   `use` line for it (P2R-174).
 
+## 41. Eloquent models from migrations (milestone 2, slice 31)
+
+The Laravel app keeps its data in 35 Eloquent models. A model extends
+`Illuminate\Database\Eloquent\Model` and declares no property: its
+attributes are the columns of its table, and only the migrations in
+`database/migrations` declare those, so Mago types every attribute read as
+`mixed`. This section reads the migrations, tells Mago the type of each
+column of a model's table, gives the model a struct of those columns, and
+converts attribute reads. Creating, querying and saving models need a
+store and wait for a later section; this section clears no file of the app
+by itself, because the files that read a model also create or query one,
+and its gain is typed attribute reads.
+
+- **P2R-400** The option `--migrations <DIR>`, given at most once, MUST
+  read every regular file directly in the directory whose name ends in
+  `.php`, in byte order of the names, as a migration. A migration's last
+  top-level statement is `return new class extends Migration { .. };`,
+  where `Migration` resolves to `\Illuminate\Database\Migrations\Migration`,
+  and its class has a public method `up()` without parameters. The
+  statements of each `up()` change a set of tables, file after file, in
+  order. `Schema::create('<t>', function (Blueprint $table) { .. });`
+  creates table `t`, and `Schema::table('<t>', function (Blueprint $table)
+  { .. });` changes it; `Schema` resolves to
+  `\Illuminate\Support\Facades\Schema`, `Blueprint` to
+  `\Illuminate\Database\Schema\Blueprint`, and each statement of the body
+  is `$table->m(..)` with modifiers chained after it (`->nullable()`), on
+  that parameter. These declare a column of a Rust type, named by its
+  first argument, a string literal: `id()` (column `id`, or the name its
+  argument gives), `foreignId`, `bigInteger`, `unsignedBigInteger`,
+  `integer`, `unsignedInteger`, `smallInteger`, `tinyInteger` and
+  `unsignedTinyInteger` as `i64`; `foreignIdFor(C::class)` as `i64`, named
+  by its second argument or else by the snake case of `C`'s short name
+  followed by `_id`; `string`, `char`, `text`, `mediumText`, `longText`,
+  `uuid`, `enum` and `decimal` as `String` (PHP reads a decimal column as a
+  string); and `boolean` as `bool`. These declare a date column, which has
+  no Rust type in this section: `timestamp`, `dateTime` and `date`, and
+  `timestamps()` (`created_at` and `updated_at`) and `softDeletes()`
+  (`deleted_at`), whose columns are nullable. The modifiers `nullable()`
+  (the column may hold null), `default(..)`, `unsigned()`,
+  `constrained(..)`, `cascadeOnDelete()`, `nullOnDelete()`,
+  `restrictOnDelete()`, `unique()`, `index()`, `after(..)`, `comment(..)`
+  and `useCurrent()` keep the column's type; `change()` replaces the
+  column of that name, which keeps its place, with the new declaration.
+  The table methods `unique(..)`, `index(..)`, `primary(..)`,
+  `dropForeign(..)`, `dropUnique(..)` and `dropIndex(..)` change no
+  column, and `dropColumn('<c>')` or `dropColumn(['<c>', ..])` removes
+  columns. The columns of a table keep the order in which they were first
+  declared; `after()` does not move them. `down()` is not read. Any other
+  form makes its table unknown: another method or modifier, a column name
+  that is not a string literal, a column declared again without
+  `change()`, a `change()` or drop of a column the table does not have,
+  `Schema::create` of a table that exists, and `Schema::table` of one that
+  does not. A statement of `up()` other than those two calls, and a file
+  that does not parse or does not have that shape, make every table
+  unknown from there on. None of these is a problem of its own: a model
+  of an unknown table stops (P2R-401). A directory that does not exist or
+  cannot be listed exits 2 with its reason (P2R-04), as P2R-340 does for
+  an include path.
+- **P2R-401** A class declared at the top level whose `extends` names one
+  class that PHP resolves to `\Illuminate\Database\Eloquent\Model` (a
+  class that `--include` reads, P2R-340) is a model. Its table is the
+  string literal of its property `protected $table = '<t>';`, or else the
+  snake case of its short name (P2R-30) with the last word in the plural:
+  `y` after a consonant becomes `ies`, a word ending in `s`, `x`, `z`, `ch`
+  or `sh` gains `es`, and any other gains `s` (Laravel's pluralizer also
+  knows irregular and uncountable words, such as `software`; a model of
+  such a word names its table with `$table`). A model MUST convert to
+  `#[derive(Clone, Debug)] pub struct <Name> { pub <column>: <type>, .. }`,
+  with one field per column of its table in the order of P2R-400, named by
+  P2R-30 from the column name, of the column's Rust type, inside `Option`
+  when the column is nullable. A column without a Rust type and a column
+  that `$casts` names with a cast other than those of P2R-402 are left
+  out of the struct. The struct has no `impl` block. The body of a model
+  may hold only the properties `$table`, `$fillable`, `$guarded`, `$hidden`
+  and `$casts`, each `protected` with a literal value (a string, or a list
+  or map of strings and `C::class`), and the trait uses `HasFactory` and
+  `SoftDeletes` (resolving to `\Illuminate\Database\Eloquent\Factories\HasFactory`
+  and `\Illuminate\Database\Eloquent\SoftDeletes`); these are left out.
+  These stop the conversion, and a stop of a member still leaves the
+  struct to the code that reads the model: a model without
+  `--migrations`, whose table the migrations do not create or have made
+  unknown, or that is `abstract`, `readonly` or implements an interface;
+  any other member (a method, a relation, a constant, another property or
+  trait); an attribute on it (P2R-07); a column whose field name repeats
+  another's (P2R-131); and a cast of a column its table does not have.
+- **P2R-402** The casts `'integer'` and `'int'`, `'string'`, and
+  `'boolean'` and `'bool'` in `$casts` MUST give the column the Rust type
+  `i64`, `String` or `bool`, keeping its nullability. Every other cast (a
+  date cast, `'encrypted'`, `'decimal:2'`, a class such as an enum or a
+  custom cast) leaves the column out of the struct.
+- **P2R-403** Before Mago analyses the input, the tool MUST tell Mago each
+  field of a model as a property that PHP reads through `__get`, as a
+  `@property` tag in the model's docblock would, of the PHP type of the
+  field's Rust type (`int`, `string` or `bool`, with `?` when nullable). A
+  read of such a property then has that type for Mago and for P2R-11. A
+  column that is left out is not told, so Mago types its read as `mixed`.
+- **P2R-404** A read `$m->column`, where `$m` has a model type and the
+  column is a field of the struct, MUST convert as a property read of a
+  readonly class does (P2R-134), and a model type converts as a readonly
+  class type does (P2R-130). These stop the conversion: a read of a name
+  that is no field (a column left out included); a write to an attribute;
+  `new` of a model, which creates no model in this section; and every
+  method call on a model or static call of a model class (`$m->save()`,
+  `M::create(..)`, `M::query()`), by P2R-135 and P2R-153.
+
 ## Spec checklist
 
 - [x] No `[NEEDS CLARIFICATION]` markers left. Decided in review: problems
@@ -3802,7 +3916,7 @@ methods, such as getters, still stops.
   takes its element type from the same variable or the declared type it
   flows into (P2R-21); a file of only functions becomes a library (P2R-33).
 - [x] Every requirement is testable: P2R-07 to P2R-49 and P2R-100 to
-  P2R-399 by case and stop folders (P2R-75 enforces this), P2R-01 to P2R-06
+  P2R-409 by case and stop folders (P2R-75 enforces this), P2R-01 to P2R-06
   by error folders and tests, P2R-50 to P2R-52 by P2R-71, the rest by CI or
   a file in the
   repository. Stated review concerns (P2R-05 partial write, P2R-72 case

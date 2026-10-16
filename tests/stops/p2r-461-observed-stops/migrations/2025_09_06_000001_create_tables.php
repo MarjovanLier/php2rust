@@ -33,5 +33,11 @@ return new class extends Migration
         Schema::create('peers', function (Blueprint $table) {
             $table->id();
         });
+        Schema::create('private_parenteds', function (Blueprint $table) {
+            $table->id();
+        });
+        Schema::create('taggeds', function (Blueprint $table) {
+            $table->id();
+        });
     }
 };

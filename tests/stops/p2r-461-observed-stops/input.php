@@ -59,6 +59,25 @@ final class Hidden extends Model
     public $timestamps = false;
 }
 
+// A parent's private retrieved and a @method tag, which Mago's lookup counts and PHP's
+// method_exists does not: the tool stops there too (P2R-461).
+#[ObservedBy([\App\Observers\PrivateParentObserver::class])]
+final class PrivateParented extends Model
+{
+    public $timestamps = false;
+}
+
+#[ObservedBy([\App\Observers\TagObserver::class])]
+final class Tagged extends Model
+{
+    public $timestamps = false;
+}
+
+function overStops(): bool
+{
+    return PrivateParented::find(1) === null && Tagged::find(1) === null;
+}
+
 // Another model as the observer, which takes retrieved from Model (HasEvents).
 #[ObservedBy([Own::class])]
 final class Peer extends Model

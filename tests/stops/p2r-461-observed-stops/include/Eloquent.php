@@ -138,3 +138,22 @@ final class HiddenObserver
     {
     }
 }
+
+// PHP's method_exists finds neither of these, but Mago's lookup does, so the tool stops.
+class PrivateBase
+{
+    private function retrieved(Model $model): void
+    {
+    }
+}
+
+final class PrivateParentObserver extends PrivateBase
+{
+}
+
+/**
+ * @method void retrieved(Model $model)
+ */
+final class TagObserver
+{
+}

@@ -3834,16 +3834,21 @@ and its gain is typed attribute reads.
   without `.php`. Migrations never enter Mago: the tool parses them and
   resolves their names only, and prints no Mago finding about them. A
   migration's last top-level statement is `return new class extends
-  Migration { .. };`, with only `declare` and `use` statements before
-  it, because Laravel runs any other code when it requires the file;
+  Migration { .. };`, with only `declare` and `use` statements and
+  inline text (a byte order mark) before it, because Laravel runs any
+  other code when it requires the file;
   `Migration` resolves to
   `\Illuminate\Database\Migrations\Migration`, and its class has a public
   method `up()` without parameters, with or without the return type
-  `void`, no method `shouldRun()`, which Laravel asks before it runs
-  `up()`, no two methods, properties or constants of one name and no
+  `void`, no method `shouldRun()` or `getConnection()`, which Laravel
+  calls before it runs `up()`, and no magic method (a name that starts
+  with `__`, such as `__construct` or `__destruct`), which PHP runs when
+  Laravel builds, clones or drops the object, no two methods,
+  properties or constants of one name and no
   modifier written twice, which PHP rejects, and no hooked property and
-  no closure or arrow function in a constant, a property default or a
-  parameter default (PHP 8.5 allows them there), because a read in
+  no closure, arrow function or first-class callable (`drop(...)`) in a
+  constant, a property default or a parameter default (PHP 8.5 allows
+  them there), because a read in
   `up()` would run its code; its other members are not read (a `$connection` naming another
   database included), and `down()` is not read. `Schema` stands for
   `\Illuminate\Support\Facades\Schema` and `DB` for

@@ -2312,6 +2312,9 @@ impl Converter<'_> {
         if let Some(converted) = self.caught_call(call, node) {
             return converted;
         }
+        if let Some(converted) = self.store_call(node) {
+            return converted.map(|(call, ty)| (call, Some(ty)));
+        }
         let Some((object, ty)) = self.expression(call.object) else {
             self.record_refused_arguments(&call.argument_list);
             return None;
@@ -2402,6 +2405,9 @@ impl Converter<'_> {
             self.record_refused_arguments(&call.argument_list);
             self.refuse(node, problem);
             return None;
+        }
+        if let Some(converted) = self.store_call(node) {
+            return converted.map(|(call, ty)| (call, Some(ty)));
         }
         if self.names_date_time(call.class) {
             return self

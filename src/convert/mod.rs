@@ -626,6 +626,8 @@ struct Converter<'c> {
     used_traits: HashSet<Vec<u8>>,
     /// The Eloquent models of the input, with their fields or why they have none (P2R-401).
     models: Vec<models::Model>,
+    /// The store functions each model's code calls, by class index (P2R-410).
+    store_uses: HashMap<usize, models::StoreUse>,
 }
 
 impl<'c> Converter<'c> {
@@ -668,6 +670,7 @@ impl<'c> Converter<'c> {
             statement: None,
             used_traits: HashSet::new(),
             models: Vec::new(),
+            store_uses: HashMap::new(),
         }
     }
 
@@ -827,6 +830,7 @@ impl<'c> Converter<'c> {
         let mut main: Vec<String> = Vec::new();
         // Each enum's place among the items, filled once every use is known (P2R-115).
         let mut enum_slots: Vec<(usize, usize, usize, &Enum<'_>)> = Vec::new();
+        let mut model_slots: Vec<(usize, usize, usize)> = Vec::new();
         for (unit, &module) in units.iter().zip(&module_of) {
             self.current_module = module;
             let items = &mut items[module];
@@ -951,12 +955,15 @@ impl<'c> Converter<'c> {
                                 if let Some(index) = self.class_index(declaration) {
                                     let name = self.classes[index].rust_name.clone();
                                     owners.insert(name, (module, crates::ItemKind::Type));
-                                    let item = if self.classes[index].model {
-                                        self.model_item(index)
+                                    // A model's store is known once every body has
+                                    // converted (P2R-410).
+                                    if self.classes[index].model {
+                                        items.push(Vec::new());
+                                        model_slots.push((module, items.len() - 1, index));
                                     } else {
-                                        self.class_item(declaration, index)
-                                    };
-                                    items.push(item);
+                                        let item = self.class_item(declaration, index);
+                                        items.push(item);
+                                    }
                                 }
                             }
                             // Its constants go into each class that uses it (P2R-280).
@@ -1007,6 +1014,9 @@ impl<'c> Converter<'c> {
             .collect();
         for ((module, slot, index, _), methods) in enum_slots.into_iter().zip(methods) {
             items[module][slot] = self.enum_item(index, methods);
+        }
+        for (module, slot, index) in model_slots {
+            items[module][slot] = self.model_item(index);
         }
         // Every body has converted, so every array shape the output uses is known; their
         // structs come first, in the crate root for a directory (P2R-200, P2R-172).

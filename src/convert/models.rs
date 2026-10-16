@@ -10,18 +10,22 @@ use mago_codex::metadata::flags::MetadataFlags;
 use mago_codex::metadata::property::PropertyMetadata;
 use mago_codex::metadata::ttype::TypeMetadata;
 use mago_codex::misc::VariableIdentifier;
+use mago_codex::scanner::scan_program;
 use mago_codex::ttype;
 use mago_codex::visibility::Visibility;
-use mago_database::file::{File, FileId};
+use mago_database::file::{File, FileId, FileType};
 use mago_names::ResolvedNames;
 use mago_names::resolver::NameResolver;
+use mago_php_version::PHPVersion;
 use mago_span::{HasSpan, Span};
 use mago_syntax::cst::*;
 use mago_syntax::parser::parse_file;
 use mago_syntax::walker::Walker;
 
-use super::{Converter, Mode, ParameterSignature, classes};
+use super::lists::unparenthesized;
+use super::{Converter, Mode, ParameterSignature, classes, nulls};
 use crate::names;
+use crate::printer::{BinOp, RExpr};
 use crate::types::{self, RustType};
 
 impl Converter<'_> {
@@ -121,7 +125,401 @@ impl Converter<'_> {
             }
             lines.push("}".to_owned());
         }
+        if let Some(uses) = self.store_uses.get(&index) {
+            lines.extend(store_lines(name, *uses));
+        }
         lines
+    }
+
+    /// `M::create([..])`, `M::find($id)`, their forms through `M::query()`, and
+    /// `M::query()->where(..)->first()`, on a model with a struct; `None` when `node` is
+    /// none of these, which then converts or stops as any other call (P2R-411 to P2R-414).
+    pub(super) fn store_call(
+        &mut self,
+        node: &Expression<'_>,
+    ) -> Option<Option<(RExpr, RustType)>> {
+        let (index, op, arguments, wheres) = self.store_form(node)?;
+        let key = &self.classes[index].key;
+        let store = self
+            .models
+            .iter()
+            .find(|model| &model.key == key)?
+            .store
+            .clone();
+        let converted = match store {
+            Err(reason) => {
+                self.refuse(node, reason);
+                None
+            }
+            Ok(store) => match op {
+                StoreOp::Create => self.store_create(node, index, arguments, &store),
+                StoreOp::Find => self.store_find(node, index, arguments),
+                StoreOp::First => self.store_first(node, index, &wheres, &store),
+            },
+        };
+        if converted.is_none() {
+            self.record_refused(node);
+        }
+        Some(converted)
+    }
+
+    /// The model's class index, the operation, its argument list, and the argument lists of
+    /// the `where` calls in source order, when `node` is one whole chain of section 42.
+    #[allow(clippy::type_complexity)]
+    fn store_form<'n, 'a>(
+        &self,
+        node: &'n Expression<'a>,
+    ) -> Option<(
+        usize,
+        StoreOp,
+        &'n ArgumentList<'a>,
+        Vec<&'n ArgumentList<'a>>,
+    )> {
+        let named = |selector: &ClassLikeMemberSelector<'_>, name: &[u8]| {
+            matches!(selector, ClassLikeMemberSelector::Identifier(method)
+                if method.value.eq_ignore_ascii_case(name))
+        };
+        let (method, arguments, class, object) = match node {
+            Expression::Call(Call::StaticMethod(call)) => {
+                (&call.method, &call.argument_list, Some(call.class), None)
+            }
+            Expression::Call(Call::Method(call)) => {
+                (&call.method, &call.argument_list, None, Some(call.object))
+            }
+            _ => return None,
+        };
+        let op = if named(method, b"create") {
+            StoreOp::Create
+        } else if named(method, b"find") {
+            StoreOp::Find
+        } else if named(method, b"first") {
+            StoreOp::First
+        } else {
+            return None;
+        };
+        let mut wheres = Vec::new();
+        let class = match (class, object) {
+            (Some(class), _) => class,
+            (None, Some(mut object)) => loop {
+                match object {
+                    Expression::Call(Call::Method(inner)) if named(&inner.method, b"where") => {
+                        wheres.push(&inner.argument_list);
+                        object = inner.object;
+                    }
+                    Expression::Call(Call::StaticMethod(inner))
+                        if named(&inner.method, b"query")
+                            && inner.argument_list.arguments.is_empty() =>
+                    {
+                        break inner.class;
+                    }
+                    _ => return None,
+                }
+            },
+            (None, None) => return None,
+        };
+        wheres.reverse();
+        // `first` follows one `where` or more; `create` and `find` follow none.
+        if matches!(op, StoreOp::First) == wheres.is_empty() {
+            return None;
+        }
+        // `M::first()` is no form; `first` comes only through `query()`, and without the
+        // columns to load, which would leave the others unread.
+        if matches!(op, StoreOp::First) && (object.is_none() || !arguments.arguments.is_empty()) {
+            return None;
+        }
+        let key = self.class_key(class)?;
+        let index = self.classes.iter().position(|c| c.key == key && c.model)?;
+        let has_struct = self
+            .models
+            .iter()
+            .any(|model| model.key == key && model.fields.is_ok());
+        has_struct.then_some((index, op, arguments, wheres))
+    }
+
+    /// `M::create([..])` as `M::store_create(M { .. })` (P2R-411).
+    fn store_create(
+        &mut self,
+        node: &Expression<'_>,
+        index: usize,
+        arguments: &ArgumentList<'_>,
+        store: &StoreRules,
+    ) -> Option<(RExpr, RustType)> {
+        let rules = match &store.create {
+            Ok(rules) => rules,
+            Err(reason) => {
+                self.refuse(node, reason.clone());
+                return None;
+            }
+        };
+        let Some(Expression::Array(array)) = sole_argument(arguments).map(unparenthesized) else {
+            self.refuse(
+                node,
+                "create converts only with one array literal of the row's values (P2R-411)",
+            );
+            return None;
+        };
+        let name = self.classes[index].rust_name.clone();
+        let fields = self.classes[index].fields.clone();
+        let mut values: Vec<(String, RExpr)> = Vec::new();
+        let mut named: HashSet<Vec<u8>> = HashSet::new();
+        for element in array.elements.iter() {
+            let ArrayElement::KeyValue(entry) = element else {
+                self.refuse(element, "each value of create needs a string key (P2R-411)");
+                return None;
+            };
+            let Some(column) = string_literal(entry.key) else {
+                self.refuse(
+                    entry.key,
+                    "a key of create must be a string literal (P2R-411)",
+                );
+                return None;
+            };
+            let field = fields
+                .iter()
+                .find(|field| field.php_name == column.as_bytes() && column != "id");
+            let Some(field) = field else {
+                self.refuse(
+                    entry.key,
+                    format!("the key {column} names no field of the struct other than id, so create cannot store it (P2R-411)"),
+                );
+                return None;
+            };
+            if !named.insert(field.php_name.clone()) {
+                self.refuse(entry.key, "a key of create is written twice (P2R-411)");
+                return None;
+            }
+            // With `$guarded = []`, Laravel fills no key that starts with `_` or holds a `.`.
+            let fillable = match &rules.fillable {
+                Some(keys) => keys.contains(&column),
+                None => !column.starts_with('_') && !column.contains('.'),
+            };
+            if !fillable {
+                self.refuse(
+                    entry.key,
+                    format!("Laravel does not fill the key {column}, so it drops it or, in strict mode, throws (P2R-411)"),
+                );
+                return None;
+            }
+            if store.numeric_text.contains(&column) {
+                self.refuse(entry.value, NUMERIC_TEXT);
+                return None;
+            }
+            let expr = self.store_value(entry.value, &field.ty)?;
+            values.push((field.rust_name.clone(), expr));
+        }
+        for field in fields.iter().filter(|field| field.php_name != b"id") {
+            if named.contains(&field.php_name) {
+                continue;
+            }
+            let column = String::from_utf8_lossy(&field.php_name).into_owned();
+            if !matches!(field.ty, RustType::Option(_)) || rules.defaults.contains(&column) {
+                self.refuse(
+                    node,
+                    format!("create must name the field {column}, which cannot be null or whose column has a default that the created model would not read (P2R-411)"),
+                );
+                return None;
+            }
+            values.push((field.rust_name.clone(), RExpr::None));
+        }
+        values.push(("id".to_owned(), RExpr::Int(0)));
+        self.store_uses.entry(index).or_default().create = true;
+        Some((
+            RExpr::Call(
+                format!("{name}::store_create"),
+                vec![RExpr::Struct(name.clone(), values)],
+            ),
+            RustType::Class(name),
+        ))
+    }
+
+    /// A value of `create` for a field of type `ty`, of the field's PHP type, as the owned
+    /// value the struct holds (P2R-411).
+    fn store_value(&mut self, value: &Expression<'_>, ty: &RustType) -> Option<RExpr> {
+        let (expr, found) = self.value(value, Some(ty))?;
+        let null = matches!(
+            unparenthesized(value),
+            Expression::Literal(Literal::Null(_))
+        );
+        if !(null && matches!(ty, RustType::Option(_))) && !same_kind(&found, ty) {
+            self.refuse(
+                value,
+                "a value of create must have the PHP type of its field, because Laravel keeps it as given (P2R-411)",
+            );
+            return None;
+        }
+        if nulls::null_for_plain(&found, ty) {
+            self.refuse(
+                value,
+                "a value that may be null cannot go into a field that cannot be null (P2R-106)",
+            );
+            return None;
+        }
+        let expr = self.declared_value(value, expr, &found, ty)?;
+        let expr = self.stored(value, expr, &found, value.span())?;
+        Some(nulls::wrapped(expr, &found, ty))
+    }
+
+    /// `M::find($id)` as `M::store_find(id)` (P2R-412).
+    fn store_find(
+        &mut self,
+        node: &Expression<'_>,
+        index: usize,
+        arguments: &ArgumentList<'_>,
+    ) -> Option<(RExpr, RustType)> {
+        let Some(id) = sole_argument(arguments) else {
+            self.refuse(node, "find converts only with one argument (P2R-412)");
+            return None;
+        };
+        let (expr, ty) = self.expression(id)?;
+        if ty != RustType::I64 {
+            self.refuse(
+                id,
+                "find converts only with an int id, which the store compares with the row's id (P2R-412)",
+            );
+            return None;
+        }
+        let name = self.classes[index].rust_name.clone();
+        self.store_uses.entry(index).or_default().find = true;
+        Some((
+            RExpr::Call(format!("{name}::store_find"), vec![expr]),
+            RustType::Option(Box::new(RustType::Class(name))),
+        ))
+    }
+
+    /// `M::query()->where('c', $v)..->first()` as `M::store_first(|row: &M| ..)` (P2R-413).
+    fn store_first(
+        &mut self,
+        node: &Expression<'_>,
+        index: usize,
+        wheres: &[&ArgumentList<'_>],
+        store: &StoreRules,
+    ) -> Option<(RExpr, RustType)> {
+        let name = self.classes[index].rust_name.clone();
+        let fields = self.classes[index].fields.clone();
+        let mut condition: Option<RExpr> = None;
+        for list in wheres {
+            let [Argument::Positional(column), Argument::Positional(value)] =
+                list.arguments.as_slice()
+            else {
+                self.refuse(
+                    node,
+                    "where converts only with a column and a value (P2R-413)",
+                );
+                return None;
+            };
+            if column.ellipsis.is_some() || value.ellipsis.is_some() {
+                self.refuse(
+                    node,
+                    "where converts only with a column and a value (P2R-413)",
+                );
+                return None;
+            }
+            let field = string_literal(column.value).and_then(|column| {
+                fields
+                    .iter()
+                    .find(|field| field.php_name == column.as_bytes())
+                    .cloned()
+            });
+            let Some(field) = field else {
+                self.refuse(
+                    column.value,
+                    "the column of where must be a string literal that names a field of the struct (P2R-413)",
+                );
+                return None;
+            };
+            if store
+                .numeric_text
+                .contains(String::from_utf8_lossy(&field.php_name).as_ref())
+            {
+                self.refuse(value.value, NUMERIC_TEXT);
+                return None;
+            }
+            let compared = self.store_compared(value.value, &field)?;
+            condition = Some(match condition {
+                Some(earlier) => RExpr::Binary(Box::new(earlier), BinOp::And, Box::new(compared)),
+                None => compared,
+            });
+        }
+        let condition = condition?;
+        self.store_uses.entry(index).or_default().first = true;
+        Some((
+            RExpr::Call(
+                format!("{name}::store_first"),
+                vec![RExpr::Closure(
+                    vec![format!("row: &{name}")],
+                    Box::new(condition),
+                )],
+            ),
+            RustType::Option(Box::new(RustType::Class(name))),
+        ))
+    }
+
+    /// The test of one `where`: the row's field against a value that reads the same each
+    /// time the closure runs (P2R-413).
+    fn store_compared(
+        &mut self,
+        value: &Expression<'_>,
+        field: &ParameterSignature,
+    ) -> Option<RExpr> {
+        let read = RExpr::Field(
+            Box::new(RExpr::Var("row".to_owned())),
+            field.rust_name.clone(),
+        );
+        if !steady(value) {
+            self.refuse(
+                value,
+                "the value of where must be a variable, a literal or a property read of one, which reads the same each time the store compares a row (P2R-413)",
+            );
+            return None;
+        }
+        let null = matches!(
+            unparenthesized(value),
+            Expression::Literal(Literal::Null(_))
+        );
+        if null {
+            if !matches!(field.ty, RustType::Option(_)) {
+                self.refuse(
+                    value,
+                    "null in where needs a field that may be null (P2R-413)",
+                );
+                return None;
+            }
+            return Some(RExpr::MethodCall(
+                Box::new(read),
+                "is_none".to_owned(),
+                Vec::new(),
+            ));
+        }
+        let (expr, found) = self.expression(value)?;
+        if matches!(found, RustType::Option(_)) || !same_kind(&found, &field.ty) {
+            self.refuse(
+                value,
+                "the value of where must have the PHP type of its field and not be null (P2R-413)",
+            );
+            return None;
+        }
+        Some(match &field.ty {
+            // A `String` compares with a `&str` or a `String` value alike.
+            RustType::Option(inner) if **inner == RustType::String => {
+                let read = RExpr::MethodCall(Box::new(read), "as_ref".to_owned(), Vec::new());
+                let test = RExpr::Binary(
+                    Box::new(RExpr::Raw("*text".to_owned())),
+                    BinOp::Eq,
+                    Box::new(expr),
+                );
+                RExpr::MethodCall(
+                    Box::new(read),
+                    "is_some_and".to_owned(),
+                    vec![RExpr::Closure(vec!["text".to_owned()], Box::new(test))],
+                )
+            }
+            RustType::Option(_) => RExpr::Binary(
+                Box::new(read),
+                BinOp::Eq,
+                Box::new(RExpr::Some(Box::new(expr))),
+            ),
+            _ => RExpr::Binary(Box::new(read), BinOp::Eq, Box::new(expr)),
+        })
     }
 
     /// True when `object` has a model type, whose attributes this section only reads
@@ -133,6 +531,108 @@ impl Converter<'_> {
         matches!(types::rust_type(union, &self.type_names), Ok(RustType::Class(name))
             if self.class_named(&name).is_some_and(|index| self.classes[index].model))
     }
+}
+
+/// The problem of a value for a `String` field of a column that is not text (P2R-411,
+/// P2R-413).
+const NUMERIC_TEXT: &str = "the field is a string cast of a column that is not text, which SQLite stores by the column's type, so the value reads back as another string (P2R-411, P2R-413)";
+
+/// The operation of a form of section 42.
+#[derive(Clone, Copy, Debug)]
+enum StoreOp {
+    Create,
+    Find,
+    First,
+}
+
+/// The one positional argument of `list`.
+fn sole_argument<'l, 'a>(list: &'l ArgumentList<'a>) -> Option<&'l Expression<'a>> {
+    match list.arguments.as_slice() {
+        [Argument::Positional(argument)] if argument.ellipsis.is_none() => Some(argument.value),
+        _ => None,
+    }
+}
+
+/// True when `found`, a value's type, holds the kind of `field`'s type: `int`, `string` or
+/// `bool`, ignoring null (P2R-411, P2R-413).
+fn same_kind(found: &RustType, field: &RustType) -> bool {
+    let kind = |ty: &RustType| match ty.inner() {
+        RustType::I64 => 1,
+        RustType::String => 2,
+        RustType::Bool => 3,
+        _ => 0,
+    };
+    kind(found) != 0 && kind(found) == kind(field)
+}
+
+/// True for a value that reads the same each time it is read: a variable, a literal, or a
+/// property read of such a value (P2R-413).
+fn steady(value: &Expression<'_>) -> bool {
+    match unparenthesized(value) {
+        Expression::Variable(Variable::Direct(_)) | Expression::Literal(_) => true,
+        Expression::Access(Access::Property(access)) => {
+            matches!(&access.property, ClassLikeMemberSelector::Identifier(_))
+                && steady(access.object)
+        }
+        _ => false,
+    }
+}
+
+/// The store functions the input's code calls on one model (P2R-410).
+#[derive(Clone, Copy, Debug, Default)]
+pub(super) struct StoreUse {
+    pub(super) create: bool,
+    pub(super) find: bool,
+    pub(super) first: bool,
+}
+
+/// The `impl` block of a model's store, with only the functions its code calls, because
+/// rustc warns about the others (P2R-50, P2R-410).
+fn store_lines(name: &str, uses: StoreUse) -> Vec<String> {
+    let mut lines = vec![
+        String::new(),
+        format!("impl {name} {{"),
+        format!(
+            "    fn store_rows() -> &'static std::thread::LocalKey<std::cell::RefCell<Vec<{name}>>> {{"
+        ),
+        "        thread_local! {".to_owned(),
+        format!(
+            "            static ROWS: std::cell::RefCell<Vec<{name}>> = const {{ std::cell::RefCell::new(Vec::new()) }};"
+        ),
+        "        }".to_owned(),
+        "        &ROWS".to_owned(),
+        "    }".to_owned(),
+    ];
+    if uses.create {
+        lines.extend([
+            String::new(),
+            format!("    pub fn store_create(mut row: {name}) -> {name} {{"),
+            format!("        {name}::store_rows().with_borrow_mut(|rows| {{"),
+            "            row.id = rows.len() as i64 + 1;".to_owned(),
+            "            rows.push(row.clone());".to_owned(),
+            "            row".to_owned(),
+            "        })".to_owned(),
+            "    }".to_owned(),
+        ]);
+    }
+    if uses.find {
+        lines.extend([
+            String::new(),
+            format!("    pub fn store_find(id: i64) -> Option<{name}> {{"),
+            format!("        {name}::store_rows().with_borrow(|rows| rows.iter().find(|row| row.id == id).cloned())"),
+            "    }".to_owned(),
+        ]);
+    }
+    if uses.first {
+        lines.extend([
+            String::new(),
+            format!("    pub fn store_first(matches: impl Fn(&{name}) -> bool) -> Option<{name}> {{"),
+            format!("        {name}::store_rows().with_borrow(|rows| rows.iter().find(|row| matches(row)).cloned())"),
+            "    }".to_owned(),
+        ]);
+    }
+    lines.push("}".to_owned());
+    lines
 }
 
 /// The property of a field, as the struct and a read see it (P2R-401, P2R-404).
@@ -174,6 +674,8 @@ const MODEL_PROPERTIES: [&[u8]; 5] = [b"$table", b"$fillable", b"$guarded", b"$h
 pub(super) struct Model {
     pub(super) key: Vec<u8>,
     pub(super) fields: Result<Vec<Field>, (Span, String)>,
+    /// What the store of the model needs, or why its forms stop (P2R-410).
+    pub(super) store: Result<StoreRules, String>,
 }
 
 /// A field of a model's struct (P2R-401).
@@ -228,20 +730,56 @@ pub(super) fn find(
             )
         })
         .collect();
-    let tables = migrations.map(|migrations| fold(migrations, &keyed));
+    let folded = migrations.map(|migrations| fold(migrations, &keyed));
+    let tables = folded.as_ref().map(|(tables, _)| tables);
     let public = public_properties(codebase);
     let overridden = model_methods(codebase);
-    let models: Vec<Model> = candidates
+    let mut models: Vec<Model> = candidates
         .iter()
-        .map(|(key, class, names)| Model {
-            key: key.clone(),
-            fields: model_fields(class, names, tables.as_ref(), &public, &overridden),
+        .map(|(key, class, names)| {
+            let (fields, store) = match model_fields(class, names, tables, &public, &overridden) {
+                Ok((fields, store)) => (Ok(fields), store),
+                Err(reason) => (Err(reason), Err(String::new())),
+            };
+            Model {
+                key: key.clone(),
+                fields,
+                store,
+            }
         })
         .collect();
+    // Two models of one table would keep two lists of its rows (P2R-410).
+    let tables_of: Vec<Option<String>> = models
+        .iter()
+        .map(|model| model.store.as_ref().ok().map(|store| store.table.clone()))
+        .collect();
+    for (at, model) in models.iter_mut().enumerate() {
+        let Some(table) = &tables_of[at] else {
+            continue;
+        };
+        if tables_of
+            .iter()
+            .enumerate()
+            .any(|(other, name)| other != at && name.as_ref() == Some(table))
+        {
+            model.store = Err(format!(
+                "another model with a struct reads the table {table} too, and one store per model would split its rows (P2R-410)"
+            ));
+        } else if let Some((_, seeds)) = &folded
+            && (seeds.any || seeds.tables.contains(table))
+        {
+            model.store = Err(format!(
+                "a migration writes rows into the table {table}, which the store, empty when it starts, does not hold (P2R-410)"
+            ));
+        }
+    }
     for model in &models {
         if let Ok(fields) = &model.fields {
             tell(codebase, &model.key, fields);
         }
+    }
+    if !models.is_empty() {
+        tell_static_forms(codebase);
     }
     models
 }
@@ -306,7 +844,7 @@ fn model_fields(
     tables: Option<&Tables>,
     public: &HashSet<String>,
     overridden: &HashSet<Vec<u8>>,
-) -> Result<Vec<Field>, (Span, String)> {
+) -> Result<FieldsAndStore, (Span, String)> {
     if let Some(attributes) = class.attribute_lists.first() {
         return Err((
             attributes.span(),
@@ -439,7 +977,168 @@ fn model_fields(
             nullable: column.nullable,
         });
     }
-    Ok(fields)
+    let store = store_rules(
+        class,
+        &table,
+        columns,
+        &fields,
+        &casts,
+        (timestamps, soft_deletes),
+    );
+    Ok((fields, store))
+}
+
+/// The fields of a model's struct, and what its store needs or why its forms stop.
+type FieldsAndStore = (Vec<Field>, Result<StoreRules, String>);
+
+/// What the store of a model needs, or why each form stops on the model (P2R-410).
+#[derive(Clone, Debug)]
+pub(super) struct StoreRules {
+    pub(super) table: String,
+    /// The `String` fields of a column that is not text, which SQLite stores by the column's
+    /// type, so a value reads back as another string (`'1.0'` as `'1'`).
+    pub(super) numeric_text: HashSet<String>,
+    pub(super) create: Result<CreateRules, String>,
+}
+
+/// What `create` needs of a model (P2R-411).
+#[derive(Clone, Debug)]
+pub(super) struct CreateRules {
+    /// The keys `create` may name, or `None` for every key (`$guarded = []`).
+    pub(super) fillable: Option<HashSet<String>>,
+    /// The columns whose default the database stores when an insert does not name them.
+    pub(super) defaults: HashSet<String>,
+}
+
+fn store_rules(
+    class: &Class<'_>,
+    table: &str,
+    columns: &[Column],
+    fields: &[Field],
+    casts: &HashMap<String, Option<Kind>>,
+    (timestamps, soft_deletes): (bool, bool),
+) -> Result<StoreRules, String> {
+    // Laravel's queries of a SoftDeletes model skip a row whose deleted_at is set, which the
+    // store, holding no such column, never has; a field of it could set one.
+    if soft_deletes
+        && (!columns.iter().any(|c| c.name == "deleted_at")
+            || fields.iter().any(|f| f.column == "deleted_at"))
+    {
+        return Err(format!(
+            "the model uses SoftDeletes, so Laravel's queries read deleted_at, which the table {table} needs as a column the struct leaves out (P2R-410)"
+        ));
+    }
+    // The store numbers the rows as `id()`, an auto-increment key, does.
+    let numbered = columns.iter().any(|c| c.name == "id" && c.increments)
+        && !casts.contains_key("id")
+        && fields
+            .iter()
+            .any(|f| f.column == "id" && f.kind == Kind::Int && !f.nullable);
+    if !numbered {
+        return Err(format!(
+            "the store needs an int id that id() declares and no cast changes, which the table {table} does not have (P2R-410)"
+        ));
+    }
+    let numeric_text = fields
+        .iter()
+        .filter(|f| {
+            f.kind == Kind::Text
+                && columns
+                    .iter()
+                    .any(|c| c.name == f.column && c.kind != Kind::Text)
+        })
+        .map(|f| f.column.clone())
+        .collect();
+    Ok(StoreRules {
+        table: table.to_owned(),
+        numeric_text,
+        create: create_rules(class, table, columns, fields, timestamps),
+    })
+}
+
+fn create_rules(
+    class: &Class<'_>,
+    table: &str,
+    columns: &[Column],
+    fields: &[Field],
+    timestamps: bool,
+) -> Result<CreateRules, String> {
+    let field = |name: &str| fields.iter().any(|field| field.column == name);
+    // Laravel writes both timestamps on every create while the model keeps them.
+    if timestamps {
+        let both = ["created_at", "updated_at"]
+            .iter()
+            .all(|name| columns.iter().any(|c| c.name == *name) && !field(name));
+        if !both {
+            return Err(format!(
+                "Laravel writes created_at and updated_at on create, so the table {table} needs both, as columns the struct leaves out, or the model $timestamps = false (P2R-411)"
+            ));
+        }
+    }
+    let needed = columns.iter().find(|c| {
+        !c.nullable
+            && !c.default
+            && c.name != "id"
+            && !(timestamps && (c.name == "created_at" || c.name == "updated_at"))
+            && !field(&c.name)
+    });
+    if let Some(column) = needed {
+        return Err(format!(
+            "the column {} of the table {table} cannot be null, has no default and is left out of the struct, so create cannot give it a value (P2R-411)",
+            column.name
+        ));
+    }
+    Ok(CreateRules {
+        fillable: fillable_keys(class)?,
+        defaults: columns
+            .iter()
+            .filter(|c| c.default)
+            .map(|c| c.name.clone())
+            .collect(),
+    })
+}
+
+/// The keys of `$fillable`, or `None` when `$guarded = []` makes every key fillable;
+/// any other declaration stops `create` (P2R-411).
+fn fillable_keys(class: &Class<'_>) -> Result<Option<HashSet<String>>, String> {
+    let mut fillable: Option<HashSet<String>> = None;
+    let mut open = false;
+    for member in class.members.iter() {
+        let ClassLikeMember::Property(Property::Plain(plain)) = member else {
+            continue;
+        };
+        let [PropertyItem::Concrete(item)] = plain.items.as_slice() else {
+            continue;
+        };
+        let Expression::Array(array) = item.value else {
+            continue;
+        };
+        match item.variable.name {
+            b"$fillable" => {
+                let keys = array
+                    .elements
+                    .iter()
+                    .map(|element| match element {
+                        ArrayElement::Value(value) => string_literal(value.value),
+                        _ => None,
+                    })
+                    .collect::<Option<HashSet<String>>>()
+                    .ok_or("the model's $fillable is not a list of string literals (P2R-411)")?;
+                fillable = Some(keys);
+            }
+            b"$guarded" => open = array.elements.is_empty(),
+            _ => {}
+        }
+    }
+    // Laravel looks in $fillable first, and with an empty one fills what $guarded allows.
+    match (fillable, open) {
+        (Some(keys), _) if !keys.is_empty() => Ok(Some(keys)),
+        (_, true) => Ok(None),
+        _ => Err(
+            "the model declares neither $fillable with keys nor $guarded = [], so Laravel refuses the keys of create (P2R-411)"
+                .to_owned(),
+        ),
+    }
 }
 
 /// What a member of a model is (P2R-401).
@@ -678,6 +1377,48 @@ fn plain_literal(expression: &Expression<'_>) -> bool {
 
 /// Tells Mago each field of the model as a property PHP reads through `__get`, as a
 /// `@property` tag would, replacing a tag of the same name (P2R-403).
+/// Laravel forwards `M::create(..)` and `M::find(..)` through `__callStatic`, which Mago types
+/// as mixed. A patch of Eloquent's model gives them to Mago as `@method static`, typed as the
+/// forms of section 42 convert them; a model of an include that declares either for real
+/// keeps its own (P2R-411, P2R-412).
+fn tell_static_forms(codebase: &mut CodebaseMetadata) {
+    let Some(model) = codebase.get_class_like(MODEL) else {
+        return;
+    };
+    let declares = |name: &[u8]| {
+        model
+            .methods
+            .iter()
+            .any(|method| method.as_bytes().eq_ignore_ascii_case(name))
+    };
+    if declares(b"create") || declares(b"find") {
+        return;
+    }
+    let source = "<?php\n\nnamespace Illuminate\\Database\\Eloquent;\n\n/**\n * @method static static create(array<string, mixed> $attributes = [])\n * @method static static|null find(int $id)\n */\nabstract class Model\n{\n}\n";
+    let file = File::new(
+        Cow::Borrowed(b"php2rust://eloquent-model-patch.php"),
+        FileType::Patch,
+        None,
+        Cow::Borrowed(source.as_bytes()),
+    );
+    let arena = LocalArena::new();
+    let program = parse_file(&arena, &file);
+    let names = NameResolver::new(&arena).resolve(program);
+    let mut patch = scan_program(&arena, &file, program, &names, PHPVersion::PHP85);
+    patch.convert_partial_to_patch();
+    codebase.extend(patch);
+    codebase.apply_patches_pass();
+    // The pass adds the methods to the class; their own entries it leaves to the scanner of
+    // a declaration, which a pseudo method has none of.
+    let added: Vec<_> = codebase
+        .patch_function_likes
+        .iter()
+        .filter(|(key, _)| !codebase.function_likes.contains_key(*key))
+        .map(|(key, function)| (*key, function.clone()))
+        .collect();
+    codebase.function_likes.extend(added);
+}
+
 fn tell(codebase: &mut CodebaseMetadata, key: &[u8], fields: &[Field]) {
     let Some(class) = codebase
         .class_likes
@@ -725,6 +1466,10 @@ pub(super) struct Column {
     pub(super) name: String,
     pub(super) kind: Kind,
     pub(super) nullable: bool,
+    /// The database stores a default when an insert does not name the column (P2R-411).
+    pub(super) default: bool,
+    /// `id()`, an auto-increment key that the database numbers (P2R-410).
+    pub(super) increments: bool,
 }
 
 /// A table after the migrations: its columns in the order of their first declaration, or
@@ -740,8 +1485,9 @@ pub(super) type Tables = HashMap<String, Table>;
 /// Folds the `up()` of each migration, in order, into the tables (P2R-400). `keyed` maps
 /// the lowercase name of each model of the input with an int key to its short name, which
 /// `foreignIdFor` names its column after.
-pub(super) fn fold(migrations: &[Migration], keyed: &HashMap<Vec<u8>, String>) -> Tables {
+pub(super) fn fold(migrations: &[Migration], keyed: &HashMap<Vec<u8>, String>) -> (Tables, Seeds) {
     let mut tables = Tables::new();
+    let mut seeds = Seeds::default();
     // True once a form the tool does not read may have changed any table, also one it has
     // not seen, which a later hasTable guard may then find.
     let mut unsure = false;
@@ -786,6 +1532,14 @@ pub(super) fn fold(migrations: &[Migration], keyed: &HashMap<Vec<u8>, String>) -
             unsure = true;
             continue;
         };
+        let seeder = SeedWalk { reader: &reader };
+        for member in class.members.iter() {
+            let down = matches!(member, ClassLikeMember::Method(method)
+                if method.name.value.eq_ignore_ascii_case(b"down"));
+            if !down {
+                seeder.walk_class_like_member(member, &mut seeds);
+            }
+        }
         // A migration that only changes rows changes no table.
         if reader.rows_only(class) {
             continue;
@@ -794,7 +1548,40 @@ pub(super) fn fold(migrations: &[Migration], keyed: &HashMap<Vec<u8>, String>) -
             reader.statement(statement, &mut tables, &mut unsure);
         }
     }
-    tables
+    (tables, seeds)
+}
+
+/// The tables that the migrations write rows into, which the store, empty when it starts,
+/// does not hold (P2R-410).
+#[derive(Debug, Default)]
+pub(super) struct Seeds {
+    tables: HashSet<String>,
+    /// A `DB::table(..)` names its table by something other than a string literal.
+    any: bool,
+}
+
+/// Finds the tables `DB::table(..)` names in a migration.
+struct SeedWalk<'r, 'n> {
+    reader: &'r Reader<'n>,
+}
+
+impl<'ast, 'arena> Walker<'ast, 'arena, Seeds> for SeedWalk<'_, '_> {
+    fn walk_in_call(&self, call: &'ast Call<'arena>, seeds: &mut Seeds) {
+        let Call::StaticMethod(call) = call else {
+            return;
+        };
+        let table = matches!(&call.method, ClassLikeMemberSelector::Identifier(method)
+            if method.value.eq_ignore_ascii_case(b"table"));
+        if !table || !self.reader.facade(call.class, "db") {
+            return;
+        }
+        match sole_argument(&call.argument_list).and_then(string_literal) {
+            Some(name) => {
+                seeds.tables.insert(name);
+            }
+            None => seeds.any = true,
+        }
+    }
 }
 
 /// Makes every table that exists unknown, keeping the first reason of one that already is.
@@ -1376,11 +2163,22 @@ impl Reader<'_> {
         };
         let foreign_id = matches!(lower.as_slice(), b"foreignid" | b"foreignidfor");
         let mut nullable_set: Option<bool> = None;
+        // `id()` is an auto-increment key, which the database numbers on insert.
+        let mut default = lower.as_slice() == b"id";
         let mut change = false;
         let mut foreign = false;
         for (name, arguments) in modifiers {
             let lower = name.to_ascii_lowercase();
             match lower.as_slice() {
+                // A default the database stores when an insert does not name the column;
+                // Laravel writes no default for null.
+                b"default" if !foreign => {
+                    default = !matches!(
+                        positional_list(arguments).as_slice(),
+                        [Expression::Literal(Literal::Null(_))]
+                    );
+                }
+                b"usecurrent" if !foreign => default = true,
                 // After constrained(), a modifier belongs to the foreign key, as in Laravel.
                 b"nullable" if !foreign => {
                     nullable_set = match positional_list(arguments).as_slice() {
@@ -1426,6 +2224,8 @@ impl Reader<'_> {
                 name,
                 kind,
                 nullable: nullable_set.unwrap_or(nullable),
+                default,
+                increments: lower.as_slice() == b"id",
             };
             let existing = columns.iter().position(|c| c.name == column.name);
             match (change, existing) {

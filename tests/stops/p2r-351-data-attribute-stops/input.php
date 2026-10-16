@@ -47,11 +47,11 @@ final class Late extends Data
 {
 }
 
-// laravel-data's attributes on a class that does not extend Data stop.
+// On a class that does not extend Data, the argument forms hold too (P2R-381).
 final class Plain
 {
     public function __construct(
-        #[MapInputName('data.code')]
+        #[MapInputName(strtoupper('code'))]
         public string $code,
     ) {}
 }

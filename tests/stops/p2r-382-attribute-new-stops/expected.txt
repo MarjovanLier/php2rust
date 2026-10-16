@@ -1,0 +1,6 @@
+input.php:15:9: attributes are not supported (P2R-07)
+input.php:17:9: attributes are not supported (P2R-07)
+input.php:20:9: attributes are not supported (P2R-07)
+input.php:23:9: attributes are not supported (P2R-07)
+input.php:26:9: attributes are not supported (P2R-07)
+input.php:35:38: Argument #2 passed to method `Spatie\LaravelData\Attributes\Validation\Unique::__construct` has type `never`, meaning it cannot produce a value. (no-value)

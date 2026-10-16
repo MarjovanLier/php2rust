@@ -4497,9 +4497,10 @@ links to conditions of the store.
   `$this`. Laravel's `when()` returns the callback's result, or `$this`
   when that result is `null`; for the callbacks of P2R-451 (no return
   value, or the builder that `$query->where(..)` gives back) that is the
-  same builder. Every other use of `when()` stops (P2R-135, P2R-153, or
-  the rules of section 45 on a collection), so the told type lets no
-  other form convert.
+  same builder. Every other use of `when()` stops (P2R-135, P2R-153, the
+  rules of section 45 on a collection, or a finding Mago gives, P2R-11,
+  such as on Spatie's `QueryBuilder`, whose `@mixin` makes `$this` the
+  `QueryBuilder`), so the told type lets no other form convert.
 - **P2R-451** In the `where` chain of P2R-413, of P2R-421 (ended by
   `sole()` or `firstOrFail()`) or of P2R-441, a link
   `->when($value, <callback>)` MAY stand anywhere between `M::query()` and
@@ -4526,12 +4527,15 @@ links to conditions of the store.
     parameter is untyped or Eloquent's `Builder`, and the second, which
     may be left out, is untyped or written as the PHP type of `$value`
     without `null`: `int`, `string`, `bool`, the class or the enum (not
-    `?string`, `true` or `false`, which PHP checks against the value it
-    passes).
+    `?string` or `true`, which this form leaves out, nor `false`, which
+    PHP refuses with a `TypeError` for every value Laravel passes).
   - Each `where` follows P2R-413, except that its value is a literal, the
-    callback's second parameter, or a property read of that parameter
-    (`$administration->id`), which stands for `$value` without `null`
-    (for an `Option`, the binding of P2R-452).
+    callback's second parameter, or, when that parameter is a model or a
+    struct, a property read of it (`$administration->id`), which stands
+    for `$value` without `null` (for an `Option`, the binding of
+    P2R-452). An enum case's `->value` or `->name` stops (a later
+    slice), and so does a property read of a model that takes no struct
+    (P2R-401).
 - **P2R-452** Each `when` link MUST convert to one more condition of the
   store closure of P2R-413, joined with `&&` in source order: a row
   passes when `$value` is falsy by PHP's rules, or when every `where` of
@@ -4543,10 +4547,12 @@ links to conditions of the store.
   `<falsy> || <conditions>` with the value in place of `b`; for a model,
   struct or enum case `<falsy>` and its `||` are left out. The binding
   `b` has the Rust name of the callback's second parameter (P2R-30, with
-  `r#` for a keyword), or `value` when the callback has one parameter;
-  it takes the first suffix `_1`, `_2` and so on (after the name without
-  `r#`) that is no word of a value's Rust form and neither of the
-  closure's names `row` and `text` of P2R-413; and it is `_` when
+  `r#` for a keyword), or `value` when the callback has one parameter or
+  P2R-30 gives the second no Rust name (`$self`, `$_`), which PHP
+  accepts; it takes the first suffix `_1`, `_2` and so on (after the
+  name without `r#`) that is no word of a value's Rust form (`r#type`
+  is the word `type`) and neither of the closure's names `row` and
+  `text` of P2R-413; and it is `_` when
   nothing reads it (a model, struct or enum case with no `where` whose
   value reads the second parameter).
 - **P2R-453** These stop the conversion: `when()` with one or three

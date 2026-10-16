@@ -87,6 +87,15 @@ function byNames(?Owner $owner, ?string $type): Collection
         ->get();
 }
 
+// A model value without null, with a where on the second parameter (P2R-452).
+/**
+ * @return Collection<int, Code>
+ */
+function ownedBy(Owner $owner): Collection
+{
+    return Code::query()->when($owner, fn (Builder $query, Owner $owner) => $query->where('owner_id', $owner->id))->get();
+}
+
 // A second parameter that has no Rust name, which PHP accepts (P2R-30, P2R-452).
 /**
  * @return Collection<int, Code>
@@ -121,3 +130,4 @@ echo firstNamed('b'), ' ', firstNamed('0'), ' ', firstNamed(''), ' ', firstNamed
 echo soleOf(1), ' ', soleOf(2), ' ', soleOf(0), "\n";
 echo names(byNames($first, null)), ' ', names(byNames(null, '0')), ' ', names(byNames($second, 'c')), "\n";
 echo names(bySelf('b')), ' ', names(bySelf(null)), "\n";
+echo names(ownedBy($first)), ' ', names(ownedBy($second)), "\n";

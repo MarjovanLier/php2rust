@@ -126,6 +126,10 @@ pub fn by_names(owner: Option<&Owner>, r#type: Option<&str>) -> Vec<Code> {
     });
 }
 
+pub fn owned_by(owner: &Owner) -> Vec<Code> {
+    return Code::store_get(|row: &Code| row.owner_id == owner.id);
+}
+
 pub fn by_self(name: Option<&str>) -> Vec<Code> {
     return Code::store_get(|row: &Code| {
         name.is_none_or(|value| value.is_empty() || value == "0" || row.name == value)
@@ -273,5 +277,9 @@ fn main() {
     print!("{}", names(&by_self(Some("b"))));
     print!(" ");
     print!("{}", names(&by_self(None)));
+    print!("\n");
+    print!("{}", names(&owned_by(&first)));
+    print!(" ");
+    print!("{}", names(&owned_by(&second)));
     print!("\n");
 }

@@ -1,3 +1,3 @@
-input/App/Filtered.php:23:12: when converts only as Laravel's, whose type the tool tells Mago when an included file declares its trait Conditionable (P2R-450, P2R-451)
+input/App/Filtered.php:23:12: when converts only as the method of Laravel's trait Conditionable, declared in an included file and not declared again by Eloquent's builder, whose type the tool tells Mago (P2R-450, P2R-451)
 input/Support/Conditionable.php:10:7: a trait that no class or enum of the input uses is not supported, because the tool checks its constants only where they are copied (P2R-280)
 input/Support/Conditionable.php:19:5: a trait may hold only constants; methods, properties and other traits are not supported yet (P2R-280)

@@ -11,6 +11,8 @@ pub struct Code {
     pub id: i64,
     pub name: String,
     pub rank: i64,
+    pub note: Option<String>,
+    pub level: Option<i64>,
 }
 
 impl Code {
@@ -35,12 +37,42 @@ impl Code {
     }
 }
 
+#[derive(Debug)]
+pub struct Filter {
+    pub note: Option<String>,
+    pub level: Option<i64>,
+}
+
+impl Filter {
+    pub fn new(note: Option<&str>, level: Option<i64>) -> Filter {
+        Filter {
+            note: note.map(ToOwned::to_owned),
+            level,
+        }
+    }
+}
+
 pub fn picked(flag: bool, tags: &[String], kind: Option<Kind>, rank: i64) -> Vec<Code> {
     return Code::store_get(|row: &Code| {
         (!flag || row.rank == 1)
             && (tags.is_empty() || row.name == "a")
             && kind.is_none_or(|_| row.rank == 1)
             && (rank == 0 || row.rank == rank)
+    });
+}
+
+pub fn optional(flag: Option<bool>, tags: Option<&[String]>, filter: &Filter) -> Vec<Code> {
+    return Code::store_get(|row: &Code| {
+        flag.is_none_or(|value| !value || row.rank == 1 && row.level.is_none())
+            && tags.is_none_or(|value| value.is_empty() || row.note.is_none())
+            && filter.note.as_deref().is_none_or(|note_1| {
+                note_1.is_empty()
+                    || note_1 == "0"
+                    || row.note.as_ref().is_some_and(|text| *text == note_1)
+            })
+            && filter
+                .level
+                .is_none_or(|level_1| level_1 == 0 || row.level == Some(level_1))
     });
 }
 
@@ -56,16 +88,22 @@ fn main() {
     Code::store_create(Code {
         name: String::from("a"),
         rank: 1,
+        note: None,
+        level: None,
         id: 0,
     });
     Code::store_create(Code {
         name: String::from("b"),
         rank: 2,
+        note: None,
+        level: None,
         id: 0,
     });
     Code::store_create(Code {
         name: String::from("a"),
         rank: 2,
+        note: None,
+        level: None,
         id: 0,
     });
     print!("{}", names(&picked(false, &[], None, 0)));
@@ -83,6 +121,45 @@ fn main() {
     print!(
         "{}",
         names(&picked(true, &[String::from("x")], Some(Kind::Main), 1))
+    );
+    print!("\n");
+    Code::store_create(Code {
+        name: String::from("c"),
+        rank: 1,
+        note: Some(String::from("n")),
+        level: Some(3),
+        id: 0,
+    });
+    Code::store_create(Code {
+        name: String::from("d"),
+        rank: 2,
+        note: Some(String::from("n")),
+        level: None,
+        id: 0,
+    });
+    let none = Filter::new(None, None);
+    print!("{}", names(&optional(None, None, &none)));
+    print!(" ");
+    print!("{}", names(&optional(Some(true), None, &none)));
+    print!(" ");
+    print!(
+        "{}",
+        names(&optional(Some(false), Some(&[String::from("x")]), &none))
+    );
+    print!("\n");
+    print!(
+        "{}",
+        names(&optional(None, None, &Filter::new(Some("n"), None)))
+    );
+    print!(" ");
+    print!(
+        "{}",
+        names(&optional(None, None, &Filter::new(Some("n"), Some(3))))
+    );
+    print!(" ");
+    print!(
+        "{}",
+        names(&optional(None, Some(&[]), &Filter::new(Some("0"), Some(0))))
     );
     print!("\n");
 }

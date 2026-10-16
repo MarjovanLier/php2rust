@@ -101,6 +101,45 @@ function check(): string
     return 'x';
 }
 
+// PHP rejects a second constructor, in any letter case, and a modifier written twice.
+class TwoConstructors extends \Exception
+{
+    public function __construct(string $m)
+    {
+        parent::__construct($m);
+    }
+
+    public function __CONSTRUCT(string $m)
+    {
+        parent::__construct($m);
+    }
+}
+
+final final class Doubled extends \Exception
+{
+    public public function __construct(public public string $what = 'x')
+    {
+        parent::__construct($what);
+    }
+}
+
+// A call that throws in the arguments of the parent call.
+class Described extends \Exception
+{
+    public function __construct(int $n)
+    {
+        parent::__construct(describe($n));
+    }
+}
+
+function describe(int $n): string
+{
+    if ($n < 0) {
+        throw new \InvalidArgumentException('negative');
+    }
+    return 'n=' . $n;
+}
+
 // A variable or parameter of the function's Rust name would hide it (P2R-31).
 class Shadowed extends \Exception
 {
@@ -113,6 +152,61 @@ class Shadowed extends \Exception
 function hide(string $shadowed): string
 {
     return $shadowed;
+}
+
+// More forms the function cannot hold.
+class ByReference extends \Exception
+{
+    public function &__construct(string $m)
+    {
+        parent::__construct($m);
+    }
+}
+
+class ThirdArgument extends \Exception
+{
+    public function __construct(string $m)
+    {
+        parent::__construct($m, 0, null);
+    }
+}
+
+class PromotedCode extends \Exception
+{
+    public function __construct(public int $code = 1)
+    {
+        parent::__construct('c', $code);
+    }
+}
+
+class StaticPromoted extends \Exception
+{
+    public function __construct(public static string $what = 'x')
+    {
+        parent::__construct($what);
+    }
+}
+
+class EndlessLoop extends \Exception
+{
+    public function __construct(string $m)
+    {
+        while (true) {
+            echo "spin\n";
+        }
+        parent::__construct($m);
+    }
+}
+
+class ThrowsInBody extends \Exception
+{
+    public function __construct(string $m)
+    {
+        if ($m === '') {
+            throw new \LogicException('empty');
+        }
+        parent::__construct($m);
+    }
 }
 
 $shadowed = 'x';

@@ -1,4 +1,4 @@
 input.php:8:15: a throw converts only for new of one of PHP's built-in exception classes or an exception class of the input (P2R-212, P2R-392)
-input.php:16:15: a throw converts only with the arguments message and code (P2R-212)
+input.php:16:15: an exception converts only with the arguments message and code (P2R-212, P2R-391)
 input.php:24:9: Cannot throw type `string('')` because it is not an instance of Throwable. (invalid-throw)
 input.php:31:10: new converts only for a class of this file (P2R-133)

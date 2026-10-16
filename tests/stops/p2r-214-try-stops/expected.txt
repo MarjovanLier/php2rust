@@ -1,7 +1,7 @@
 input.php:19:7: finally is not supported (P2R-214)
 input.php:27:9: a try inside another try, its catch bodies included, is not supported (P2R-214)
 input.php:41:9: a break or continue cannot leave the body of a try, which Rust holds in a labelled block (P2R-214)
-input.php:55:14: a catch converts only for PHP's built-in exception classes, Exception and Throwable (P2R-214)
+input.php:55:14: a catch converts only for PHP's built-in exception classes, Exception, Throwable and the exception classes of the input (P2R-214, P2R-392)
 input.php:66:7: a catch after a catch of Exception or Throwable never runs (P2R-214)
 input.php:73:5: the catches of one try must use one variable name (P2R-214)
 input.php:84:5: a catch of a class other than Exception or Throwable needs a variable (P2R-214)

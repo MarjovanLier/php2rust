@@ -159,6 +159,15 @@ impl Converter<'_> {
                 self.refuse(node, reason);
                 None
             }
+            Ok(_)
+                if matches!(op, StoreOp::Get | StoreOp::All) && !arguments.arguments.is_empty() =>
+            {
+                self.refuse(
+                    node,
+                    "get() and all() convert without a list of columns only, because Laravel then loads only those columns (P2R-441)",
+                );
+                None
+            }
             Ok(store) => match op {
                 StoreOp::Create => self.store_create(node, index, arguments, &store),
                 StoreOp::Find | StoreOp::FindOrFail => self.store_find(node, index, arguments, op),
@@ -253,9 +262,9 @@ impl Converter<'_> {
         wheres.reverse();
         match op {
             // `get()` comes through `query()`, after any number of `where`, and `M::all()`
-            // on the class; both without the columns to load (P2R-441).
-            StoreOp::Get if object.is_none() || !arguments.arguments.is_empty() => return None,
-            StoreOp::All if object.is_some() || !arguments.arguments.is_empty() => return None,
+            // on the class; `store_call` refuses the columns to load (P2R-441).
+            StoreOp::Get if object.is_none() => return None,
+            StoreOp::All if object.is_some() => return None,
             StoreOp::Get | StoreOp::All => {}
             // `first`, `sole` and `firstOrFail` follow one `where` or more; the others none.
             _ if op.filters() == wheres.is_empty() => return None,

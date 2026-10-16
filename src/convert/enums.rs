@@ -431,6 +431,8 @@ impl Converter<'_> {
         let Some((method, result)) = found else {
             let message = if ty == RustType::DateTime {
                 "of DateTime only DateTime::createFromFormat() and format() convert (P2R-330)"
+            } else if matches!(ty, RustType::Collection(_)) {
+                super::collections::COLLECTION_USE
             } else {
                 "only ->name of an enum and ->value of a backed enum are supported (P2R-113)"
             };

@@ -3292,7 +3292,8 @@ later sections.
   exits 2 with its reason (P2R-04).
 - **P2R-341** The attribute `#[SensitiveParameter]` (any name PHP
   resolves to `\SensitiveParameter`), written alone on a parameter that
-  is not promoted, of a function, a method or an arrow function, and
+  is not promoted, of a function, a method other than an interface's
+  (P2R-370) or an arrow function, and
   with no arguments (`#[\SensitiveParameter]` or
   `#[\SensitiveParameter()]`), MUST be left out: PHP uses it only to
   hide the argument's value in a stack trace, and the Rust output prints
@@ -3482,9 +3483,10 @@ interface that extends another, its constants and its static methods.
   modifier, `public`, no body, a declared return type and a name that
   does not start with `__`, MUST convert to `pub trait Name { ... }` with
   one line `fn m(&self, p: T) -> R;` per method, in source order. The
-  receiver is `self` instead when only enums implement the interface,
-  because an enum method takes its value (P2R-155), and an interface that
-  both an enum and a class implement stops. The trait takes the Rust name
+  receiver is `self` instead when one or more enums and no class
+  implement the interface, because an enum method takes its value
+  (P2R-155), and an interface with a method that both an enum and a
+  class implement stops. The trait takes the Rust name
   a class of that name takes, and its methods the names methods take
   (P2R-131); a parameter takes the type and form of a method parameter
   (P2R-24, P2R-132, P2R-201, P2R-232), a parameter of a changing type its
@@ -3494,7 +3496,7 @@ interface that extends another, its constants and its static methods.
   would (P2R-33); in a directory input it stands in its file's module,
   which P2R-172 makes for a namespace of interfaces only. These stop:
   a constant, a property or a static method in the interface; `extends`;
-  an attribute (P2R-07); a method modifier other than one `public`, a
+  an attribute (P2R-07), also on a parameter; a method modifier other than one `public`, a
   method body, a by-reference return and a name that starts with `__`
   (P2R-130, P2R-155), which PHP rejects or treats in its own way and
   Mago's analyser does not report; a parameter with a default, by
@@ -3504,15 +3506,9 @@ interface that extends another, its constants and its static methods.
   `clone_into`, `into`, `try_into`, `eq`, `ne`), where only an inherent
   method wins, and `new` or `clone` (P2R-131); two methods whose names are
   equal ignoring letter case (P2R-131); an interface whose name PHP
-  reserves or has as a class-like (P2R-111), whose Rust name is that of
-  another enum, class, interface or function of the output, a name the
-  output uses (P2R-111, P2R-131, P2R-173) or a trait of Rust's prelude
-  (`AsMut`, `AsRef`, `Clone`, `Copy`, `Default`, `DoubleEndedIterator`,
-  `Drop`, `Eq`, `ExactSizeIterator`, `Extend`, `Fn`, `FnMut`, `FnOnce`,
-  `From`, `FromIterator`, `Future`, `Into`, `IntoFuture`,
-  `IntoIterator`, `Iterator`, `Ord`, `PartialEq`, `PartialOrd`, `Send`,
-  `Sized`, `Sync`, `ToString`, `TryFrom`, `TryInto`, `Unpin`), whose
-  methods the output calls; and an
+  reserves or has as a class-like (P2R-111), or whose Rust name is that
+  of another enum, class, interface or function of the output or a name
+  the output uses (P2R-111, P2R-131, P2R-173); and an
   interface declared inside another statement. No array shape or union
   takes a trait's name (P2R-200, P2R-230). An interface declared in an
   included file (P2R-340) is not one of the input.

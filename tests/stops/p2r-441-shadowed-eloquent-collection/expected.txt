@@ -1,0 +1,1 @@
+input/App/Size.php:18:12: get() and all() convert only with Laravel's Eloquent collection and its base class read by --include (P2R-441)

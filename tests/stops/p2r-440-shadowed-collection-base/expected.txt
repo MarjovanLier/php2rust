@@ -1,0 +1,1 @@
+input/App/Size.php:12:15: the type Illuminate\Database\Eloquent\Collection<int, int> has no Rust type (P2R-22)

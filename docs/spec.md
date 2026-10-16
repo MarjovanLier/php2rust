@@ -334,13 +334,15 @@ requirement IDs.
   the conversion. A name whose Rust form is not an ASCII identifier (a
   letter or `_` first, then only ASCII letters, digits and `_`) MUST stop the
   conversion (`$_2` gives `2`; non-ASCII names trip rustc's confusable-name
-  lints).
+  lints). The parameters of a `when` callback are the exception: they are
+  no variables of the function, and P2R-452 names the binding.
 - **P2R-31** These MUST stop the conversion: two PHP functions in the file,
   or two PHP names in one function, that give the same Rust name
   (`getTotal()` and `get_total()`); a variable whose Rust name equals the
   Rust name of a function in the file; a PHP function named `main`; a
   function, variable, parameter or foreach key or value whose Rust name is
-  the name of a helper of P2R-160; and a
+  the name of a helper of P2R-160 (the parameters of a `when` callback are
+  none of these, P2R-452); and a
   function with the name of a function PHP has built in (`next`, `touch`),
   which PHP rejects when it compiles the file and Mago does not report (in
   a namespace PHP accepts it, P2R-151); and a parameter named like a

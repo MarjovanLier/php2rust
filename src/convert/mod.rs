@@ -41,6 +41,7 @@ mod dates;
 mod enums;
 mod exceptions;
 mod expressions;
+mod filters;
 mod flow;
 mod foreach;
 mod functions;

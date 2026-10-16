@@ -23,7 +23,7 @@ use mago_syntax::parser::parse_file;
 use mago_syntax::walker::Walker;
 
 use super::lists::unparenthesized;
-use super::{Converter, Mode, ParameterSignature, classes, nulls, throws};
+use super::{Converter, Mode, ParameterSignature, classes, filters, nulls, throws};
 use crate::names;
 use crate::printer::{self, BinOp, RExpr};
 use crate::types::{self, COLLECTIONS, RustType};
@@ -217,18 +217,13 @@ impl Converter<'_> {
             .is_some_and(|(_, op, _, _)| op.throws())
     }
 
-    /// The model's class index, the operation, its argument list, and the argument lists of
-    /// the `where` calls in source order, when `node` is one whole chain of section 42 or 43.
+    /// The model's class index, the operation, its argument list, and the `where` and
+    /// `when` links in source order, when `node` is one whole chain of sections 42 to 46.
     #[allow(clippy::type_complexity)]
     fn store_form<'n, 'a>(
         &self,
         node: &'n Call<'a>,
-    ) -> Option<(
-        usize,
-        StoreOp,
-        &'n ArgumentList<'a>,
-        Vec<&'n ArgumentList<'a>>,
-    )> {
+    ) -> Option<(usize, StoreOp, &'n ArgumentList<'a>, Vec<Link<'n, 'a>>)> {
         let named = |selector: &ClassLikeMemberSelector<'_>, name: &[u8]| {
             matches!(selector, ClassLikeMemberSelector::Identifier(method)
                 if method.value.eq_ignore_ascii_case(name))
@@ -257,7 +252,11 @@ impl Converter<'_> {
             (None, Some(mut object)) => loop {
                 match object {
                     Expression::Call(Call::Method(inner)) if named(&inner.method, b"where") => {
-                        wheres.push(&inner.argument_list);
+                        wheres.push(Link::Where(&inner.argument_list));
+                        object = inner.object;
+                    }
+                    Expression::Call(Call::Method(inner)) if named(&inner.method, b"when") => {
+                        wheres.push(Link::When(&inner.argument_list));
                         object = inner.object;
                     }
                     Expression::Call(Call::StaticMethod(inner))
@@ -278,7 +277,8 @@ impl Converter<'_> {
             StoreOp::Get if object.is_none() => return None,
             StoreOp::All if object.is_some() => return None,
             StoreOp::Get | StoreOp::All => {}
-            // `first`, `sole` and `firstOrFail` follow one `where` or more; the others none.
+            // `first`, `sole` and `firstOrFail` follow one `where` or `when` link or more;
+            // the others none (P2R-451).
             _ if op.filters() == wheres.is_empty() => return None,
             // `M::first()` is no form; `first` comes only through `query()`, and without the
             // columns to load, which would leave the others unread.
@@ -465,51 +465,21 @@ impl Converter<'_> {
         &mut self,
         node: &Expression<'_>,
         index: usize,
-        wheres: &[&ArgumentList<'_>],
+        wheres: &[Link<'_, '_>],
         store: &StoreRules,
         op: StoreOp,
     ) -> Option<(RExpr, RustType)> {
         let name = self.classes[index].rust_name.clone();
         let fields = self.classes[index].fields.clone();
-        let mut tests: Vec<StoreTest> = Vec::new();
-        for list in wheres {
-            let [Argument::Positional(column), Argument::Positional(value)] =
-                list.arguments.as_slice()
-            else {
-                self.refuse(
-                    node,
-                    "where converts only with a column and a value (P2R-413)",
-                );
-                return None;
-            };
-            if column.ellipsis.is_some() || value.ellipsis.is_some() {
-                self.refuse(
-                    node,
-                    "where converts only with a column and a value (P2R-413)",
-                );
-                return None;
-            }
-            let field = string_literal(column.value).and_then(|column| {
-                fields
-                    .iter()
-                    .find(|field| field.php_name == column.as_bytes())
-                    .cloned()
+        let mut tests: Vec<Condition> = Vec::new();
+        for link in wheres {
+            tests.push(match link {
+                Link::Where(list) => {
+                    let (field, value) = self.where_field(node, list, &fields, store)?;
+                    Condition::Test(self.store_compared(value, &field)?)
+                }
+                Link::When(list) => Condition::When(self.when_test(node, list, &fields, store)?),
             });
-            let Some(field) = field else {
-                self.refuse(
-                    column.value,
-                    "the column of where must be a string literal that names a field of the struct (P2R-413)",
-                );
-                return None;
-            };
-            if let Some(reason) = store
-                .retyped
-                .get(String::from_utf8_lossy(&field.php_name).as_ref())
-            {
-                self.refuse(value.value, *reason);
-                return None;
-            }
-            tests.push(self.store_compared(value.value, &field)?);
         }
         let collection = RustType::Collection(Box::new(RustType::Class(name.clone())));
         // `M::query()->get()` reads every row, as `M::all()` does (P2R-441).
@@ -521,10 +491,7 @@ impl Converter<'_> {
             ));
         }
         // The closure's names may not be names its values read (`$row->code`).
-        let read: HashSet<String> = tests
-            .iter()
-            .flat_map(|test| variables_read(&test.value))
-            .collect();
+        let read: HashSet<String> = tests.iter().flat_map(Condition::words).collect();
         let fresh = |base: &str, taken: &[&str]| {
             (0..)
                 .map(|n| {
@@ -541,7 +508,13 @@ impl Converter<'_> {
         let text = fresh("text", &[row.as_str()]);
         let condition = tests
             .into_iter()
-            .map(|test| test.rendered(&row, &text))
+            .map(|test| match test {
+                Condition::Test(test) => test.rendered(&row, &text, None),
+                Condition::When(when) => {
+                    let binding = fresh(&when.base, &[row.as_str(), text.as_str()]);
+                    when.rendered(&row, &text, &binding)
+                }
+            })
             .reduce(|earlier, test| RExpr::Binary(Box::new(earlier), BinOp::And, Box::new(test)))?;
         let uses = self.store_uses.entry(index).or_default();
         let (function, ty) = match op {
@@ -577,6 +550,53 @@ impl Converter<'_> {
         ))
     }
 
+    /// The field and the value of one `where('<c>', $v)`, with a problem recorded when it
+    /// takes another form (P2R-413).
+    pub(super) fn where_field<'l, 'a>(
+        &mut self,
+        node: &Expression<'_>,
+        list: &'l ArgumentList<'a>,
+        fields: &[ParameterSignature],
+        store: &StoreRules,
+    ) -> Option<(ParameterSignature, &'l Expression<'a>)> {
+        let [Argument::Positional(column), Argument::Positional(value)] = list.arguments.as_slice()
+        else {
+            self.refuse(
+                node,
+                "where converts only with a column and a value (P2R-413)",
+            );
+            return None;
+        };
+        if column.ellipsis.is_some() || value.ellipsis.is_some() {
+            self.refuse(
+                node,
+                "where converts only with a column and a value (P2R-413)",
+            );
+            return None;
+        }
+        let field = string_literal(column.value).and_then(|column| {
+            fields
+                .iter()
+                .find(|field| field.php_name == column.as_bytes())
+                .cloned()
+        });
+        let Some(field) = field else {
+            self.refuse(
+                column.value,
+                "the column of where must be a string literal that names a field of the struct (P2R-413)",
+            );
+            return None;
+        };
+        if let Some(reason) = store
+            .retyped
+            .get(String::from_utf8_lossy(&field.php_name).as_ref())
+        {
+            self.refuse(value.value, *reason);
+            return None;
+        }
+        Some((field, value.value))
+    }
+
     /// The test of one `where`: the row's field against a value that reads the same each
     /// time the closure runs (P2R-413).
     fn store_compared(
@@ -584,11 +604,6 @@ impl Converter<'_> {
         value: &Expression<'_>,
         field: &ParameterSignature,
     ) -> Option<StoreTest> {
-        let test = |kind, value| StoreTest {
-            field: field.rust_name.clone(),
-            kind,
-            value,
-        };
         if !steady(value) {
             self.refuse(
                 value,
@@ -596,32 +611,64 @@ impl Converter<'_> {
             );
             return None;
         }
-        let null = matches!(
-            unparenthesized(value),
-            Expression::Literal(Literal::Null(_))
-        );
-        if null {
-            if !matches!(field.ty, RustType::Option(_)) {
-                self.refuse(
-                    value,
-                    "null in where needs a field that may be null (P2R-413)",
-                );
-                return None;
-            }
-            return Some(test(TestKind::IsNone, RExpr::None));
+        if let Some(test) = self.null_test(value, field) {
+            return test;
         }
         let (expr, found) = self.expression(value)?;
-        if matches!(found, RustType::Option(_)) || !same_kind(&found, &field.ty) {
+        self.compared_test(value, field, TestValue::Expr(expr), &found)
+    }
+
+    /// The test of `where('<c>', null)`, `None` for any other value (P2R-413).
+    pub(super) fn null_test(
+        &mut self,
+        value: &Expression<'_>,
+        field: &ParameterSignature,
+    ) -> Option<Option<StoreTest>> {
+        if !matches!(
+            unparenthesized(value),
+            Expression::Literal(Literal::Null(_))
+        ) {
+            return None;
+        }
+        if !matches!(field.ty, RustType::Option(_)) {
             self.refuse(
                 value,
+                "null in where needs a field that may be null (P2R-413)",
+            );
+            return Some(None);
+        }
+        Some(Some(StoreTest {
+            field: field.rust_name.clone(),
+            kind: TestKind::IsNone,
+            value: TestValue::Expr(RExpr::None),
+        }))
+    }
+
+    /// The test of the field against a value of the type `found`, which must have the PHP
+    /// type of the field and not be null (P2R-413).
+    pub(super) fn compared_test(
+        &mut self,
+        node: &Expression<'_>,
+        field: &ParameterSignature,
+        value: TestValue,
+        found: &RustType,
+    ) -> Option<StoreTest> {
+        if matches!(found, RustType::Option(_)) || !same_kind(found, &field.ty) {
+            self.refuse(
+                node,
                 "the value of where must have the PHP type of its field and not be null (P2R-413)",
             );
             return None;
         }
-        Some(match &field.ty {
-            RustType::Option(inner) if **inner == RustType::String => test(TestKind::TextEq, expr),
-            RustType::Option(_) => test(TestKind::SomeEq, expr),
-            _ => test(TestKind::Eq, expr),
+        let kind = match &field.ty {
+            RustType::Option(inner) if **inner == RustType::String => TestKind::TextEq,
+            RustType::Option(_) => TestKind::SomeEq,
+            _ => TestKind::Eq,
+        };
+        Some(StoreTest {
+            field: field.rust_name.clone(),
+            kind,
+            value,
         })
     }
 
@@ -642,10 +689,40 @@ const NUMERIC_TEXT: &str = "the field is a string cast of a column that is not t
 const REAL_INT: &str = "the field is an int cast of a float or double column, which SQLite stores as REAL, so an int above 2^53 reads back rounded (P2R-411, P2R-413)";
 
 /// The test of one `where`, before the closure's names are chosen (P2R-413).
-struct StoreTest {
+pub(super) struct StoreTest {
     field: String,
     kind: TestKind,
-    value: RExpr,
+    value: TestValue,
+}
+
+/// The value a `where` compares with: an expression, or the value of a `when` link that
+/// its callback's second parameter stands for, alone or through one of its fields
+/// (P2R-451).
+pub(super) enum TestValue {
+    Expr(RExpr),
+    Bound(Option<String>),
+}
+
+/// One `where` or `when` link of a store chain, in source order (P2R-413, P2R-451).
+pub(super) enum Link<'n, 'a> {
+    Where(&'n ArgumentList<'a>),
+    When(&'n ArgumentList<'a>),
+}
+
+/// One condition of the store closure (P2R-413, P2R-452).
+enum Condition {
+    Test(StoreTest),
+    When(filters::WhenTest),
+}
+
+impl Condition {
+    /// The names the condition's values read, which the closure's names avoid.
+    fn words(&self) -> Vec<String> {
+        match self {
+            Condition::Test(test) => test.words(),
+            Condition::When(when) => when.words(),
+        }
+    }
 }
 
 enum TestKind {
@@ -659,9 +736,32 @@ enum TestKind {
 }
 
 impl StoreTest {
-    fn rendered(self, row: &str, text: &str) -> RExpr {
+    /// True when the value is a `when` link's value (P2R-451).
+    pub(super) fn binds(&self) -> bool {
+        matches!(self.value, TestValue::Bound(_))
+    }
+
+    /// The names the value reads.
+    pub(super) fn words(&self) -> Vec<String> {
+        match &self.value {
+            TestValue::Expr(expr) => variables_read(expr),
+            TestValue::Bound(_) => Vec::new(),
+        }
+    }
+
+    /// The test in Rust, where `bound` is what a `when` link's value is named inside its
+    /// condition.
+    pub(super) fn rendered(self, row: &str, text: &str, bound: Option<&RExpr>) -> RExpr {
         let read = RExpr::Field(Box::new(RExpr::Var(row.to_owned())), self.field);
-        let value = Box::new(self.value);
+        let value = Box::new(match (self.value, bound) {
+            (TestValue::Expr(expr), _) => expr,
+            (TestValue::Bound(None), Some(bound)) => bound.clone(),
+            (TestValue::Bound(Some(field)), Some(bound)) => {
+                RExpr::Field(Box::new(bound.clone()), field)
+            }
+            // A bound value appears only inside a `when` condition.
+            (TestValue::Bound(_), None) => RExpr::None,
+        });
         match self.kind {
             TestKind::IsNone => RExpr::MethodCall(Box::new(read), "is_none".to_owned(), Vec::new()),
             TestKind::Eq => RExpr::Binary(Box::new(read), BinOp::Eq, value),
@@ -684,7 +784,7 @@ impl StoreTest {
 
 /// Every name in the debug form of `expr`: the variables it reads, also those inside raw
 /// Rust text, and more, which only makes a closure name take a suffix it did not need.
-fn variables_read(expr: &RExpr) -> Vec<String> {
+pub(super) fn variables_read(expr: &RExpr) -> Vec<String> {
     format!("{expr:?}")
         .split(|c: char| !(c.is_ascii_alphanumeric() || c == '_'))
         .filter(|word| !word.is_empty())
@@ -742,7 +842,7 @@ fn same_kind(found: &RustType, field: &RustType) -> bool {
 
 /// True for a value that reads the same each time it is read: a variable, a literal (a
 /// negative number included), or a property read of such a value (P2R-413).
-fn steady(value: &Expression<'_>) -> bool {
+pub(super) fn steady(value: &Expression<'_>) -> bool {
     match unparenthesized(value) {
         Expression::Variable(Variable::Direct(_)) | Expression::Literal(_) => true,
         Expression::UnaryPrefix(unary) => {
@@ -1039,9 +1139,46 @@ pub(super) fn find(
     }
     if !models.is_empty() {
         tell_static_forms(codebase);
+        tell_when(codebase, included);
     }
     models
 }
+
+/// Laravel's `when()` returns `$this|TWhenReturnType`, which a callback without a return
+/// value leaves without a type, so Mago types the chain as mixed. A patch of the vendored
+/// trait keeps its parameters and template and returns `$this`, as `when()` does for the
+/// callbacks a store chain takes (P2R-450).
+fn tell_when(codebase: &mut CodebaseMetadata, included: &HashSet<FileId>) {
+    let vendored = codebase
+        .get_class_like(CONDITIONABLE)
+        .is_some_and(|conditionable| {
+            included.contains(&conditionable.span.file_id)
+                && conditionable
+                    .methods
+                    .iter()
+                    .any(|method| method.as_bytes().eq_ignore_ascii_case(b"when"))
+        });
+    if !vendored {
+        return;
+    }
+    let source = "<?php\n\nnamespace Illuminate\\Support\\Traits;\n\ntrait Conditionable\n{\n    /**\n     * @template TWhenParameter\n     * @param  (\\Closure($this): TWhenParameter)|TWhenParameter|null  $value\n     * @param  (callable($this, TWhenParameter): mixed)|null  $callback\n     * @param  (callable($this, TWhenParameter): mixed)|null  $default\n     * @return $this\n     */\n    public function when($value = null, ?callable $callback = null, ?callable $default = null)\n    {\n    }\n}\n";
+    let file = File::new(
+        Cow::Borrowed(b"php2rust://conditionable-patch.php"),
+        FileType::Patch,
+        None,
+        Cow::Borrowed(source.as_bytes()),
+    );
+    let arena = LocalArena::new();
+    let program = parse_file(&arena, &file);
+    let names = NameResolver::new(&arena).resolve(program);
+    let mut patch = scan_program(&arena, &file, program, &names, PHPVersion::PHP85);
+    patch.convert_partial_to_patch();
+    codebase.extend(patch);
+    codebase.apply_patches_pass();
+}
+
+/// Laravel's trait that gives the query builder `when()`, lowercase.
+const CONDITIONABLE: &[u8] = b"illuminate\\support\\traits\\conditionable";
 
 /// The lowercase fully qualified name of the name at `node`, written `raw`.
 fn resolved(names: &ResolvedNames<'_>, node: &impl HasSpan, raw: &[u8]) -> Vec<u8> {

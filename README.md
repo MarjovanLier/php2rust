@@ -48,8 +48,11 @@ an Eloquent model (a class that extends `Illuminate\Database\Eloquent\Model`, re
 `vendor/` with `--include`) becomes a struct of its columns and `$model->column` a field
 read. Only columns of a known Rust type become fields (ints, strings, and casts to
 `integer`, `string` or `boolean`); dates, decimals, uncast booleans and other casts are
-left out. A model with an accessor, a `casts()` method that is not a literal map, an
-observer or another member that may change what a read gives gets no struct.
+left out. A model with an accessor, a `casts()` method that is not a literal map, another
+attribute or another member that may change what a read gives gets no struct. A model with
+Laravel's `#[ObservedBy(X::class)]` or `#[ObservedBy([X::class, ..])]` keeps its struct:
+its reads convert unless an observer has a `retrieved` method, and `create` on it stops,
+because Laravel runs the observers there and the store does not.
 `M::create([..])`, `M::find($id)` and `M::query()->where('c', $v)->first()` convert against a
 store the output keeps in memory, one list of rows per model and thread that starts empty:
 a table that a migration seeds stops, and the store holds no row that a seeder or another
@@ -635,7 +638,7 @@ php2rust refuses some valid PHP that version 1 converts in other forms:
 The tests need PHP 8.5 on `PATH` and the Rust toolchain pinned in
 `rust-toolchain.toml` (`rustup toolchain install` installs it). Each folder under
 `tests/cases`, `tests/stops` and `tests/errors` is one test, and `cargo test` also checks
-that each requirement from P2R-07 to P2R-49 and from P2R-100 to P2R-453 starts the name of
+that each requirement from P2R-07 to P2R-49 and from P2R-100 to P2R-462 starts the name of
 a case or stop folder.
 To rewrite every
 `expected.rs` and `expected.txt` from the current output:

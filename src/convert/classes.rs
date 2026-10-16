@@ -988,10 +988,13 @@ impl Converter<'_> {
                 Some("only a constructor parameter can be promoted to a property (P2R-130)")
             } else if name == b"$this" {
                 Some("a parameter cannot be named $this, which PHP rejects (P2R-135)")
+            } else if SUPERGLOBALS.contains(&name) {
+                Some("PHP rejects a parameter named like a superglobal (P2R-380)")
             } else if seen.contains(&name) {
                 Some("PHP rejects a second parameter of this name (P2R-380)")
             } else if parameter.ampersand.is_some()
                 || parameter.ellipsis.is_some()
+                || !parameter.attribute_lists.is_empty()
                 || !parameter
                     .hint
                     .as_ref()
@@ -1022,7 +1025,7 @@ impl Converter<'_> {
         if unchecked {
             self.refuse(
                 &method.name,
-                "a hook that declares a function, in which self names no class, a class, interface, trait, enum or anonymous class, or that writes self, parent or static after a backslash, a deprecated cast, ${...}, case ...; with a semicolon, backticks, a string escape PHP rejects or an octal escape above \\377, $http_response_header, declare, or a closure parameter with a null default on a type without null or a default before a required one, is not supported: PHP rejects, deprecates or warns about them when it compiles the file, and the tool reads nothing else of a hook (P2R-380)",
+                "a hook that declares a function, in which self names no class, a class, interface, trait, enum or anonymous class, or that writes self, parent or static after a backslash, a deprecated cast, ${...}, case ...; with a semicolon, backticks, a string escape PHP rejects or an octal escape above \\377, $http_response_header, declare, or a closure parameter with a null default on a type without null, a default before a required one or a superglobal's name, is not supported: PHP rejects, deprecates or warns about them when it compiles the file, and the tool reads nothing else of a hook (P2R-380)",
             );
             refused = true;
         }
@@ -2431,8 +2434,21 @@ fn named_like_hook(method: &Method<'_>) -> bool {
     DATA_HOOKS.contains(&lowercase(method).as_slice())
 }
 
+/// The variables PHP declares in every scope, which a parameter may not take as its name.
+const SUPERGLOBALS: [&[u8]; 9] = [
+    b"$GLOBALS",
+    b"$_SERVER",
+    b"$_GET",
+    b"$_POST",
+    b"$_FILES",
+    b"$_COOKIE",
+    b"$_SESSION",
+    b"$_REQUEST",
+    b"$_ENV",
+];
+
 /// The problem of a hook signature outside the forms that P2R-380 leaves out.
-const HOOK_SIGNATURE: &str = "a hook's parameter or return type must be a class name, int, float, string, bool, array, iterable or object, with or without ?, or mixed (a return type also void, never, static or self), and a default must be a literal, true, false or null, with no variadic or by-reference parameter; the tool checks nothing else of a hook (P2R-380)";
+const HOOK_SIGNATURE: &str = "a hook's parameter or return type must be a class name, int, float, string, bool, array, iterable or object, with or without ?, or mixed (a return type also void, never, static or self), and a default must be a literal, true, false or null, with no variadic or by-reference parameter and no attribute on a parameter; the tool checks nothing else of a hook (P2R-380)";
 
 /// True for a type a hook's signature may write: one name, with or without `?`, or `mixed`
 /// alone, and for a return type also `void`, `never`, `static` or `self` alone. PHP compiles
@@ -2490,8 +2506,8 @@ fn hook_default(value: &Expression<'_>, nullable: bool) -> bool {
 /// no class, a cast PHP removed or deprecates (`(real)`, `(integer)` and others), `${...}`,
 /// `case 1;`, backticks, a string escape PHP rejects or an octal escape above `\377`,
 /// `$http_response_header`, a class-like declared inside (an anonymous class too),
-/// `declare`, and in a closure a `null` default on a type without null or a default
-/// before a required parameter. PHP accepts such a
+/// `declare`, and in a closure a `null` default on a type without null, a default before
+/// a required parameter or a superglobal's name. PHP accepts such a
 /// function itself, `Foo\self` and `${'x'}` outside a string, so this stops more than PHP
 /// rejects (P2R-380).
 struct Unchecked;
@@ -2516,12 +2532,14 @@ impl<'ast, 'arena> Walker<'ast, 'arena, bool> for Unchecked {
         });
     }
 
-    // PHP deprecates a `null` default on a type without null, such as `int $x = null`.
+    // PHP deprecates a `null` default on a type without null, such as `int $x = null`, and
+    // rejects a parameter named like a superglobal.
     fn walk_in_function_like_parameter(
         &self,
         parameter: &'ast FunctionLikeParameter<'arena>,
         found: &mut bool,
     ) {
+        *found |= SUPERGLOBALS.contains(&parameter.variable.name);
         *found |= parameter
             .hint
             .as_ref()
@@ -2582,8 +2600,8 @@ impl<'ast, 'arena> Walker<'ast, 'arena, bool> for Unchecked {
         *found |= part.value.is_none() || printer::octal_overflow(part.raw);
     }
 
-    // PHP rejects a class-like declared inside a method, and an anonymous class brings
-    // its own members, which the tool does not check either.
+    // A class-like declared inside, an anonymous class too, brings members the tool does
+    // not check.
     fn walk_in_class(&self, _class: &'ast Class<'arena>, found: &mut bool) {
         *found = true;
     }
@@ -2604,7 +2622,8 @@ impl<'ast, 'arena> Walker<'ast, 'arena, bool> for Unchecked {
         *found = true;
     }
 
-    // PHP rejects `strict_types` there and warns about an unknown directive.
+    // PHP rejects `strict_types` there and warns about an unknown directive; `ticks` it
+    // accepts, so this stops more than PHP rejects.
     fn walk_in_declare(&self, _declare: &'ast Declare<'arena>, found: &mut bool) {
         *found = true;
     }

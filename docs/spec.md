@@ -4087,8 +4087,8 @@ and its gain is typed attribute reads.
   compound assignment, `++` or `--`, `$m->c[] = ..`); `new` of a model,
   which creates no model in this section; and every method call on a
   model or static call of a model class (`$m->save()`, `M::create(..)`,
-  `M::query()`), by P2R-135 and P2R-153, other than the forms of section
-  42.
+  `M::query()`), by P2R-135 and P2R-153, other than the forms of sections
+  42, 43 and 45.
 
 ## 42. Creating and finding models (milestone 2, slice 32)
 
@@ -4382,8 +4382,9 @@ member of another union, still stops.
 ## 45. Laravel's collections as lists (milestone 2, slice 35)
 
 42 files of the app import `Illuminate\Support\Collection` or
-`Illuminate\Database\Eloquent\Collection`, and 29 call a query's
-`get()`, which gives an Eloquent collection of models. Parameters,
+`Illuminate\Database\Eloquent\Collection`, and 27 call a query's
+`get()` (26 without arguments), which gives an Eloquent collection of
+models. Parameters,
 returns and interface methods carry such types, and each stops by P2R-22
 today. This section maps a collection to a Rust `Vec` of its elements,
 gives `get()` and `M::all()` the store of section 42, and converts the
@@ -4397,15 +4398,21 @@ otherwise than an array (`empty($c)` is false for an empty collection).
   `Illuminate\Database\Eloquent\Collection<K, T>`, as a declared type
   or as the type Mago gives a value, where the class is the vendored one
   (P2R-340), MUST map to `Vec<T>` when `list<T>` has a Rust type
-  (P2R-21) and `T` is no changing type (P2R-140), whatever `K` is,
-  because no use below reads a key. Such a type is a collection type
-  below, and a value of it a collection value. A parameter of a
-  collection type becomes `&[T]`, as a list parameter does (P2R-24), and
-  an assignment, a return, an argument and a property copy or lend a
-  collection value as they do a list (P2R-26). These stop by P2R-22: a
-  collection type with another element type, without its type arguments
-  (Mago then gives `mixed` elements), nullable or in a union, and either
-  class without the vendored class.
+  (P2R-21) and `T` is neither nullable nor a changing type (P2R-141),
+  whatever `K` is, because no use below reads a key. Such a type is a
+  collection type below, and a value of it a collection value. A
+  collection type is no list type for any rule but these: a parameter of
+  a collection type becomes `&[T]`, as a list parameter does (P2R-24),
+  and works on a copy when the function assigns to it (P2R-181); an
+  assignment, a return, an argument to a parameter of a collection type
+  and a property copy or lend a collection value as they do a list
+  (P2R-26); and the forms of P2R-442. These stop by P2R-22: a collection
+  type with another element type; one without type arguments in its
+  docblock, whose elements Mago gives as `mixed` (or as `Model` for the
+  Eloquent class); one with a single type argument (`Collection<Item>`,
+  which Mago reads as the key type); a collection type that is nullable,
+  in a union, or inside a list, a map, a shape or another collection; and
+  either class without the vendored class.
 - **P2R-441** `M::query()` without arguments, followed by zero or more
   `->where('<c>', $v)` and then `->get()` without arguments, and
   `M::all()` without arguments, where `M` is a model whose store applies
@@ -4413,9 +4420,14 @@ otherwise than an array (`empty($c)` is false for an empty collection).
   closure and the conditions of P2R-413 for each `where`, or to
   `M::store_all()` when no `where` comes before `get()`. Both give copies
   of every matching row in creation order, as `Vec<M>`, and the `impl`
-  block of P2R-410 holds each only when a form calls it. `get([..])` and
+  block of P2R-410 holds each only when a form calls it. The order is the
+  limit that section 42 states: an index whose columns start with a
+  `where` column can make SQLite give another order. `get([..])` and
   `all([..])` with a list of columns stop, because Laravel then loads only
-  those columns, and so does a `where` that P2R-413 refuses.
+  those columns, and so does a `where` that P2R-413 refuses. On a model
+  whose store does not apply, these forms stop with the reason of
+  P2R-410. `M::where(..)->get()` and `M::get()` stop on Mago's finding
+  (P2R-11), because `__callStatic` gives `mixed`.
 - **P2R-442** On a collection value `$c`, these MUST convert, in the
   collection's order:
   - `foreach ($c as $x)` without a key, as a `foreach` over a list
@@ -4425,20 +4437,27 @@ otherwise than an array (`empty($c)` is false for an empty collection).
   - `$c->isEmpty()` as `c.is_empty()`, and `$c->isNotEmpty()` as
     `!c.is_empty()`;
   - `$c->first()` without arguments as a copy of the first element, or
-    `None` for an empty collection, of type `Option<T>`
-    (`c.first().cloned()`), as Laravel's `first()` gives `null` then.
+    `None` for an empty collection, of type `Option<T>` whatever Mago
+    narrows it to (P2R-102) (`c.first().cloned()`), as Laravel's
+    `first()` gives `null` then; for a collection of `DateTime` it stops,
+    because `Option<PhpDateTime>` stands for `DateTime|false` (P2R-330).
 - **P2R-443** Every other use of a collection value stops, by P2R-135,
   P2R-153 or the rule that names it: any other method (`map`, `filter`,
   `pluck`, `push`, `each`, `toArray`, `all`, `keys`, `where`, `first`
   with a callback or a default), `foreach` with a key (Laravel keeps the
   keys a collection had) or by reference, a condition on it and `empty()`
-  (PHP reads an object as true), a comparison, `$c[..]` and `$c[] = ..`
-  (Laravel's `ArrayAccess`), a property read, a collection value where a
-  PHP array is needed and an array where a collection is needed (Mago
-  reports most of these), and the forms that make a collection other than
-  P2R-441: `collect(..)`, `new Collection(..)` and the static methods of
-  both classes. A collection value therefore comes only from P2R-441, a
-  parameter, a property, or a call of the input that returns one.
+  (PHP reads an object as true), a comparison, `gettype()` and
+  `is_scalar()` (P2R-222; PHP gives `"object"`), `$c[..]` and
+  `$c[] = ..` (Laravel's `ArrayAccess`), a property read on it (`$c->x`,
+  or a Laravel proxy such as `$c->sum`), a collection value where a PHP
+  array is needed and an array where a collection is needed (Mago reports
+  most of these), `isEmpty()`, `isNotEmpty()` and `first()` as an
+  expression statement (P2R-43), whose unused Rust result rustc refuses,
+  and the forms that make a collection other than P2R-441: `collect(..)`,
+  `new Collection(..)` and the static methods of both classes. A
+  collection value therefore comes only from P2R-441, a parameter, a
+  property, a variable that holds one, or a call of the input that
+  returns one.
 
 ## Spec checklist
 
@@ -4457,7 +4476,11 @@ otherwise than an array (`empty($c)` is false for an empty collection).
   input reaches, and which of two included declarations of one name
   wins, which no output shows, and in P2R-361 that the included
   `create()` returns a new `Optional` and does nothing else, as 4.18.0's
-  does, which Mago's metadata does not show, and in P2R-380 a PHP
+  does, which Mago's metadata does not show, and in P2R-440 that the
+  included collection classes behave as Laravel 12.35.1's do in
+  `count()`, `isEmpty()`, `isNotEmpty()`, `first()` and iteration, with
+  the element type as their second template parameter, which the tool
+  does not check, and in P2R-380 a PHP
   compile-time error, deprecation or warning in the body of a left-out
   method that Mago does not report and P2R-380 does not list, such as
   `yield` in a method that returns `array`, `unset($this)`, a closure

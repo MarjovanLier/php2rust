@@ -1034,8 +1034,6 @@ impl Converter<'_> {
                 Some("static can only be a return type, which PHP requires (P2R-154)")
             } else if parameter.is_promoted_property() {
                 Some("only a constructor parameter can be promoted to a property (P2R-130)")
-            } else if !parameter.modifiers.is_empty() {
-                Some("PHP rejects a modifier on the parameter of a method (P2R-380)")
             } else if name == b"$this" {
                 Some("a parameter cannot be named $this, which PHP rejects (P2R-135)")
             } else if SUPERGLOBALS.contains(&name) {

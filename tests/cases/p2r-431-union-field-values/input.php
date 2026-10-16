@@ -26,6 +26,16 @@ function valueOf(array $row): int|string
     return $row['value'];
 }
 
+// A variable that holds the read takes gettype(), (string) and is_scalar() (P2R-233).
+/**
+ * @param array{id: int, value: int|string} $row
+ */
+function described(array $row): string
+{
+    $v = $row['value'];
+    return gettype($v) . ':' . (string) $v . ':' . (is_scalar($v) ? 'y' : 'n');
+}
+
 /**
  * @return array{id: int, value: int|string}
  */
@@ -41,3 +51,4 @@ $kept = valueOf($second);
 echo show($kept), ' ', $first['id'], "\n";
 $setting = new Setting($second['value']);
 echo show($setting->value), "\n";
+echo described($first), ' ', described($second), "\n";

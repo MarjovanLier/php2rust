@@ -30,6 +30,15 @@ function same(array $pair): bool
     return $pair['value'] === 'x';
 }
 
+// gettype() takes a variable that holds the read, not the read itself (P2R-222, P2R-431).
+/**
+ * @param array{key: string, value: int|string} $pair
+ */
+function typeOf(array $pair): string
+{
+    return gettype($pair['value']);
+}
+
 // Two declared shapes of one name with other field types (P2R-200).
 /**
  * @param array{key: string, value: bool|string} $pair
@@ -37,6 +46,23 @@ function same(array $pair): bool
 function other(array $pair): string
 {
     return $pair['key'];
+}
+
+// The same, with the shape whose field may be null met first (P2R-200).
+/**
+ * @param array{label: string, size: int|string|null} $box
+ */
+function loose(array $box): string
+{
+    return $box['label'];
+}
+
+/**
+ * @param array{label: string, size: int|string} $box
+ */
+function strict(array $box): string
+{
+    return $box['label'];
 }
 
 final readonly class Point

@@ -38,6 +38,26 @@ pub fn value_of(row: &IdValueShape) -> IntOrString {
     return row.value.clone();
 }
 
+pub fn described(row: &IdValueShape) -> String {
+    let v = row.value.clone();
+    return format!(
+        "{}:{}:{}",
+        match &v {
+            IntOrString::Int(_) => "integer",
+            IntOrString::String(_) => "string",
+        },
+        match &v {
+            IntOrString::Int(x) => x.to_string(),
+            IntOrString::String(x) => x.clone(),
+        },
+        if matches!(&v, IntOrString::Int(_) | IntOrString::String(_)) {
+            "y"
+        } else {
+            "n"
+        }
+    );
+}
+
 pub fn entry(id: i64, text: &str) -> IdValueShape {
     return IdValueShape {
         id: id,
@@ -63,5 +83,9 @@ fn main() {
     print!("\n");
     let setting = Setting::new(&second.value);
     print!("{}", show(&setting.value));
+    print!("\n");
+    print!("{}", described(&first));
+    print!(" ");
+    print!("{}", described(&second));
     print!("\n");
 }

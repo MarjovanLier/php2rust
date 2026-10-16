@@ -119,6 +119,13 @@ pub fn sole_of(rank: i64) -> Result<String, PhpException> {
     }
 }
 
+pub fn by_names(owner: Option<&Owner>, r#type: Option<&str>) -> Vec<Code> {
+    return Code::store_get(|row: &Code| {
+        owner.is_none_or(|row_1| row.owner_id == row_1.id)
+            && r#type.is_none_or(|r#type| r#type.is_empty() || r#type == "0" || row.name == r#type)
+    });
+}
+
 pub fn names(codes: &[Code]) -> String {
     let mut out = String::from("");
     for code in codes.to_vec() {
@@ -250,5 +257,11 @@ fn main() {
     print!("{}", sole_of(2).unwrap_or_else(|e| e.uncaught()));
     print!(" ");
     print!("{}", sole_of(0).unwrap_or_else(|e| e.uncaught()));
+    print!("\n");
+    print!("{}", names(&by_names(Some(&first), None)));
+    print!(" ");
+    print!("{}", names(&by_names(None, Some("0"))));
+    print!(" ");
+    print!("{}", names(&by_names(Some(&second), Some("c"))));
     print!("\n");
 }

@@ -139,6 +139,70 @@ function missingProperty(?Code $code): Collection
     return Code::query()->when($code, fn (Builder $query, Code $code) => $query->where('name', $code->missing))->get();
 }
 
+// Parameters PHP rejects and Mago does not report (P2R-451).
+/**
+ * @return Collection<int, Code>
+ */
+function thisParameter(?string $name): Collection
+{
+    return Code::query()->when($name, static function (Builder $this, string $name): void {
+        $this->where('name', $name);
+    })->get();
+}
+
+/**
+ * @return Collection<int, Code>
+ */
+function superglobalParameter(?string $name): Collection
+{
+    return Code::query()->when($name, fn (Builder $query, string $_GET) => $query->where('name', 'a'))->get();
+}
+
+/**
+ * @return Collection<int, Code>
+ */
+function doubledParameter(?string $name): Collection
+{
+    return Code::query()->when($name, fn ($query, $query) => $query->where('name', 'a'))->get();
+}
+
+// A second parameter typed false or ?string, which PHP checks against the value (P2R-451).
+/**
+ * @return Collection<int, Code>
+ */
+function falseParameter(bool $flag): Collection
+{
+    return Code::query()->when($flag, fn (Builder $query, false $flag) => $query->where('name', 'a'))->get();
+}
+
+/**
+ * @return Collection<int, Code>
+ */
+function nullableParameter(?string $name): Collection
+{
+    return Code::query()->when($name, fn (Builder $query, ?string $name) => $query->where('name', $name))->get();
+}
+
+// A model value without null, always truthy, with no where on the second parameter.
+/**
+ * @return Collection<int, Code>
+ */
+function alwaysTruthy(Code $code): Collection
+{
+    return Code::query()->when($code, fn (Builder $query) => $query->where('name', 'a'))->get();
+}
+
+// A when link before a call that takes no filter.
+function beforeFind(?string $name): Code
+{
+    return Code::query()->when($name, fn (Builder $query) => $query->where('name', 'a'))->findOrFail(1);
+}
+
+function beforeCreate(?string $name): Code
+{
+    return Code::query()->when($name, fn (Builder $query) => $query->where('name', 'a'))->create(['name' => 'a', 'rank' => 1]);
+}
+
 // unless() is no form of section 46.
 /**
  * @return Collection<int, Code>

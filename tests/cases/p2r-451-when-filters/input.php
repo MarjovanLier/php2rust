@@ -73,6 +73,20 @@ function soleOf(int $rank): string
     }
 }
 
+// A second parameter named like the closure's row, and one named like a Rust keyword.
+/**
+ * @return Collection<int, Code>
+ */
+function byNames(?Owner $owner, ?string $type): Collection
+{
+    return Code::query()
+        ->when($owner, fn (Builder $query, Owner $row) => $query->where('owner_id', $row->id))
+        ->when($type, static function (Builder $query, $type): void {
+            $query->where('name', $type);
+        })
+        ->get();
+}
+
 /**
  * @param Collection<int, Code> $codes
  */
@@ -96,3 +110,4 @@ echo names(filtered('0', 0, $second)), ' ', names(filtered(null, 2, $first)), ' 
 echo names(flagged(true)), ' ', names(flagged(false)), "\n";
 echo firstNamed('b'), ' ', firstNamed('0'), ' ', firstNamed(''), ' ', firstNamed('a'), "\n";
 echo soleOf(1), ' ', soleOf(2), ' ', soleOf(0), "\n";
+echo names(byNames($first, null)), ' ', names(byNames(null, '0')), ' ', names(byNames($second, 'c')), "\n";

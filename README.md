@@ -54,7 +54,8 @@ observer or another member that may change what a read gives gets no struct.
 store the output keeps in memory, one list of rows per model and thread that starts empty:
 a table that a migration seeds stops, and the store holds no row that a seeder or another
 process inserts, enforces no constraint and compares strings byte for byte. The same chains
-ended by `sole()` or `firstOrFail()`, and `M::findOrFail($id)`, throw Laravel's
+ended by `sole()` or `firstOrFail()`, and `M::findOrFail($id)` and
+`M::query()->findOrFail($id)`, throw Laravel's
 `ModelNotFoundException` or `MultipleRecordsFoundException` with Laravel's messages, which a
 `catch` of those classes catches. Other queries and saving models still stop the conversion.
 Migrations are never converted.

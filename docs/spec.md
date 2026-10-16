@@ -2078,7 +2078,9 @@ Section 40 adds exception classes that the input declares.
   class tree; and `pub fn uncaught(self) -> !`, which flushes stdout,
   writes `PHP Fatal error:  Uncaught <class>: <message>` to stderr and
   exits with code 255, the exit code PHP gives an uncaught exception (PHP's
-  own message also names the file and a stack trace). The classes are
+  own message also names the file and a stack trace); its paths start
+  with `::std`, so a module `std` that a namespace `Std` gives the crate
+  does not hide them. The classes are
   PHP's `Exception`, `ErrorException`, `JsonException`, `LogicException`
   with `BadFunctionCallException` (and `BadMethodCallException` under it),
   `DomainException`, `InvalidArgumentException`, `LengthException` and
@@ -4270,7 +4272,8 @@ them.
   e.uncaught())` in `fn main()`, a `break 'throw` in a `try` body). For
   P2R-211, P2R-213 and P2R-214 each form on a model with a struct (the
   `where` chain ended by `sole()` or `firstOrFail()` without arguments,
-  or `findOrFail` with any arguments) is a call that throws, also where
+  or `M::findOrFail(..)` and `M::query()->findOrFail(..)` with any
+  arguments) is a call that throws, also where
   it then stops on the store, an argument or a `where` value:
   - The `where` chain of P2R-413 ended by `->sole()` without arguments
     converts to `M::store_sole(|row: &M| ..)`, with the closure of

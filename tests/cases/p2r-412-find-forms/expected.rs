@@ -7,9 +7,9 @@ pub struct City {
 }
 
 impl City {
-    fn store_rows() -> &'static std::thread::LocalKey<std::cell::RefCell<Vec<City>>> {
+    fn store_rows() -> &'static ::std::thread::LocalKey<::std::cell::RefCell<Vec<City>>> {
         thread_local! {
-            static ROWS: std::cell::RefCell<Vec<City>> = const { std::cell::RefCell::new(Vec::new()) };
+            static ROWS: ::std::cell::RefCell<Vec<City>> = const { ::std::cell::RefCell::new(Vec::new()) };
         }
         &ROWS
     }

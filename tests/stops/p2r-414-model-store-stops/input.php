@@ -62,6 +62,38 @@ final class Amount extends Model
     public $timestamps = false;
 }
 
+// A default of deleted_at marks a new row deleted, which Laravel's queries skip.
+final class Shelved extends Model
+{
+    use SoftDeletes;
+}
+
+final class Archived extends Model
+{
+    use SoftDeletes;
+}
+
+// useCurrent(false) gives no default.
+final class Late extends Model
+{
+    protected $fillable = ['name'];
+
+    public $timestamps = false;
+}
+
+// Laravel takes default()'s first value by any name, which the tool does not read.
+final class Blank extends Model
+{
+    protected $fillable = ['name'];
+
+    public $timestamps = false;
+}
+
+// timestamps() gives a Collection, so Laravel throws on a modifier after it.
+final class Chained extends Model
+{
+}
+
 // Laravel reads the values of $fillable, so a keyed list stops.
 final class Mapped extends Model
 {
@@ -148,6 +180,16 @@ function flagged(): Flagged
     return Flagged::create(['name' => 'a']);
 }
 
+function late(): Late
+{
+    return Late::create(['name' => 'a']);
+}
+
+function blank(): Blank
+{
+    return Blank::create(['name' => 'a']);
+}
+
 function mapped(): Mapped
 {
     return Mapped::create(['name' => 'a']);
@@ -202,6 +244,21 @@ function seeded(): ?Seeded
 function soft(): ?Soft
 {
     return Soft::query()->find(1);
+}
+
+function shelved(): ?Shelved
+{
+    return Shelved::query()->find(1);
+}
+
+function archived(): ?Archived
+{
+    return Archived::query()->find(1);
+}
+
+function chained(): ?Chained
+{
+    return Chained::query()->find(1);
 }
 
 // find and where stop on these (P2R-412, P2R-413).

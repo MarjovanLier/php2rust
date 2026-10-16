@@ -10,9 +10,9 @@ pub struct Role {
 }
 
 impl Role {
-    fn store_rows() -> &'static std::thread::LocalKey<std::cell::RefCell<Vec<Role>>> {
+    fn store_rows() -> &'static ::std::thread::LocalKey<::std::cell::RefCell<Vec<Role>>> {
         thread_local! {
-            static ROWS: std::cell::RefCell<Vec<Role>> = const { std::cell::RefCell::new(Vec::new()) };
+            static ROWS: ::std::cell::RefCell<Vec<Role>> = const { ::std::cell::RefCell::new(Vec::new()) };
         }
         &ROWS
     }

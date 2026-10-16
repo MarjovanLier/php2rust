@@ -10,9 +10,9 @@ pub struct Note {
 }
 
 impl Note {
-    fn store_rows() -> &'static std::thread::LocalKey<std::cell::RefCell<Vec<Note>>> {
+    fn store_rows() -> &'static ::std::thread::LocalKey<::std::cell::RefCell<Vec<Note>>> {
         thread_local! {
-            static ROWS: std::cell::RefCell<Vec<Note>> = const { std::cell::RefCell::new(Vec::new()) };
+            static ROWS: ::std::cell::RefCell<Vec<Note>> = const { ::std::cell::RefCell::new(Vec::new()) };
         }
         &ROWS
     }
@@ -33,9 +33,9 @@ pub struct Stamp {
 }
 
 impl Stamp {
-    fn store_rows() -> &'static std::thread::LocalKey<std::cell::RefCell<Vec<Stamp>>> {
+    fn store_rows() -> &'static ::std::thread::LocalKey<::std::cell::RefCell<Vec<Stamp>>> {
         thread_local! {
-            static ROWS: std::cell::RefCell<Vec<Stamp>> = const { std::cell::RefCell::new(Vec::new()) };
+            static ROWS: ::std::cell::RefCell<Vec<Stamp>> = const { ::std::cell::RefCell::new(Vec::new()) };
         }
         &ROWS
     }

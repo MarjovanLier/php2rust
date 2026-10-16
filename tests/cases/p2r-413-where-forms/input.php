@@ -46,6 +46,14 @@ function notedAs(string $text): string
     return $book === null ? 'none' : $book->title;
 }
 
+// The tool knows the value of $row here, and the closure's name still steps aside.
+function onShelfTwo(): string
+{
+    $row = 2;
+    $book = Book::query()->where('shelf', $row)->first();
+    return $book === null ? 'none' : $book->title;
+}
+
 Book::create(['title' => 'Dune', 'shelf' => 1, 'note' => 'sand', 'rank' => 2]);
 Book::create(['title' => 'Emma', 'shelf' => 1, 'rank' => null]);
 Book::create(['title' => 'Dune', 'shelf' => 2, 'note' => 'again', 'rank' => 1]);
@@ -57,6 +65,7 @@ $first = Book::find(1);
 if ($first !== null) {
     echo sameTitle($first), ' ', notedAs('sand'), "\n";
 }
+echo onShelfTwo(), "\n";
 $below = Book::query()->where('shelf', -1)->first();
 echo $below === null ? 'none' : $below->title, "\n";
 $wanted = 'Emma';

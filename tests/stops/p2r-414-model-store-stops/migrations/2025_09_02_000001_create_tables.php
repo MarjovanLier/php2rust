@@ -54,6 +54,30 @@ return new class extends Migration
             $table->id();
             $table->string('name');
         });
+        Schema::create('shelveds', function (Blueprint $table) {
+            $table->id();
+            $table->string('name');
+            $table->softDeletes()->useCurrent();
+        });
+        Schema::create('lates', function (Blueprint $table) {
+            $table->id();
+            $table->string('name');
+            $table->timestamp('seen')->useCurrent(false);
+        });
+        Schema::create('blanks', function (Blueprint $table) {
+            $table->id();
+            $table->string('name');
+            $table->string('code')->default(value: null);
+        });
+        Schema::create('archiveds', function (Blueprint $table) {
+            $table->id();
+            $table->string('name');
+            $table->timestamp('deleted_at')->nullable()->default('2020-01-01 00:00:00');
+        });
+        Schema::create('chaineds', function (Blueprint $table) {
+            $table->id();
+            $table->timestamps()->useCurrent();
+        });
         Schema::create('mappeds', function (Blueprint $table) {
             $table->id();
             $table->string('name');

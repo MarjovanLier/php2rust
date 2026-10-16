@@ -10,9 +10,9 @@ pub struct Book {
 }
 
 impl Book {
-    fn store_rows() -> &'static std::thread::LocalKey<std::cell::RefCell<Vec<Book>>> {
+    fn store_rows() -> &'static ::std::thread::LocalKey<::std::cell::RefCell<Vec<Book>>> {
         thread_local! {
-            static ROWS: std::cell::RefCell<Vec<Book>> = const { std::cell::RefCell::new(Vec::new()) };
+            static ROWS: ::std::cell::RefCell<Vec<Book>> = const { ::std::cell::RefCell::new(Vec::new()) };
         }
         &ROWS
     }
@@ -88,6 +88,17 @@ pub fn noted_as(text: &str) -> String {
     .to_string();
 }
 
+pub fn on_shelf_two() -> String {
+    let row: i64 = 2;
+    let book = Book::store_first(|row_1: &Book| row_1.shelf == row);
+    return (if let Some(book) = book.as_ref() {
+        book.title.as_str()
+    } else {
+        "none"
+    })
+    .to_string();
+}
+
 fn main() {
     Book::store_create(Book {
         title: String::from("Dune"),
@@ -131,6 +142,8 @@ fn main() {
         print!("{}", noted_as("sand"));
         print!("\n");
     }
+    print!("{}", on_shelf_two());
+    print!("\n");
     let below = Book::store_first(|row: &Book| row.shelf == -1);
     print!(
         "{}",

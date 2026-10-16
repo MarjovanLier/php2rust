@@ -171,9 +171,11 @@ it changes P2R-07, P2R-31, P2R-153, the intro of section 22, P2R-210,
 P2R-212, P2R-214, section 14 and the roadmap of section 10. Its spec
 reviewers found constructor forms that PHP rejects and Mago does not
 report, on ordinary classes too, that PHP rejects a modifier written
-twice and a modifier on the parameter of a function, and that PHP
-rejects a parameter named like a superglobal anywhere, not only in a
-hook.
+twice, a modifier on the parameter of a function, `readonly` on a
+method, a set visibility wider than its property's visibility and
+`final private` on a declared property, and that PHP rejects a
+parameter named like a superglobal anywhere, not only in a hook. It
+also changes P2R-135, P2R-140 and P2R-380.
 
 php2rust converts typed PHP source into normal, readable Rust (`Vec`,
 `String`, `i64`), without AI. It reads PHP with the Mago crates, uses Mago's
@@ -985,13 +987,15 @@ Sections 3 to 9 apply to nullable values unless this section says otherwise.
     `abstract`, a trait other than one of constants (P2R-280), a property that is not
     promoted, a static property, a constructor parameter that is not
     promoted, a constructor with a body, a constructor with a return type
-    or `static`, and a modifier written twice or a second visibility on
+    or `static`, a modifier written twice or a second visibility on
     a class, method, promoted parameter or declared property (`final
-    final`, `public public`), which PHP rejects and Mago does not
-    report, and a parameter default value other than those of P2R-168
+    final`, `public public`), and a set visibility wider than the
+    visibility of its promoted parameter or declared property (`private
+    public(set)`; no visibility reads as `public`), which PHP rejects
+    and Mago does not report, and a parameter default value other than those of P2R-168
     (section 16 converts constants and static methods);
   - a promoted parameter without a type, with a property hook, by reference
-    or variadic, with `static`, or named `$this` or like a superglobal
+    or variadic, with `static` or `abstract`, or named `$this` or like a superglobal
     (P2R-31), which PHP rejects or makes fail and Mago does not report;
   - a method whose PHP name starts with `__`, other than the constructor,
     and an attribute on the class or a member (P2R-07), other than the
@@ -1074,7 +1078,8 @@ Sections 3 to 9 apply to nullable values unless this section says otherwise.
   method on every path, through any object of its class (`$this`, a
   parameter, a list element, a new object), stops the conversion, as a
   function that calls itself does (P2R-50): rustc matches the method, not
-  the object. These stop the conversion: `parent::` and the native type
+  the object. These stop the conversion: `parent::`, other than the call
+  that ends the constructor of an exception class (P2R-391), and the native type
   `parent` (section 16 converts static methods, `self::`, `static::` and
   the types `self` and `static`; a docblock type that names `self`, such as
   `list<self>`, is the class to Mago and converts); `$this` outside a
@@ -1082,7 +1087,9 @@ Sections 3 to 9 apply to nullable values unless this section says otherwise.
   rejects and Mago does not report; a by-reference parameter or return
   (`function &offsetGet`); a `final
   private` method other than the constructor, for which PHP prints a
-  warning and Mago reports nothing; two methods whose PHP names are equal
+  warning and Mago reports nothing; `readonly` or a set visibility on a
+  method, and `abstract` or `final` on the parameter of a method other
+  than the constructor, which PHP rejects and Mago does not report; two methods whose PHP names are equal
   ignoring letter case, which PHP rejects and Mago does not report; and a
   call to a method the class does not declare itself (Mago reports it,
   P2R-11, other than one the parent of P2R-350 declares).
@@ -1131,7 +1138,9 @@ decided on 11 Oct 2026.
   the conversion: a declared property without a type or a default, with a
   default of any other form (a list with elements included), with a hook,
   `static`, or `readonly` (PHP rejects a default on a readonly property and
-  Mago does not report it); `var`; and the stops of P2R-130 other than "a
+  Mago does not report it), or with `final` and `private` together, which
+  PHP rejects on a declared property (it accepts them on a promoted one);
+  `var`; and the stops of P2R-130 other than "a
   class that is not readonly".
 - **P2R-141** A changing type is a class with a property that can change (a
   class that is not readonly with a property that is not `readonly`), a
@@ -2138,8 +2147,11 @@ Section 40 adds exception classes that the input declares.
   (`Error`, `TypeError` and the input's other classes included); a clause after a catch-all, which PHP never runs; clauses of
   one `try` with different variable names; a clause that tests a class
   when no clause has a variable; a catch variable whose name the function
-  already uses before the `try`, because PHP overwrites it, or named like
-  a superglobal, which PHP overwrites in a function too; and a read of
+  already uses before the `try`, because PHP overwrites it; a catch
+  variable named like a superglobal, because in a function a read of it
+  gives PHP's superglobal, not the exception, and at the top level the
+  catch overwrites the superglobal for every function; a catch variable
+  named `$this`, which PHP rejects and Mago does not report; and a read of
   `$e` after its handler (by P2R-34), or any other use of `$e` than
   `getMessage()`, `getCode()` and `throw $e` (a built-in function such as
   `get_class($e)` stops by P2R-48).
@@ -3624,7 +3636,8 @@ forms of those attributes that the app uses.
   Other forms that PHP accepts, such as `callable` or `?self`, stop
   too. These stop with their own rules: a return by
   reference (P2R-135), a parameter named `$this` (P2R-135), `static` in
-  a parameter (P2R-154), a promoted parameter (P2R-130), a parameter
+  a parameter (P2R-154), a promoted parameter (P2R-130), any other
+  modifier on a parameter (`abstract`, `final`), a parameter
   named like a superglobal (`$_GET`, `$GLOBALS` and the others) and a
   second parameter of one name. In its body these stop, because PHP
   rejects, deprecates or warns about them when it compiles the file and
@@ -3744,13 +3757,17 @@ methods, such as getters, still stops.
   modifier other than `public` and `final` (`static` and `abstract`
   included), with a return type, or that returns by reference, which
   PHP rejects or gives a notice for and Mago does not report; a
-  parameter with a modifier written twice or with `static`, which PHP
-  rejects (P2R-130); a promoted
+  parameter with a modifier written twice, with `static` or `abstract`,
+  or with a set visibility wider than its visibility, which PHP rejects
+  (P2R-130); a promoted
   parameter with a property hook, which runs when the constructor sets
   the property (P2R-130); a body that does not end with that call, or
   that reads or writes `$this`, holds a `return`, holds another
   `parent::` access or holds a `throw` or a call that throws, also in the
-  arguments of that call (P2R-211);
+  arguments of that call (P2R-211), or that changes an object it is
+  given, because a `throw` would have to lend it and its callers' forms
+  do not see that (P2R-143); a call with arguments other than the
+  message and the code (P2R-212);
   a promoted parameter named `message`, `code`, `file`, `line`,
   `previous` or `trace`, names of properties of PHP's `Exception`, the
   first four of which change what `getMessage()`, `getCode()`, the

@@ -247,7 +247,7 @@ impl Converter<'_> {
         for span in spans {
             self.refuse(
                 &span,
-                "another enum, class, trait or function of the crate has the same Rust name or fully qualified name (P2R-173)",
+                "another enum, class, interface, trait or function of the crate has the same Rust name or fully qualified name (P2R-173)",
             );
         }
         for (rust, module, span) in functions {

@@ -179,6 +179,7 @@ impl Converter<'_> {
         let arguments = self
             .arguments(list, &signature.parameters, node)
             .ok_or(None)?;
+        self.record_trait_use(index, at);
         Ok((
             RExpr::MethodCall(Box::new(bound), signature.rust_name, arguments),
             returns,

@@ -10,42 +10,6 @@ use super::control::emit;
 use super::{Converter, Mode, Signature};
 use crate::types::RustType;
 
-/// The traits of Rust's prelude. A trait of the output with one of these names hides the
-/// prelude's, whose methods the output calls (`.clone()`, `.to_string()`, `.map()`), so
-/// such an interface stops (P2R-370).
-const PRELUDE: &[&str] = &[
-    "AsMut",
-    "AsRef",
-    "Clone",
-    "Copy",
-    "Default",
-    "DoubleEndedIterator",
-    "Drop",
-    "Eq",
-    "ExactSizeIterator",
-    "Extend",
-    "Fn",
-    "FnMut",
-    "FnOnce",
-    "From",
-    "FromIterator",
-    "Future",
-    "Into",
-    "IntoFuture",
-    "IntoIterator",
-    "Iterator",
-    "Ord",
-    "PartialEq",
-    "PartialOrd",
-    "Send",
-    "Sized",
-    "Sync",
-    "ToString",
-    "TryFrom",
-    "TryInto",
-    "Unpin",
-];
-
 /// The methods that prelude traits give the output's types: `to_owned` and `clone_into` of
 /// `ToOwned`, `into` and `try_into` of the blanket `Into` and `TryInto`, and `eq` and `ne`
 /// of a derived `PartialEq` (P2R-370).
@@ -70,13 +34,6 @@ impl Converter<'_> {
             let Some(rust_name) = self.declared_type_name(&declaration.name, "interface") else {
                 continue;
             };
-            if PRELUDE.contains(&rust_name.as_str()) {
-                self.refuse(
-                    &declaration.name,
-                    format!("{rust_name} is the name of a trait of Rust's prelude, which the output uses (P2R-370)"),
-                );
-                continue;
-            }
             if self.interfaces.iter().any(|i| i.rust_name == rust_name) {
                 self.refuse(
                     &declaration.name,
@@ -168,7 +125,7 @@ impl Converter<'_> {
             let ClassLikeMember::Method(method) = member else {
                 self.refuse(
                     member,
-                    "an interface may hold only methods; its constants are not supported yet (P2R-370)",
+                    "an interface may hold only methods; its constants and properties are not supported yet (P2R-370)",
                 );
                 continue;
             };
@@ -258,7 +215,11 @@ impl Converter<'_> {
             .filter(|class| class.interfaces.contains(&index))
             .map(|class| class.is_enum)
             .collect();
-        if implementers.contains(&true) && implementers.contains(&false) {
+        // A marker interface has no method whose receiver could differ.
+        if implementers.contains(&true)
+            && implementers.contains(&false)
+            && !self.interfaces[index].methods.is_empty()
+        {
             self.refuse(
                 &declaration.name,
                 "an interface that both an enum and a class implement is not supported, because their methods take self in two ways (P2R-370)",
@@ -412,6 +373,16 @@ impl Converter<'_> {
             lines.push("}".to_owned());
         }
         lines
+    }
+
+    /// Records that the module converting calls the method at `at` of the class or enum at
+    /// `class`, so it names the method's trait in a `use` line when the method is one of a
+    /// trait impl; a trait method is called only where its trait is in scope (P2R-372).
+    pub(super) fn record_trait_use(&mut self, class: usize, at: usize) {
+        if let Some(interface) = self.trait_of(class, at) {
+            let name = self.interfaces[interface].rust_name.clone();
+            self.trait_uses.insert((self.current_module, name));
+        }
     }
 
     /// The position in the `implements` list of the class or enum at `class` of the

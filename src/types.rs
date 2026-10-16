@@ -713,12 +713,13 @@ fn shape_type(keyed: &TKeyedArray, enums: &TypeNames) -> Result<RustType, String
             ty,
         });
     }
-    if enums
-        .values()
-        .any(|ty| matches!(ty, RustType::Enum(n) | RustType::Class(n) if *n == rust_name))
+    if enums.traits.contains(&rust_name)
+        || enums
+            .values()
+            .any(|ty| matches!(ty, RustType::Enum(n) | RustType::Class(n) if *n == rust_name))
     {
         return Err(format!(
-            "{rust_name}, the Rust name of this array shape, is the name of an enum or class (P2R-200)"
+            "{rust_name}, the Rust name of this array shape, is the name of an enum, class or trait (P2R-200)"
         ));
     }
     // A union enum checks the shapes known when it is made, so a later shape checks it.

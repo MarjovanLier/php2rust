@@ -2070,11 +2070,7 @@ impl Converter<'_> {
         if self.current_method == Some((index, at)) {
             self.self_calls.push(call.span());
         }
-        // A trait method is called only where its trait is in scope (P2R-372).
-        if let Some(interface) = self.trait_of(index, at) {
-            let name = self.interfaces[interface].rust_name.clone();
-            self.trait_uses.insert((self.current_module, name));
-        }
+        self.record_trait_use(index, at);
         let call = RExpr::MethodCall(Box::new(object), signature.rust_name, arguments);
         Some((
             self.raised(node, call, signature.throws)?,

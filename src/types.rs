@@ -271,6 +271,12 @@ pub const NULLABLE_OBJECT: &str = "a list of nullable objects is not supported y
 /// gathering the array shapes (P2R-200). A `null` member makes it an `Option` (P2R-100).
 /// The error is the problem message.
 pub fn rust_type(union: &TUnion, enums: &TypeNames) -> Result<RustType, String> {
+    typed(union, enums, false)
+}
+
+/// `rust_type`, where a `declared` type makes each shape inside it a declared shape, which
+/// keeps its own field types and may hold a union field (P2R-430).
+fn typed(union: &TUnion, enums: &TypeNames, declared: bool) -> Result<RustType, String> {
     let unknown = || format!("the type {} has no Rust type (P2R-22)", union.get_id());
     let mut found: Option<RustType> = None;
     let mut nullable = false;
@@ -293,9 +299,13 @@ pub fn rust_type(union: &TUnion, enums: &TypeNames) -> Result<RustType, String> 
             continue;
         }
         let this = match atomic {
-            TAtomic::Array(TArray::Keyed(keyed)) if is_shape(keyed) => shape_type(keyed, enums)?,
-            TAtomic::Array(TArray::Keyed(keyed)) if is_map(keyed) => map_type(keyed, enums)?,
-            _ => atomic_type(atomic, enums).ok_or_else(unknown)?,
+            TAtomic::Array(TArray::Keyed(keyed)) if is_shape(keyed) => {
+                shape_type(keyed, enums, declared)?
+            }
+            TAtomic::Array(TArray::Keyed(keyed)) if is_map(keyed) => {
+                map_with(keyed, |values| typed(values, enums, declared))?
+            }
+            _ => atomic_type(atomic, enums, declared).ok_or_else(unknown)?,
         };
         if found.as_ref().is_some_and(|seen| *seen != this) {
             return Err(unknown());
@@ -347,7 +357,7 @@ pub fn rust_type(union: &TUnion, enums: &TypeNames) -> Result<RustType, String> 
 /// of `ArrayAccess`): `rust_type`, or a union enum gathered into `enums` for a union of
 /// members with different Rust types (P2R-230).
 pub fn declared_type(union: &TUnion, enums: &TypeNames) -> Result<RustType, String> {
-    let error = match rust_type(union, enums) {
+    let error = match typed(union, enums, true) {
         Ok(ty) => return Ok(ty),
         Err(error) => error,
     };
@@ -372,9 +382,10 @@ pub fn declared_type(union: &TUnion, enums: &TypeNames) -> Result<RustType, Stri
             TAtomic::Array(TArray::Keyed(keyed)) if is_map(keyed) => {
                 vec![declared_map(keyed, enums)?]
             }
-            // A list of a union fails here, and a union stays out of lists (P2R-230).
+            // A list of a union fails here, and a union stays out of lists (P2R-230). A shape
+            // member, also inside a list, is a declared shape (P2R-430).
             _ => vec![
-                rust_type(&TUnion::from_vec(vec![atomic.clone()]), enums)
+                typed(&TUnion::from_vec(vec![atomic.clone()]), enums, true)
                     .map_err(|_| error.clone())?,
             ],
         };
@@ -588,20 +599,16 @@ pub fn fits_map(union: &TUnion, map: &RustType, enums: &TypeNames) -> bool {
     })
 }
 
-/// The map of `array<K, V>`: `IndexMap<i64, V>` for an int key, and `IndexMap<String, V>`
-/// keyed by the text of the key for a string, `int|string` or `array-key` key, because PHP
-/// turns stored and lookup keys the same way. Known keys and their values count as keys
-/// and values of the map (P2R-240).
-fn map_type(keyed: &TKeyedArray, enums: &TypeNames) -> Result<RustType, String> {
-    map_with(keyed, |values| rust_type(values, enums))
-}
-
 /// The map of a declared `array<K, V>`, whose value type may be a union (P2R-250).
 fn declared_map(keyed: &TKeyedArray, enums: &TypeNames) -> Result<RustType, String> {
     map_with(keyed, |values| declared_type(values, enums))
 }
 
-/// The map of `keyed`, with `value` giving the Rust type of the value type.
+/// The map of `array<K, V>`, with `value` giving the Rust type of the value type:
+/// `IndexMap<i64, V>` for an int key, and `IndexMap<String, V>` keyed by the text of the
+/// key for a string, `int|string` or `array-key` key, because PHP turns stored and lookup
+/// keys the same way. Known keys and their values count as keys and values of the map
+/// (P2R-240).
 fn map_with(
     keyed: &TKeyedArray,
     value: impl Fn(&TUnion) -> Result<RustType, String>,
@@ -647,9 +654,35 @@ fn map_with(
     Ok(RustType::Map(Box::new(key), Box::new(value)))
 }
 
+/// True when the Rust type of every member of `value` is a member of the union enum of the
+/// field type `ty`, `null` included where `ty` is `Option<U>` (P2R-430).
+fn fits_union(value: &TUnion, ty: &RustType, enums: &TypeNames) -> bool {
+    let RustType::Union(name) = ty.inner() else {
+        return false;
+    };
+    let Some(members) = enums.unions.borrow().get(name).cloned() else {
+        return false;
+    };
+    within(value, &members, matches!(ty, RustType::Option(_)), enums)
+}
+
+/// True for a map of union values, also inside a list or `Option`, which a declared map
+/// alone may be (P2R-250).
+fn holds_union_map(ty: &RustType) -> bool {
+    match ty {
+        RustType::Map(_, value) => {
+            matches!(value.inner(), RustType::Union(_)) || holds_union_map(value)
+        }
+        RustType::Vec(inner) | RustType::Option(inner) => holds_union_map(inner),
+        _ => false,
+    }
+}
+
 /// The struct of an array shape, gathered into `enums` (P2R-200). Mago keeps the keys in
-/// byte order, which is the order of the fields and of the parts of the name.
-fn shape_type(keyed: &TKeyedArray, enums: &TypeNames) -> Result<RustType, String> {
+/// byte order, which is the order of the fields and of the parts of the name. A field of a
+/// `declared` shape may hold a union, and a shape that Mago gives a read of one keeps its
+/// struct (P2R-430).
+fn shape_type(keyed: &TKeyedArray, enums: &TypeNames, declared: bool) -> Result<RustType, String> {
     let items = keyed.known_items.as_deref().into_iter().flatten();
     // The name depends on the keys alone, so a shape that Mago narrows finds the struct of
     // the declared shape before its fields map.
@@ -682,15 +715,41 @@ fn shape_type(keyed: &TKeyedArray, enums: &TypeNames) -> Result<RustType, String
             ));
         }
         // On the null side of a check, Mago types a `?T` field as `null` (P2R-104).
-        let declared = known
+        let declared_field = known
             .iter()
             .flatten()
             .find(|field| field.key == key.as_bytes() && matches!(field.ty, RustType::Option(_)));
-        let ty = match declared {
-            Some(field) if only_null(value) => field.ty.clone(),
+        let known_union = known
+            .iter()
+            .flatten()
+            .find(|field| field.key == key.as_bytes() && fits_union(value, &field.ty, enums));
+        // A declared shape keeps its own field types; the type Mago gives a read, a copy or a
+        // literal of it maps to its struct by the members of a union field (P2R-430).
+        let ty = match (declared_field, known_union) {
+            _ if declared => {
+                let ty = declared_type(value, enums)?;
+                if holds_union_map(&ty) {
+                    return Err(
+                        "a union as a map value inside an array shape is not supported (P2R-250)"
+                            .into(),
+                    );
+                }
+                ty
+            }
+            (Some(field), _) if only_null(value) => field.ty.clone(),
+            (_, Some(field)) => field.ty.clone(),
             _ => rust_type(value, enums)?,
         };
-        if ty.holds_class() {
+        // A union field holds a class when one of its members does (P2R-430).
+        let union_holds_class = match ty.inner() {
+            RustType::Union(name) => enums
+                .unions
+                .borrow()
+                .get(name)
+                .is_some_and(|members| members.iter().any(RustType::holds_class)),
+            _ => false,
+        };
+        if ty.holds_class() || union_holds_class {
             return Err(
                 "an array shape that holds an object is not supported yet (P2R-200)".into(),
             );
@@ -768,13 +827,13 @@ pub fn mixed_or_scalar(union: &TUnion) -> bool {
     union.is_mixed() || matches!(union.types.as_ref(), [TAtomic::Scalar(TScalar::Generic)])
 }
 
-fn atomic_type(atomic: &TAtomic, enums: &TypeNames) -> Option<RustType> {
+fn atomic_type(atomic: &TAtomic, enums: &TypeNames, declared: bool) -> Option<RustType> {
     match atomic {
         TAtomic::Scalar(TScalar::Integer(_)) => Some(RustType::I64),
         TAtomic::Scalar(TScalar::Float(_)) => Some(RustType::F64),
         TAtomic::Scalar(TScalar::Bool(_)) => Some(RustType::Bool),
         TAtomic::Scalar(TScalar::String(_)) => Some(RustType::String),
-        TAtomic::Array(TArray::List(list)) => list_type(list, enums),
+        TAtomic::Array(TArray::List(list)) => list_type(list, enums, declared),
         // A single case (`enum(Suit::Hearts)`) widens to its enum (P2R-21).
         TAtomic::Object(TObject::Enum(found)) => {
             match enums.get(&found.name.as_bytes().to_ascii_lowercase()) {
@@ -799,12 +858,12 @@ fn atomic_type(atomic: &TAtomic, enums: &TypeNames) -> Option<RustType> {
 /// `list{int, int}` keeps its element types in `known_elements` and `never` as its
 /// general element type, so both are folded together. They fold as one union, so
 /// `list{int(1), null}` gives `Vec<Option<i64>>` (P2R-100).
-fn list_type(list: &TList, enums: &TypeNames) -> Option<RustType> {
+fn list_type(list: &TList, enums: &TypeNames, declared: bool) -> Option<RustType> {
     let members = element_members(list);
     if members.is_empty() {
         return None;
     }
-    let element = rust_type(&TUnion::from_vec(members), enums).ok()?;
+    let element = typed(&TUnion::from_vec(members), enums, declared).ok()?;
     // A list of `PhpOptional` waits for a later slice (P2R-360).
     if matches!(element, RustType::Optional(_)) {
         return None;

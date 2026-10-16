@@ -4426,8 +4426,9 @@ otherwise than an array (`empty($c)` is false for an empty collection).
   `all([..])` with a list of columns stop, because Laravel then loads only
   those columns, and so does a `where` that P2R-413 refuses. On a model
   whose store does not apply, these forms stop with the reason of
-  P2R-410. `M::where(..)->get()` and `M::get()` stop on Mago's finding
-  (P2R-11), because `__callStatic` gives `mixed`.
+  P2R-410. `M::get()` and `M::where(..)->get()` stop, by P2R-153 or on
+  Mago's finding (P2R-11), because `__callStatic` forwards them and Mago
+  gives `mixed`.
 - **P2R-442** On a collection value `$c`, these MUST convert, in the
   collection's order:
   - `foreach ($c as $x)` without a key, as a `foreach` over a list

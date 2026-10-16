@@ -111,7 +111,7 @@ impl Converter<'_> {
         if !self.when_told() {
             self.refuse(
                 node,
-                "when converts only as the method of Laravel's trait Conditionable, declared in an included file and not declared again by Eloquent's builder, whose type the tool tells Mago (P2R-450, P2R-451)",
+                "when converts only as the method of Laravel's trait Conditionable, declared in an included file and not declared again by Eloquent's builder or a subclass of it, whose type the tool tells Mago (P2R-450, P2R-451)",
             );
             return None;
         }
@@ -197,8 +197,8 @@ impl Converter<'_> {
     }
 
     /// True when the tool told Mago the type of Laravel's `when()`: an included file, never
-    /// the input, declares its trait with the method, and Eloquent's builder takes `when()`
-    /// from that trait rather than declaring its own (P2R-450).
+    /// the input, declares its trait with the method, and Eloquent's builder and each of its
+    /// subclasses take `when()` from that trait rather than declaring their own (P2R-450).
     fn when_told(&self) -> bool {
         let codebase = self.codebase;
         let included = codebase
@@ -209,11 +209,23 @@ impl Converter<'_> {
                     .iter()
                     .any(|analysed| analysed.file == conditionable.span.file_id)
             });
-        included
-            && codebase
-                .get_declaring_method(BUILDER, b"when")
-                .zip(codebase.get_method(CONDITIONABLE, b"when"))
+        let laravel = codebase.get_method(CONDITIONABLE, b"when");
+        let laravel_when = |class: &[u8]| {
+            codebase
+                .get_declaring_method(class, b"when")
+                .zip(laravel)
                 .is_some_and(|(declared, laravel)| std::ptr::eq(declared, laravel))
+        };
+        // Mago types `M::query()` as the builder itself, but an included `query()` may give
+        // back a subclass at runtime, so no subclass may declare its own `when()` either.
+        let subclass_own = codebase.class_likes.values().any(|class| {
+            class
+                .all_parent_classes
+                .iter()
+                .any(|parent| parent.as_bytes().eq_ignore_ascii_case(BUILDER))
+                && !laravel_when(class.name.as_bytes())
+        });
+        included && laravel_when(BUILDER) && !subclass_own
     }
 
     /// The parameters and the `where` chains of a callback of P2R-451, or `None` with a

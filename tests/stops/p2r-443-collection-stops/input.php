@@ -152,6 +152,14 @@ function nullable(\Illuminate\Support\Collection $numbers): int
 }
 
 /**
+ * @param \Illuminate\Support\Collection<int, \DateTime|false> $dates
+ */
+function maybeDates(\Illuminate\Support\Collection $dates): int
+{
+    return 0;
+}
+
+/**
  * @param Collection<Code> $codes
  */
 function single(Collection $codes): int

@@ -111,7 +111,7 @@ impl Converter<'_> {
         if !self.when_told() {
             self.refuse(
                 node,
-                "when converts only as Laravel's, whose type the tool tells Mago when an included file declares its trait Conditionable (P2R-450, P2R-451)",
+                "when converts only as the method of Laravel's trait Conditionable, declared in an included file and not declared again by Eloquent's builder, whose type the tool tells Mago (P2R-450, P2R-451)",
             );
             return None;
         }
@@ -168,7 +168,7 @@ impl Converter<'_> {
         let mut tests = Vec::new();
         for chain in callback.chains {
             for list in self.where_chain(chain, &query)? {
-                let (field, value) = self.where_field(node, list, fields, store)?;
+                let (field, value) = self.where_field(chain, list, fields, store)?;
                 tests.push(self.bound_test(value, &field, second.as_deref(), &inner)?);
             }
         }
@@ -197,20 +197,23 @@ impl Converter<'_> {
     }
 
     /// True when the tool told Mago the type of Laravel's `when()`: an included file, never
-    /// the input, declares its trait with the method (P2R-450).
+    /// the input, declares its trait with the method, and Eloquent's builder takes `when()`
+    /// from that trait rather than declaring its own (P2R-450).
     fn when_told(&self) -> bool {
-        self.codebase
+        let codebase = self.codebase;
+        let included = codebase
             .get_class_like(CONDITIONABLE)
             .is_some_and(|conditionable| {
                 !self
                     .files
                     .iter()
                     .any(|analysed| analysed.file == conditionable.span.file_id)
-                    && conditionable
-                        .methods
-                        .iter()
-                        .any(|method| method.as_bytes().eq_ignore_ascii_case(b"when"))
-            })
+            });
+        included
+            && codebase
+                .get_declaring_method(BUILDER, b"when")
+                .zip(codebase.get_method(CONDITIONABLE, b"when"))
+                .is_some_and(|(declared, laravel)| std::ptr::eq(declared, laravel))
     }
 
     /// The parameters and the `where` chains of a callback of P2R-451, or `None` with a

@@ -2975,8 +2975,7 @@ This section converts a closure only as such a callback.
 - **P2R-300** An arrow function (`fn(T $x): R => expr`, with or without
   `static` and the return type) MUST convert to a Rust closure
   `|x: T| expr` where it is the callback argument of P2R-301 or P2R-302,
-  and nowhere else; as the callback of a `when` link it converts to
-  store conditions instead (P2R-451). It takes exactly one parameter, a new variable of the
+  and nowhere else. It takes exactly one parameter, a new variable of the
   parameter type of P2R-24 (`&str` for a string), which only its body
   reads, and which hides a variable of the same PHP name of the enclosing
   body there, as in PHP; for P2R-30 and P2R-31 it is a variable of the
@@ -3009,7 +3008,9 @@ This section converts a closure only as such a callback.
   (an `array_map` call as the list argument of another still converts,
   because the list converts before the callback); and a closure of the
   long form (`function () use (..) { .. }`), also with `static` (a later
-  slice).
+  slice). As the callback of a `when` link (P2R-451), an arrow function
+  or a closure of the long form converts to store conditions instead, and
+  this paragraph does not apply to it.
 - **P2R-301** `array_map(CB, $list)` with two positional arguments, where
   `$list` is any expression whose value is a list (`Vec<T>`, not a map)
   of ints, floats, bools, enums or strings, a temporary such as
@@ -4281,7 +4282,8 @@ them.
   P2R-213 (`?` in a function that throws, `unwrap_or_else(|e|
   e.uncaught())` in `fn main()`, a `break 'throw` in a `try` body). For
   P2R-211, P2R-213 and P2R-214 each form on a model with a struct (the
-  `where` chain ended by `sole()` or `firstOrFail()` without arguments,
+  `where` chain, with its `when` links (P2R-451), ended by `sole()` or
+  `firstOrFail()` without arguments,
   or `M::findOrFail(..)` and `M::query()->findOrFail(..)` with any
   arguments) is a call that throws, also where
   it then stops on the store, an argument or a `where` value:
@@ -4325,9 +4327,10 @@ them.
   `firstOrFail()` with an argument (a list of columns, which Laravel
   loads alone); `findOrFail` with an argument of another type, a second
   argument, or a named or unpacked argument; `sole()` or `firstOrFail()`
-  after `query()` without a `where`, or after a `where` called on the
-  model class without `query()` (`M::where(..)->firstOrFail()`), and
-  `where(..)->findOrFail(..)`; these forms on a model whose store
+  after `query()` without a `where` or `when` link, or after a `where`
+  called on the model class without `query()`
+  (`M::where(..)->firstOrFail()`), and `where(..)->findOrFail(..)` and
+  `when(..)->findOrFail(..)`; these forms on a model whose store
   does not apply, with the reason of P2R-410; and these forms where a
   call that throws cannot stand (P2R-213), such as the default of `??`.
 
@@ -4420,11 +4423,12 @@ otherwise than an array (`empty($c)` is false for an empty collection).
   in a union, or inside a list, a map, a shape or another collection; and
   either class without the vendored class.
 - **P2R-441** `M::query()` without arguments, followed by zero or more
-  `->where('<c>', $v)` and then `->get()` without arguments, and
-  `M::all()` without arguments, where `M` is a model whose store applies
-  (P2R-410), MUST convert to `M::store_get(|row: &M| ..)`, with the
-  closure and the conditions of P2R-413 for each `where`, or to
-  `M::store_all()` when no `where` comes before `get()`. Both give copies
+  `->where('<c>', $v)` and `when` links (P2R-451) and then `->get()`
+  without arguments, and `M::all()` without arguments, where `M` is a
+  model whose store applies (P2R-410), MUST convert to
+  `M::store_get(|row: &M| ..)`, with the closure and the conditions of
+  P2R-413 for each `where` and of P2R-452 for each `when` link, or to
+  `M::store_all()` when no `where` or `when` link comes before `get()`. Both give copies
   of every matching row in creation order, as `Vec<M>`, and the `impl`
   block of P2R-410 holds each only when a form calls it. The order is the
   limit that section 42 states: an index whose columns start with a
@@ -4476,11 +4480,16 @@ $query->where('c', $value); })->get()`, and Mago types each chain as
 callback without a return value gives that type no meaning. A throwaway
 spike that told Mago `when()` returns `$this` and let such links through
 the store chain cleared four of the seven files (the other three read
-models without a store) and made no other file stop. This section tells
-Mago that type and converts the links to conditions of the store.
+models without a store) and made no other file stop. With the checks
+of this section two of the four still stop: `ListAccountQuery` compares
+an int with its string column `number` (P2R-413), and
+`ListJournalLineDimensionQuery` reads `JournalLine`, which takes no
+struct (P2R-401). This section tells Mago that type and converts the
+links to conditions of the store.
 
-- **P2R-450** Before Mago analyses the input, when an included file,
-  never the input (P2R-340), declares Laravel's trait
+- **P2R-450** Before Mago analyses the input, when the input declares a
+  model (P2R-401) and an included file, never the input (P2R-340),
+  declares Laravel's trait
   `Illuminate\Support\Traits\Conditionable` with a method `when`, the
   tool MUST give Mago, as a patch of that trait would, a `when()` that
   keeps Laravel's parameters and its template `TWhenParameter`, so a
@@ -4491,10 +4500,12 @@ Mago that type and converts the links to conditions of the store.
   same builder. Every other use of `when()` stops (P2R-135, P2R-153, or
   the rules of section 45 on a collection), so the told type lets no
   other form convert.
-- **P2R-451** In a chain of P2R-413, P2R-421 or P2R-441, a link
+- **P2R-451** In the `where` chain of P2R-413, of P2R-421 (ended by
+  `sole()` or `firstOrFail()`) or of P2R-441, a link
   `->when($value, <callback>)` MAY stand anywhere between `M::query()` and
   the last call, among the `where` links; `first()`, `sole()` and
-  `firstOrFail()` then need one or more `where` or `when` links. Such a
+  `firstOrFail()` then need one or more `where` or `when` links. These
+  links convert only where P2R-450 told Mago the type of `when()`. Such a
   link converts when all of these hold:
   - It has two positional arguments, neither named nor unpacked.
   - `$value` is a variable, a parameter or a property read of one (it is
@@ -4502,36 +4513,55 @@ Mago that type and converts the links to conditions of the store.
     P2R-452 gives a truthiness rule; a closure as `$value` stops,
     because Laravel calls it.
   - The callback is a closure `function (Builder $query, T $value): void
-    { .. }`, with or without `static`, whose body is one or more
-    statements `$query->where('<c>', <v>);`, or an arrow function
-    `fn (Builder $query, T $value) => $query->where('<c>', <v>)`, whose
-    body is one or more chained `where` calls on its first parameter.
-    The callback has one or two parameters, none by reference, variadic
-    or with a default, and no `use` list; the first parameter is
-    untyped or Eloquent's `Builder`, and the second, which may be left
-    out, is untyped or of the Rust type of `$value` without `null`.
+    { .. }`, with or without `static` and with `: void` or no return
+    type, whose body is one or more statements, each a chain
+    `$query->where('<c>', <v>)` of one or more `where` calls on its first
+    parameter, or an arrow function
+    `fn (Builder $query, T $value) => $query->where('<c>', <v>)`, with or
+    without `static` and without a return type, whose body is one such
+    chain. The callback has one or two parameters, none by reference,
+    variadic, with a default, a modifier or an attribute, no two of one
+    name and none named `$this` or like a superglobal (PHP rejects
+    these, and Mago does not report them), and no `use` list; the first
+    parameter is untyped or Eloquent's `Builder`, and the second, which
+    may be left out, is untyped or written as the PHP type of `$value`
+    without `null`: `int`, `string`, `bool`, the class or the enum (not
+    `?string`, `true` or `false`, which PHP checks against the value it
+    passes).
   - Each `where` follows P2R-413, except that its value is a literal, the
     callback's second parameter, or a property read of that parameter
-    (`$administration->id`), which stands for `$value`.
+    (`$administration->id`), which stands for `$value` without `null`
+    (for an `Option`, the binding of P2R-452).
 - **P2R-452** Each `when` link MUST convert to one more condition of the
   store closure of P2R-413, joined with `&&` in source order: a row
   passes when `$value` is falsy by PHP's rules, or when every `where` of
   the callback holds with the second parameter bound to `$value`. Falsy
   are `null`, `false`, `0`, `""`, `"0"` and an empty list; any other int,
   string, list, model, struct or enum case is truthy. An `Option<T>`
-  value converts to `v.is_none_or(|v| <falsy> || <conditions>)`, with
+  value converts to `v.is_none_or(|b| <falsy> || <conditions>)`, with
   `v` lent as an argument is (P2R-101, P2R-204), and any other value to
-  `<falsy> || <conditions>`. The binding's name follows the closure-name
-  rule of P2R-413, and is `_` when nothing reads it (a model or an enum
-  case, which is always truthy, with no `where` on it).
+  `<falsy> || <conditions>` with the value in place of `b`; for a model,
+  struct or enum case `<falsy>` and its `||` are left out. The binding
+  `b` has the Rust name of the callback's second parameter (P2R-30, with
+  `r#` for a keyword), or `value` when the callback has one parameter;
+  it takes the first suffix `_1`, `_2` and so on (after the name without
+  `r#`) that is no word of a value's Rust form and neither of the
+  closure's names `row` and `text` of P2R-413; and it is `_` when
+  nothing reads it (a model, struct or enum case with no `where` whose
+  value reads the second parameter).
 - **P2R-453** These stop the conversion: `when()` with one or three
   arguments (Laravel then gives a proxy or calls a default callback), a
   named or unpacked argument, `unless()`, a value of another type (a
   float, because PHP 8.5 warns when it tests `NAN` for truth, a map, a
-  shape, a union, a collection) or another form, and a callback
-  of any other form: another statement or expression in the body, a
-  `return`, a `where` with an operator or a closure, a call on another
-  variable, a value that reads a variable of the enclosing body, or a
+  shape, a union, a collection) or another form, a model, struct or
+  enum case without `null` as the value with no `where` whose value
+  reads the second parameter (it is always truthy, and Rust would read
+  it nowhere), a
+  `when` link before `find`, `findOrFail` or `create` (P2R-153), and a
+  callback of any other form: another statement or expression in the
+  body, a `return`, another return type, a `where` with an operator or
+  a closure, a call on another variable, a value that reads any other
+  variable (`$this` included), a parameter of another form, or a
   written parameter type of another class.
 
 ## Spec checklist

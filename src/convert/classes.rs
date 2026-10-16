@@ -7,13 +7,14 @@ use heck::ToSnakeCase;
 use mago_codex::ttype::union::TUnion;
 use mago_span::{HasSpan, Span};
 use mago_syntax::cst::*;
+use mago_syntax::walker::Walker;
 
 use super::control::emit;
 use super::recursion::{self, Target};
 use super::variables::THIS;
 use super::{
     Context, Converter, Mode, ParameterSignature, Signature, Variables, functions, helpers, lists,
-    nulls,
+    nulls, unions,
 };
 use crate::names;
 use crate::printer::{self, RExpr};
@@ -557,7 +558,9 @@ impl Converter<'_> {
                 None => return false,
             };
             let plain = match value {
-                Expression::Literal(Literal::String(_) | Literal::Integer(_)) => true,
+                // Mago gives no value for an escape PHP rejects, such as `\u{110000}`.
+                Expression::Literal(Literal::String(string)) => string.value.is_some(),
+                Expression::Literal(Literal::Integer(_)) => true,
                 Expression::Access(Access::ClassConstant(access)) => {
                     matches!(access.class, Expression::Identifier(_))
                         && matches!(&access.constant, ClassLikeConstantSelector::Identifier(constant)
@@ -581,9 +584,9 @@ impl Converter<'_> {
 
     /// True for a method of a `Data` class named like a hook, in any letter case, that no
     /// interface of the class declares, which is P2R-371's, and that neither `Data` nor a
-    /// trait it uses has a real method of, only an `@method` tag or nothing, which P2R-350
-    /// checks (P2R-380). It reads Mago's codebase, because the interfaces' own methods are
-    /// read after the classes.
+    /// trait or interface of it has a real method of, only an `@method` tag or nothing,
+    /// which P2R-350 checks (P2R-380). It reads Mago's codebase, because the interfaces'
+    /// own methods are read after the classes.
     fn hook_name(&self, class: usize, method: &Method<'_>) -> bool {
         let real = |owner: &[u8]| {
             self.codebase
@@ -600,11 +603,23 @@ impl Converter<'_> {
                 .codebase
                 .get_declaring_method(b"Spatie\\LaravelData\\Data", method.name.value)
                 .is_none_or(|parent| parent.flags.is_magic_method())
-            // Mago takes Data's own @method tag over a real method of its trait.
+            // Mago takes Data's own @method tag over a real method of its trait or interface,
+            // also over a trait method that Data renames to the hook's name.
             && self
                 .codebase
                 .get_class_like(b"spatie\\laraveldata\\data")
-                .is_none_or(|data| !data.used_traits.iter().any(|name| real(name.as_bytes())))
+                .is_none_or(|data| {
+                    !data
+                        .used_traits
+                        .iter()
+                        .chain(data.all_parent_interfaces.iter())
+                        .any(|name| real(name.as_bytes()))
+                        && !data.trait_alias_map.iter().any(|(original, alias)| {
+                            [original, alias]
+                                .iter()
+                                .any(|name| name.as_bytes().eq_ignore_ascii_case(method.name.value))
+                        })
+                })
     }
 
     /// Refuses everything a class of these slices may not hold (P2R-130, P2R-140).
@@ -720,14 +735,16 @@ impl Converter<'_> {
                 if !hook_form(method) {
                     self.refuse(&method.name, DATA_HOOK);
                 } else if hooks.contains(&lowercase(method)) {
-                    // PHP rejects it when it loads the class, and Mago does not report it.
+                    // PHP rejects it when it compiles the file, and Mago does not report it.
                     self.refuse(
                         &method.name,
                         "PHP rejects a second method of this name in one class (P2R-380)",
                     );
                 } else {
                     hooks.push(lowercase(method));
-                    self.left_out.push(method.span());
+                    if !index.is_some_and(|index| self.hook_shape(method, index)) {
+                        self.left_out.push(method.span());
+                    }
                 }
                 continue;
             }
@@ -933,9 +950,70 @@ impl Converter<'_> {
         }
     }
 
+    /// Refuses what PHP rejects in a hook when it compiles the file, where Mago reports
+    /// nothing or a code that a left-out hook drops; true when it refused something
+    /// (P2R-130, P2R-135, P2R-154, P2R-380). The tool reads nothing else of a hook.
+    fn hook_shape(&mut self, method: &Method<'_>, class: usize) -> bool {
+        let mut refused = false;
+        let resolve = |identifier: Option<&Identifier<'_>>| match identifier {
+            Some(identifier) => Some(self.name_key(identifier, identifier.value())),
+            None => Some(self.classes[class].key.clone()),
+        };
+        let written: Vec<(Span, &'static str)> = method
+            .parameter_list
+            .parameters
+            .iter()
+            .filter_map(|parameter| parameter.hint.as_ref())
+            .chain(method.return_type_hint.as_ref().map(|hint| &hint.hint))
+            .filter_map(|hint| {
+                unions::written_problem(hint, &resolve).map(|problem| (hint.span(), problem))
+            })
+            .collect();
+        for (span, problem) in written {
+            self.refuse(&span, problem);
+            refused = true;
+        }
+        let mut seen: Vec<&[u8]> = Vec::new();
+        for parameter in method.parameter_list.parameters.iter() {
+            let name = parameter.variable.name;
+            let problem = if static_modifier(parameter)
+                || parameter
+                    .hint
+                    .as_ref()
+                    .is_some_and(|hint| names(hint, is_static))
+            {
+                Some("static can only be a return type, which PHP requires (P2R-154)")
+            } else if parameter.is_promoted_property() {
+                Some("only a constructor parameter can be promoted to a property (P2R-130)")
+            } else if name == b"$this" {
+                Some("a parameter cannot be named $this, which PHP rejects (P2R-135)")
+            } else if seen.contains(&name) {
+                Some("PHP rejects a second parameter of this name (P2R-380)")
+            } else {
+                None
+            };
+            if let Some(problem) = problem {
+                self.refuse(parameter, problem);
+                refused = true;
+            }
+            seen.push(name);
+        }
+        let mut unchecked = false;
+        Unchecked.walk_method(method, &mut unchecked);
+        if unchecked {
+            self.refuse(
+                &method.name,
+                "a hook that declares a function, or writes self, parent or static after a backslash, is not supported: PHP rejects them, and Mago reports them under a code that a left-out hook drops (P2R-380)",
+            );
+            refused = true;
+        }
+        refused
+    }
+
     /// A constructor converts only when every parameter promotes to a typed property and
-    /// its body is empty (P2R-130). With `data` (the class extends Spatie's `Data`),
-    /// laravel-data's attributes are left out (P2R-351).
+    /// its body is empty (P2R-130). laravel-data's attributes are left out on every class
+    /// (P2R-381); `data` (the class extends Spatie's `Data`) adds the check of the names
+    /// `Data` declares (P2R-350).
     fn constructor_shape(&mut self, method: &Method<'_>, data: bool) {
         match &method.body {
             MethodBody::Concrete(block) if block.statements.is_empty() => {}
@@ -2334,10 +2412,45 @@ fn named_like_hook(method: &Method<'_>) -> bool {
     DATA_HOOKS.contains(&lowercase(method).as_slice())
 }
 
+/// Finds in a hook what PHP rejects when it compiles the file and Mago reports under a code
+/// that a left-out hook drops: `self`, `parent` or `static` after a backslash (`\self`), and
+/// a function declared inside, where `self` names no class (P2R-380).
+struct Unchecked;
+
+impl<'ast, 'arena> Walker<'ast, 'arena, bool> for Unchecked {
+    fn walk_in_function(&self, _function: &'ast Function<'arena>, found: &mut bool) {
+        *found = true;
+    }
+
+    fn walk_in_qualified_identifier(
+        &self,
+        identifier: &'ast QualifiedIdentifier<'arena>,
+        found: &mut bool,
+    ) {
+        *found |= reserved_class_name(identifier.value);
+    }
+
+    fn walk_in_fully_qualified_identifier(
+        &self,
+        identifier: &'ast FullyQualifiedIdentifier<'arena>,
+        found: &mut bool,
+    ) {
+        *found |= reserved_class_name(identifier.value);
+    }
+}
+
+/// True for a name whose last part is `self`, `parent` or `static`, in any letter case.
+fn reserved_class_name(name: &[u8]) -> bool {
+    let last = name.rsplit(|byte| *byte == b'\\').next().unwrap_or(name);
+    [&b"self"[..], b"parent", b"static"]
+        .iter()
+        .any(|word| last.eq_ignore_ascii_case(word))
+}
+
 /// True for a public static method with a body and no attribute, the only form of a hook
-/// that is left out (P2R-380). PHP checks an attribute such as `#[\Override]`, and a
-/// modifier other than `public`, `static` and `final` or one written twice, when it
-/// loads the class.
+/// that is left out (P2R-380). PHP checks an attribute such as `#[\Override]` when it loads
+/// the class, and rejects a modifier other than `public`, `static` and `final`, or one
+/// written twice, when it compiles the file.
 fn hook_form(method: &Method<'_>) -> bool {
     let count =
         |kind: fn(&Modifier<'_>) -> bool| method.modifiers.iter().filter(|m| kind(m)).count();

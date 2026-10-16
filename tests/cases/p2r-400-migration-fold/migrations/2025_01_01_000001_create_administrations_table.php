@@ -1,7 +1,8 @@
 
 <?php
 
-declare(strict_types=1);
+// The blank line before <?php only prints, so the file is read. PHP refuses such
+// text before declare(strict_types=1), so this file has no declare.
 
 use Illuminate\Database\Migrations\Migration;
 use Illuminate\Database\Schema\Blueprint;

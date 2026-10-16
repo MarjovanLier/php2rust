@@ -61,3 +61,7 @@ final class Gasket extends Model
 final class Seal extends Model
 {
 }
+
+final class Rivet extends Model
+{
+}

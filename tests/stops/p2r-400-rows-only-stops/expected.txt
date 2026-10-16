@@ -12,3 +12,4 @@ input.php:49:13: the migrations leave the table cams of this model unknown: migr
 input.php:53:13: the migrations leave the table wheels of this model unknown: migrations/2025_08_01_000015_code_before_return.php: the file is not a migration of the form the tool reads (P2R-400)
 input.php:57:13: the migrations leave the table gaskets of this model unknown: migrations/2025_08_01_000017_callable_in_constant.php: the file is not a migration of the form the tool reads (P2R-400)
 input.php:61:13: the migrations leave the table seals of this model unknown: migrations/2025_08_01_000019_constructor.php: the file is not a migration of the form the tool reads (P2R-400)
+input.php:65:13: the migrations leave the table rivets of this model unknown: migrations/2025_08_01_000021_text_before_declare.php: the file is not a migration of the form the tool reads (P2R-400)

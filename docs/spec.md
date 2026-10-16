@@ -4517,17 +4517,18 @@ Mago that type and converts the links to conditions of the store.
   store closure of P2R-413, joined with `&&` in source order: a row
   passes when `$value` is falsy by PHP's rules, or when every `where` of
   the callback holds with the second parameter bound to `$value`. Falsy
-  are `null`, `false`, `0`, `0.0` and `-0.0`, `""`, `"0"` and an empty
-  list; any other int, float (`NAN` included), string, list, model,
-  struct or enum case is truthy. An `Option<T>` value converts to
-  `v.is_none_or(|v| <falsy> || <conditions>)`, with `v` lent as an
-  argument is (P2R-101, P2R-204), and any other value to `<falsy> ||
-  <conditions>`. The binding's name follows the closure-name rule of
-  P2R-413.
+  are `null`, `false`, `0`, `""`, `"0"` and an empty list; any other int,
+  string, list, model, struct or enum case is truthy. An `Option<T>`
+  value converts to `v.is_none_or(|v| <falsy> || <conditions>)`, with
+  `v` lent as an argument is (P2R-101, P2R-204), and any other value to
+  `<falsy> || <conditions>`. The binding's name follows the closure-name
+  rule of P2R-413, and is `_` when nothing reads it (a model or an enum
+  case, which is always truthy, with no `where` on it).
 - **P2R-453** These stop the conversion: `when()` with one or three
   arguments (Laravel then gives a proxy or calls a default callback), a
   named or unpacked argument, `unless()`, a value of another type (a
-  map, a shape, a union, a collection) or another form, and a callback
+  float, because PHP 8.5 warns when it tests `NAN` for truth, a map, a
+  shape, a union, a collection) or another form, and a callback
   of any other form: another statement or expression in the body, a
   `return`, a `where` with an operator or a closure, a call on another
   variable, a value that reads a variable of the enclosing body, or a

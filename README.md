@@ -60,7 +60,8 @@ ended by `sole()` or `firstOrFail()`, and `M::findOrFail($id)` and
 `catch` of those classes catches. `M::query()->get()`, with or without `where` calls before
 it, and `M::all()` give the rows in creation order as a Laravel collection, which becomes a
 `Vec` of its elements; so does any `Collection<K, T>` type of Laravel (Eloquent's or the
-base class) whose elements have a Rust type. A collection converts only where it is read in
+base class) whose elements have a Rust type and are neither nullable nor objects of a class
+that changes them. A collection converts only where it is read in
 order: a `foreach` without a key, `count()`, and the methods `count()`, `isEmpty()`,
 `isNotEmpty()` and `first()` without arguments; any other use stops, because a collection
 is an object that a caller and a callee share. Other queries and saving models still stop

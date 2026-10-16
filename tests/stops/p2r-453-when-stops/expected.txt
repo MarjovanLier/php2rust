@@ -19,6 +19,9 @@ input.php:166:70: Attempting to access a method on a non-object type (`string`).
 input.php:175:39: Invalid argument type for argument #2 of `Illuminate\Support\Traits\Conditionable::when`: expected `(callable(Illuminate\Database\Eloquent\Builder<App\Code>, bool): mixed)|null`, but found `(closure(Illuminate\Database\Eloquent\Builder<Illuminate\Database\Eloquent\Model>, false): Illuminate\Database\Eloquent\Builder<Illuminate\Database\Eloquent\Model>)`. (invalid-argument)
 input.php:183:59: the second parameter of the callback of when is untyped or written as the PHP type of the value without null: int, string, bool, the class or the enum (P2R-451)
 input.php:192:32: a when whose value is an object or an enum case without null, which is always truthy, needs a where on the callback's second parameter (P2R-453)
-input.php:198:12: Could not infer a precise return type for function `App\beforeFind`. Saw type `mixed`. (mixed-return-statement)
-input.php:203:12: Could not infer a precise return type for function `App\beforeCreate`. Saw type `mixed`. (mixed-return-statement)
-input.php:212:12: Returned type `Illuminate\Database\Eloquent\Collection<int, App\Code|Illuminate\Database\Eloquent\Model>` is less specific than the declared return type `Illuminate\Database\Eloquent\Collection<int, App\Code>` for function `App\unlessForm`. (less-specific-return-statement)
+input.php:201:13: no migration creates the table ghosts of this model (P2R-401)
+input.php:211:96: an enum case's value or name in the callback of when is not supported yet (P2R-451, P2R-453)
+input.php:219:99: this model takes no struct (P2R-401), so a property read of it does not convert
+input.php:225:12: Could not infer a precise return type for function `App\beforeFind`. Saw type `mixed`. (mixed-return-statement)
+input.php:230:12: Could not infer a precise return type for function `App\beforeCreate`. Saw type `mixed`. (mixed-return-statement)
+input.php:239:12: Returned type `Illuminate\Database\Eloquent\Collection<int, App\Code|Illuminate\Database\Eloquent\Model>` is less specific than the declared return type `Illuminate\Database\Eloquent\Collection<int, App\Code>` for function `App\unlessForm`. (less-specific-return-statement)

@@ -192,6 +192,33 @@ function alwaysTruthy(Code $code): Collection
     return Code::query()->when($code, fn (Builder $query) => $query->where('name', 'a'))->get();
 }
 
+// An enum case's value, and a property of a model that takes no struct (P2R-451).
+enum Kind: string
+{
+    case A = 'a';
+}
+
+final class Ghost extends Model
+{
+    public $timestamps = false;
+}
+
+/**
+ * @return Collection<int, Code>
+ */
+function enumValue(?Kind $kind): Collection
+{
+    return Code::query()->when($kind, fn (Builder $query, Kind $kind) => $query->where('name', $kind->value))->get();
+}
+
+/**
+ * @return Collection<int, Code>
+ */
+function structless(?Ghost $ghost): Collection
+{
+    return Code::query()->when($ghost, fn (Builder $query, Ghost $ghost) => $query->where('rank', $ghost->id))->get();
+}
+
 // A when link before a call that takes no filter.
 function beforeFind(?string $name): Code
 {

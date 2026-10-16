@@ -122,7 +122,13 @@ pub fn sole_of(rank: i64) -> Result<String, PhpException> {
 pub fn by_names(owner: Option<&Owner>, r#type: Option<&str>) -> Vec<Code> {
     return Code::store_get(|row: &Code| {
         owner.is_none_or(|row_1| row.owner_id == row_1.id)
-            && r#type.is_none_or(|r#type| r#type.is_empty() || r#type == "0" || row.name == r#type)
+            && r#type.is_none_or(|type_1| type_1.is_empty() || type_1 == "0" || row.name == type_1)
+    });
+}
+
+pub fn by_self(name: Option<&str>) -> Vec<Code> {
+    return Code::store_get(|row: &Code| {
+        name.is_none_or(|value| value.is_empty() || value == "0" || row.name == value)
     });
 }
 
@@ -263,5 +269,9 @@ fn main() {
     print!("{}", names(&by_names(None, Some("0"))));
     print!(" ");
     print!("{}", names(&by_names(Some(&second), Some("c"))));
+    print!("\n");
+    print!("{}", names(&by_self(Some("b"))));
+    print!(" ");
+    print!("{}", names(&by_self(None)));
     print!("\n");
 }

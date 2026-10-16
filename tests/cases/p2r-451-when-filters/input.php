@@ -87,6 +87,15 @@ function byNames(?Owner $owner, ?string $type): Collection
         ->get();
 }
 
+// A second parameter that has no Rust name, which PHP accepts (P2R-30, P2R-452).
+/**
+ * @return Collection<int, Code>
+ */
+function bySelf(?string $name): Collection
+{
+    return Code::query()->when($name, fn (Builder $query, string $self) => $query->where('name', $self))->get();
+}
+
 /**
  * @param Collection<int, Code> $codes
  */
@@ -111,3 +120,4 @@ echo names(flagged(true)), ' ', names(flagged(false)), "\n";
 echo firstNamed('b'), ' ', firstNamed('0'), ' ', firstNamed(''), ' ', firstNamed('a'), "\n";
 echo soleOf(1), ' ', soleOf(2), ' ', soleOf(0), "\n";
 echo names(byNames($first, null)), ' ', names(byNames(null, '0')), ' ', names(byNames($second, 'c')), "\n";
+echo names(bySelf('b')), ' ', names(bySelf(null)), "\n";

@@ -4083,7 +4083,8 @@ yet. The output connects to no database. Of the 14 files, two clear
 model without a struct, a `uuid` key that `create` cannot fill, a seeded
 table or `sole()`. The store answers as an empty SQLite table without
 constraints would, and these are stated limits, not checked against a
-real database: it enforces no unique, foreign key or other constraint,
+real database: it holds no row that a seeder, another process or an
+earlier run inserts; it enforces no unique, foreign key or other constraint,
 where a database would refuse the row; it compares strings byte for byte,
 where MySQL's collation `utf8mb4_unicode_ci`, which the app sets, also
 ignores case, accents and trailing spaces; and it keeps rows in creation
@@ -4104,14 +4105,17 @@ relations and every other query method still stop.
   - The struct has a field `id` of type `i64`, not nullable, whose column
     `id()` declares (an auto-increment key) and no cast changes, because
     the store numbers the rows as the database numbers them.
-  - No other model with a struct reads the same table, because Laravel
-    gives both models the rows of one table and the store keeps one list
-    per model.
+  - No other model for which the first and the last condition of this
+    list hold reads the same table, because Laravel gives both models the
+    rows of one table and the store keeps one list per model. The forms on
+    a model for which one of them fails stop, so its rows never reach a
+    store.
   - No migration writes rows into the table: a `DB::table('<t>')` call in
-    a migration, `down()` aside, names `t` (a seed row that the store,
-    empty when it starts, does not hold), and one whose argument is not a
-    string literal may name any table, so it stops the forms on every
-    model.
+    a migration, `down()` aside, names `t` in any case, as SQLite matches
+    it (a seed row that the store, empty when it starts, does not hold),
+    and one whose argument is not a string literal of only letters, digits
+    and `_` (`'roles as r'`, `'main.roles'`) may name any table, so it
+    stops the forms on every model.
   - A model that uses `SoftDeletes` has a column `deleted_at` that is no
     field, because Laravel's queries read it to skip deleted rows.
 
@@ -4136,22 +4140,28 @@ relations and every other query method still stop.
     reads as a string). A `String` field of a column that is not text (a
     `'string'` cast of an int, boolean, decimal or date column) takes no
     value, because SQLite stores it by the column's type (`'1.0'` reads
-    back as `'1'`).
+    back as `'1'`); nor does an `i64` field of a `float(..)` or
+    `double(..)` column, which SQLite stores as REAL (2^53 + 1 reads back
+    as 2^53).
   - Each field other than `id` is named, except a nullable field whose
     column has no default, which gets null: for a column with a default
     the database stores the default while the created model reads null.
-    `default(..)` with a value other than null and `useCurrent()` give a
-    default; `default(null)`, `useCurrentOnUpdate()` and a `default(..)`
+    `default(..)` with a value other than null, and `useCurrent()` after
+    `date(..)`, `dateTime(..)` or `timestamp(..)`, give a default (Laravel
+    writes no default for `useCurrent()` on another column);
+    `default(null)`, `useCurrentOnUpdate()` and a `default(..)`
     after `constrained(..)`, which belongs to the foreign key, give none,
     and `change()` keeps only the default it writes again.
   - The table has no column that is neither nullable nor has a default
-    and is not a field (a date or decimal column), other than `id`,
+    and is not a field (a date or decimal column), other than `id`, and
+    `created_at` and `updated_at` while the model keeps its timestamps,
     because the database would refuse the row.
   - While the model keeps its timestamps, the table has `created_at` and
     `updated_at` and neither is a field, because Laravel writes both on
     every create, also into a field that a cast made of one.
-  - Each key is fillable. When the model declares `$fillable` as a
-    literal list with at least one key, it holds the key; otherwise the
+  - Each key is fillable. A `$fillable` that is not a literal list of
+    string literals (a keyed array, a constant) stops `create`. When
+    `$fillable` holds at least one key, it holds the key; otherwise the
     model declares `$guarded = []` and the key starts with no `_` and holds
     no `.`. Laravel throws `MassAssignmentException` for a fully guarded
     model, and for another key in strict mode (`Model::shouldBeStrict()`,
@@ -4160,23 +4170,29 @@ relations and every other query method still stop.
   The values are computed in the order the map gives them. The new row's
   `id` is one more than the number of rows the store holds, as an empty
   table's auto-increment gives.
-- **P2R-412** `M::find($id)` and `M::query()->find($id)`, with one
-  positional argument of type `int`, MUST convert to `M::store_find(<id>)`,
+- **P2R-412** `M::find($id)` and `M::query()->find($id)`, where `query()`
+  has no arguments, with one positional argument of type `int`, MUST
+  convert to `M::store_find(<id>)`,
   which gives a copy of the row with that `id` as `Option<M>`, or `None`
   when the store holds none.
-- **P2R-413** `M::query()`, followed by one or more `->where('<c>', $v)`
-  and then `->first()` without arguments (with a list of columns Laravel
-  loads only those), MUST convert to `M::store_first(|row: &M| ..)`, a
-  closure that compares a row's fields with the values, which gives a copy
-  of the first row in creation order that matches every `where`, as
-  `Option<M>`. Each `where` has two positional arguments: a string literal
+- **P2R-413** `M::query()` without arguments, followed by one or more
+  `->where('<c>', $v)` and then `->first()` without arguments (with a list
+  of columns Laravel loads only those), MUST convert to
+  `M::store_first(|row: &M| ..)`, a closure that compares a row's fields
+  with the values, which gives a copy of the first row in creation order
+  that matches every `where`, as `Option<M>`. The closure's own names
+  (`row`, and `text` for a nullable `String` field) take the first suffix
+  `_1`, `_2` and so on that no value reads, so a value never reads the
+  row in place of a variable of the same name. Each `where` has two positional arguments: a string literal
   that names a field of the struct, and a value of the field's PHP type
-  that is a variable, a literal or a property read of one, so it reads the
-  same each time the closure runs, once per row; for a nullable field the
+  that is a variable, a literal (a negative number included) or a property
+  read of one, so it reads the same each time the closure runs, once per
+  row; for a nullable field the
   value may also be the literal `null`, which matches a row whose field is
   null, as Laravel turns `where('c', null)` into `whereNull('c')`. A value
   of a nullable type, and `null` for a field that is not nullable, stop.
-  A `String` field of a column that is not text stops, as in P2R-411.
+  A `String` field of a column that is not text, and an `i64` field of a
+  REAL column, stop, as in P2R-411.
 - **P2R-414** These stop, by P2R-135 and P2R-153: any other call on a
   model, a model class or a query (`sole()`, `get()`, `firstOrFail()`,
   `orderBy(..)`, `where` with an operator or a closure, `update(..)`,

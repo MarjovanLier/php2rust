@@ -52,7 +52,8 @@ left out. A model with an accessor, a `casts()` method that is not a literal map
 observer or another member that may change what a read gives gets no struct.
 `M::create([..])`, `M::find($id)` and `M::query()->where('c', $v)->first()` convert against a
 store the output keeps in memory, one list of rows per model and thread that starts empty:
-it holds no seed rows, enforces no constraint and compares strings byte for byte. Other
+a table that a migration seeds stops, and the store holds no row that a seeder or another
+process inserts, enforces no constraint and compares strings byte for byte. Other
 queries, `sole()` and saving models still stop the conversion. Migrations are never converted.
 
 With a directory, php2rust analyses all its `.php` files together, so a class of one file

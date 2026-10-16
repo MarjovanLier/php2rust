@@ -372,12 +372,16 @@ impl Converter<'_> {
             && is_second(access.object)
             && let ClassLikeMemberSelector::Identifier(name) = &access.property
             && let RustType::Class(class) = inner
-            && let Some(property) = self.class_named(class).and_then(|index| {
+        {
+            // A model that takes no struct has no properties (P2R-401).
+            let Some(property) = self.class_named(class).and_then(|index| {
                 self.properties(index)
                     .find(|property| property.php_name == name.value)
                     .cloned()
-            })
-        {
+            }) else {
+                self.refuse(value, "this class has no property of that name (P2R-134)");
+                return None;
+            };
             return self.compared_test(
                 value,
                 field,

@@ -1,0 +1,5 @@
+input.php:9:13: the migrations leave the table pins of this model unknown: migrations/2025_08_01_000002_connection.php:13: a statement other than Schema::create, Schema::table and a DB::table chain (P2R-400)
+input.php:13:13: the migrations leave the table cranks of this model unknown: migrations/2025_08_01_000003_create_cranks_and_rods_tables.php:15: a named or unpacked argument in a Blueprint call (P2R-400)
+input.php:17:13: the migrations leave the table rods of this model unknown: migrations/2025_08_01_000004_calls_down.php:14: a statement other than Schema::create, Schema::table and a DB::table chain (P2R-400)
+input.php:21:13: the migrations leave the table cogs of this model unknown: migrations/2025_08_01_000005_create_cogs_table.php:19: a statement other than Schema::create, Schema::table and a DB::table chain (P2R-400)
+input.php:25:13: the migrations leave the table belts of this model unknown: migrations/2025_08_01_000006_up_twice.php: the file is not a migration of the form the tool reads (P2R-400)

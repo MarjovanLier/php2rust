@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App;
 
+use Illuminate\Database\Eloquent\Attributes\Initialize;
 use Illuminate\Database\Eloquent\Attributes\ObservedBy;
 use Illuminate\Database\Eloquent\Casts\Attribute;
 use Illuminate\Database\Eloquent\Model;
@@ -53,6 +54,35 @@ final class Booted extends Model
     }
 }
 
+final class Initialized extends Model
+{
+    protected $table = 'items';
+
+    #[Initialize]
+    protected function prepare(): void
+    {
+    }
+}
+
+final class Lifecycle extends Model
+{
+    protected $table = 'items';
+
+    protected function initializeNamed(): void
+    {
+    }
+}
+
+final class Nullable extends Model
+{
+    protected $table = 'items';
+
+    protected function name(): ?Attribute
+    {
+        return null;
+    }
+}
+
 final class Constant extends Model
 {
     protected $table = 'items';
@@ -97,6 +127,43 @@ final class Miscast extends Model
 
 final class Pair extends Model
 {
+}
+
+// PHP rejects these, and Mago does not report them.
+final final class Twice extends Model
+{
+    protected $table = 'items';
+}
+
+final class Tables extends Model
+{
+    protected $table = 'nothing';
+
+    protected $table = 'items';
+}
+
+final class Stamps extends Model
+{
+    protected $table = 'items';
+
+    public $timestamps = true;
+
+    public $timestamps = false;
+}
+
+final class Casted extends Model
+{
+    protected $table = 'items';
+
+    protected function casts(): array
+    {
+        return [];
+    }
+
+    protected function CASTS(): array
+    {
+        return [];
+    }
 }
 
 // A relation stops, and it leaves the struct, so the read below converts.

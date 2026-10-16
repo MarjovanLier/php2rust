@@ -1,0 +1,1 @@
+input.php: the migrations path is not a directory

@@ -19,6 +19,9 @@ return new class extends Migration
             $table->string('code');
             $table->timestamp('opened_at');
             $table->decimal('ratio', 8, 2);
+            $table->unsignedInteger('created_at');
+            $table->string('updated_at')->nullable();
+            $table->integer('deleted_at')->nullable();
         });
     }
 };

@@ -27,6 +27,11 @@ final class ObservedBy
     }
 }
 
+#[\Attribute(\Attribute::TARGET_METHOD)]
+final class Initialize
+{
+}
+
 namespace Illuminate\Database\Eloquent\Casts;
 
 final class Attribute

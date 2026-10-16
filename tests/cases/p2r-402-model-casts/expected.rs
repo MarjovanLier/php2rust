@@ -9,6 +9,25 @@ pub struct Flag {
     pub weight: String,
     pub code: i64,
     pub opened_at: String,
+    pub updated_at: Option<String>,
+    pub deleted_at: Option<i64>,
+}
+
+#[derive(Clone, Debug)]
+pub struct Stamp {
+    pub id: i64,
+    pub weight: i64,
+    pub code: String,
+}
+
+#[derive(Clone, Debug)]
+pub struct Untimed {
+    pub id: i64,
+    pub weight: i64,
+    pub code: String,
+    pub created_at: i64,
+    pub updated_at: Option<String>,
+    pub deleted_at: Option<i64>,
 }
 
 pub fn summary(flag: &Flag) -> String {

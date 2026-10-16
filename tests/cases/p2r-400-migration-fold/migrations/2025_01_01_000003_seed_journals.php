@@ -10,7 +10,7 @@ return new class extends Migration
 {
     public function up(): void
     {
-        $now = now();
+        $now = now()->startOfDay();
         foreach ([1, 2] as $number) {
             DB::table('journals')->insert(['code' => 'J' . $number, 'created_at' => $now]);
         }

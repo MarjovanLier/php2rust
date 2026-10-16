@@ -11,3 +11,7 @@ abstract class Model
         return null;
     }
 }
+
+trait SoftDeletes
+{
+}

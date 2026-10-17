@@ -3029,10 +3029,10 @@ fn outside_expression(expression: &Expression<'_>) -> Option<Span> {
         _ if plain_variable(expression) => None,
         // Reads only: PHP rejects `?->` and `[]` in a write when it compiles the file.
         Expression::Access(Access::Property(access)) => {
-            outside_expression(access.object).or_else(|| outside_selector(&access.property))
+            outside_base(access.object).or_else(|| outside_selector(&access.property))
         }
         Expression::Access(Access::NullSafeProperty(access)) => {
-            outside_expression(access.object).or_else(|| outside_selector(&access.property))
+            outside_base(access.object).or_else(|| outside_selector(&access.property))
         }
         Expression::Access(Access::ClassConstant(access)) => {
             outside_class(access.class).or_else(|| match &access.constant {
@@ -3041,7 +3041,7 @@ fn outside_expression(expression: &Expression<'_>) -> Option<Span> {
             })
         }
         Expression::ArrayAccess(access) => {
-            outside_expression(access.array).or_else(|| outside_expression(access.index))
+            outside_base(access.array).or_else(|| outside_expression(access.index))
         }
         Expression::Call(Call::Function(call)) => {
             let callee = match call.function {
@@ -3051,10 +3051,10 @@ fn outside_expression(expression: &Expression<'_>) -> Option<Span> {
             };
             callee.or_else(|| outside_arguments(&call.argument_list))
         }
-        Expression::Call(Call::Method(call)) => outside_expression(call.object)
+        Expression::Call(Call::Method(call)) => outside_base(call.object)
             .or_else(|| outside_selector(&call.method))
             .or_else(|| outside_arguments(&call.argument_list)),
-        Expression::Call(Call::NullSafeMethod(call)) => outside_expression(call.object)
+        Expression::Call(Call::NullSafeMethod(call)) => outside_base(call.object)
             .or_else(|| outside_selector(&call.method))
             .or_else(|| outside_arguments(&call.argument_list)),
         // `self` and `static` name the hook's own class, which extends `Data`.
@@ -3091,6 +3091,23 @@ fn outside_expression(expression: &Expression<'_>) -> Option<Span> {
         }
         Expression::Closure(closure) => outside_closure(closure),
         other => Some(other.span()),
+    }
+}
+
+/// The object of `->` or `?->`, or the base of `[..]`: a plain variable, a call, a read or
+/// `new C(..)`, which PHP's grammar takes there. PHP fails to parse a closure or a number
+/// there, where Mago reads them.
+fn outside_base(base: &Expression<'_>) -> Option<Span> {
+    let taken = plain_variable(base)
+        || matches!(
+            base,
+            Expression::Call(_) | Expression::Access(_) | Expression::ArrayAccess(_)
+        )
+        || matches!(base, Expression::Instantiation(new) if new.argument_list.is_some());
+    if taken {
+        outside_expression(base)
+    } else {
+        Some(base.span())
     }
 }
 

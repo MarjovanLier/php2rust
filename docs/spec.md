@@ -4888,12 +4888,14 @@ Laravel app and the hooks of P2R-380's case folder write.
   $v) { .. }` and `foreach (.. as $k => $v) { .. }`, whose key and value
   are plain variables other than a superglobal; `continue;` inside a
   `foreach` of the same function; and `return;` in a closure. Each ends
-  with `;` or with its braces. The expressions are a literal; a
+  with `;` or with its braces. The expressions are a literal (a string
+  in single or double quotes with no part inside, an integer, a float,
+  `true`, `false` or `null`, with no sign; not a heredoc or nowdoc); a
   double-quoted string without a `b` prefix whose parts are text and
   plain variables (`$x`, `{$x}`); an array literal `[..]` of values and
   `key => value` pairs,
   with no `...`, `&` or empty element; a plain variable; a read of a
-  property (`->` or `?->` with a plain name), of an array key (`$a[..]`
+  property (`->` or `?->` with a plain name), of an array key (`..[..]`
   with an index) or of a class constant (`C::NAME`, `C::class`); a call
   of a function by a plain name or a plain variable, of a method (`->`
   or `?->`), or of a static method of a plain class name, `self` or
@@ -4912,7 +4914,10 @@ Laravel app and the hooks of P2R-380's case folder write.
   `mixed`), since PHP fails to parse `new match` and `list::m()`, which
   Mago reads; `enum` is not one, because Laravel names a rule class
   `Enum`. `C` above is a plain name; a plain variable is `$name` other
-  than `$this`. Anything
+  than `$this`. The object of `->` and `?->` and the base of `[..]` are a
+  plain variable, a call, a read or `new C(..)`, as PHP's grammar takes
+  them; PHP fails to parse a closure or a number there, which Mago
+  reads. Anything
   else stops with a message that names the list, pointing at the first
   part outside it in the order of the source. The check runs after P2R-380's, so a form that both
   refuse prints P2R-380's line, and P2R-380's refused forms (such as a

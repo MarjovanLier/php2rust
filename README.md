@@ -50,9 +50,10 @@ read. Only columns of a known Rust type become fields (ints, strings, and casts 
 `integer`, `string` or `boolean`); dates, decimals, uncast booleans and other casts are
 left out. A model with an accessor, a `casts()` method that is not a literal map, another
 attribute or another member that may change what a read gives gets no struct. A docblock
-type on `$table`, `$fillable`, `$guarded`, `$hidden`, `$casts` or `$timestamps` that is
-narrower than Laravel's, such as `@var list<string>`, does not stop, because PHP never
-checks it and the tool reads the value itself. A model with
+type on `$table`, `$fillable`, `$guarded`, `$hidden`, `$casts` or `$timestamps` that
+differs from Laravel's, such as `@var list<string>`, does not stop, because PHP never checks
+it and the tool reads the value itself; a docblock type that the value does not fit still
+stops. A model with
 Laravel's `#[ObservedBy(X::class)]` or `#[ObservedBy([X::class, ..])]` keeps its struct:
 its reads convert unless an observer has a `retrieved` method, and `create` on it stops,
 because Laravel runs the observers there and the store does not. `ObservedBy` must come from

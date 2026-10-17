@@ -1125,6 +1125,11 @@ impl Converter<'_> {
             );
             refused = true;
         }
+        // The closed list runs last, so a form that both checks refuse keeps the line above.
+        if !refused && let Some(span) = outside_hook_body(method) {
+            self.refuse(&span, HOOK_BODY);
+            refused = true;
+        }
         refused
     }
 
@@ -2868,6 +2873,263 @@ fn reserved_class_name(name: &[u8]) -> bool {
     [&b"self"[..], b"parent", b"static"]
         .iter()
         .any(|word| last.eq_ignore_ascii_case(word))
+}
+
+/// The problem of a hook body outside the closed list of P2R-510.
+const HOOK_BODY: &str = "a hook's body is supported only as calls, if without else and foreach before one return of a value, built from literals, arrays, variables, reads of a property, an array key or a class constant, calls and new with positional arguments, !, &&, ||, ??, comparisons, ., double-quoted strings with plain variables inside, and closures (function or static function with typed parameters, : void and no use) whose bodies hold those statements, continue; and return;; PHP rejects some other forms when it compiles the file, Mago does not report them, and the tool reads nothing else of a hook (P2R-510)";
+
+/// The first part of a hook body outside the closed list of P2R-510: statements of
+/// `outside_statement`, then one `return` of a value. PHP compiles every form on the list
+/// once its own checks hold, where the list of forms it rejects (`Unchecked`) never closed.
+fn outside_hook_body(method: &Method<'_>) -> Option<Span> {
+    let MethodBody::Concrete(block) = &method.body else {
+        return Some(method.span());
+    };
+    let Some((last, before)) = block.statements.as_slice().split_last() else {
+        return Some(block.span());
+    };
+    // PHP rejects a value returned from a void or never method.
+    let returns_nothing = method
+        .return_type_hint
+        .as_ref()
+        .is_some_and(|hint| matches!(hint.hint, Hint::Void(_) | Hint::Never(_)));
+    match last {
+        Statement::Return(Return {
+            value: Some(value),
+            terminator: Terminator::Semicolon(_),
+            ..
+        }) if !returns_nothing => before
+            .iter()
+            .find_map(|statement| outside_statement(statement, false, false))
+            .or_else(|| outside_expression(value)),
+        other => Some(other.span()),
+    }
+}
+
+/// The first part of `expression` outside the list of P2R-510.
+fn outside_expression(expression: &Expression<'_>) -> Option<Span> {
+    match expression {
+        // `Unchecked` refuses an escape PHP rejects.
+        Expression::Literal(_) => None,
+        Expression::CompositeString(CompositeString::Interpolated(string))
+            if string.prefix.is_none() =>
+        {
+            string.parts.iter().find_map(|part| match part {
+                StringPart::Literal(_) => None,
+                StringPart::Expression(inner) if plain_variable(inner) => None,
+                StringPart::BracedExpression(braced) if plain_variable(braced.expression) => None,
+                other => Some(other.span()),
+            })
+        }
+        Expression::Array(array) => array.elements.iter().find_map(|element| match element {
+            ArrayElement::KeyValue(entry) => {
+                outside_expression(entry.key).or_else(|| outside_expression(entry.value))
+            }
+            ArrayElement::Value(entry) => outside_expression(entry.value),
+            other => Some(other.span()),
+        }),
+        _ if plain_variable(expression) => None,
+        // Reads only: PHP rejects `?->` and `[]` in a write when it compiles the file.
+        Expression::Access(Access::Property(access)) => {
+            outside_expression(access.object).or_else(|| outside_selector(&access.property))
+        }
+        Expression::Access(Access::NullSafeProperty(access)) => {
+            outside_expression(access.object).or_else(|| outside_selector(&access.property))
+        }
+        Expression::Access(Access::ClassConstant(access)) => {
+            outside_class(access.class).or_else(|| match &access.constant {
+                ClassLikeConstantSelector::Identifier(_) => None,
+                other => Some(other.span()),
+            })
+        }
+        Expression::ArrayAccess(access) => {
+            outside_expression(access.array).or_else(|| outside_expression(access.index))
+        }
+        Expression::Call(Call::Function(call)) => {
+            let callee = match call.function {
+                Expression::Identifier(name) if !reserved_class_name(name.value()) => None,
+                callee if plain_variable(callee) => None,
+                other => Some(other.span()),
+            };
+            callee.or_else(|| outside_arguments(&call.argument_list))
+        }
+        Expression::Call(Call::Method(call)) => outside_expression(call.object)
+            .or_else(|| outside_selector(&call.method))
+            .or_else(|| outside_arguments(&call.argument_list)),
+        Expression::Call(Call::NullSafeMethod(call)) => outside_expression(call.object)
+            .or_else(|| outside_selector(&call.method))
+            .or_else(|| outside_arguments(&call.argument_list)),
+        // `self` and `static` name the hook's own class, which extends `Data`.
+        Expression::Call(Call::StaticMethod(call)) => match call.class {
+            Expression::Self_(_) | Expression::Static(_) => None,
+            class => outside_class(class),
+        }
+        .or_else(|| outside_selector(&call.method))
+        .or_else(|| outside_arguments(&call.argument_list)),
+        Expression::Instantiation(new) => outside_class(new.class)
+            .or_else(|| new.argument_list.as_ref().and_then(outside_arguments)),
+        Expression::UnaryPrefix(unary) if matches!(unary.operator, UnaryPrefixOperator::Not(_)) => {
+            outside_expression(unary.operand)
+        }
+        // Not `instanceof`, which PHP rejects on a constant when it compiles the file.
+        Expression::Binary(binary)
+            if matches!(
+                binary.operator,
+                BinaryOperator::And(_)
+                    | BinaryOperator::Or(_)
+                    | BinaryOperator::NullCoalesce(_)
+                    | BinaryOperator::Identical(_)
+                    | BinaryOperator::NotIdentical(_)
+                    | BinaryOperator::Equal(_)
+                    | BinaryOperator::NotEqual(_)
+                    | BinaryOperator::LessThan(_)
+                    | BinaryOperator::LessThanOrEqual(_)
+                    | BinaryOperator::GreaterThan(_)
+                    | BinaryOperator::GreaterThanOrEqual(_)
+                    | BinaryOperator::StringConcat(_)
+            ) =>
+        {
+            outside_expression(binary.lhs).or_else(|| outside_expression(binary.rhs))
+        }
+        Expression::Closure(closure) => outside_closure(closure),
+        other => Some(other.span()),
+    }
+}
+
+/// True for `$name` other than `$this`, which a static hook does not have.
+fn plain_variable(expression: &Expression<'_>) -> bool {
+    matches!(expression, Expression::Variable(Variable::Direct(variable)) if variable.name != THIS)
+}
+
+/// A class written as a plain name, not `self`, `parent` or `static`.
+fn outside_class(class: &Expression<'_>) -> Option<Span> {
+    match class {
+        Expression::Identifier(name) if !reserved_class_name(name.value()) => None,
+        other => Some(other.span()),
+    }
+}
+
+fn outside_selector(selector: &ClassLikeMemberSelector<'_>) -> Option<Span> {
+    match selector {
+        ClassLikeMemberSelector::Identifier(_) => None,
+        other => Some(other.span()),
+    }
+}
+
+/// Positional arguments without `...`: PHP rejects some orders of named and unpacked ones.
+fn outside_arguments(list: &ArgumentList<'_>) -> Option<Span> {
+    list.arguments.iter().find_map(|argument| match argument {
+        Argument::Positional(positional) if positional.ellipsis.is_none() => {
+            outside_expression(positional.value)
+        }
+        other => Some(other.span()),
+    })
+}
+
+/// A closure with typed parameters, `: void`, no `use` and no attribute, whose body holds
+/// only the statements of `outside_statement`.
+fn outside_closure(closure: &Closure<'_>) -> Option<Span> {
+    let void = closure
+        .return_type_hint
+        .as_ref()
+        .is_some_and(|hint| matches!(hint.hint, Hint::Void(_)));
+    if !void
+        || !closure.attribute_lists.is_empty()
+        || closure.ampersand.is_some()
+        || closure.use_clause.is_some()
+    {
+        return Some(closure.span());
+    }
+    let mut seen: Vec<&[u8]> = Vec::new();
+    for parameter in closure.parameter_list.parameters.iter() {
+        let name = parameter.variable.name;
+        let typed = parameter
+            .hint
+            .as_ref()
+            .is_some_and(|hint| hook_hint(hint, false) || matches!(hint, Hint::Callable(_)));
+        // PHP rejects `$this`, a superglobal's name and a second parameter of one name.
+        if !typed
+            || !parameter.attribute_lists.is_empty()
+            || !parameter.modifiers.is_empty()
+            || parameter.ampersand.is_some()
+            || parameter.ellipsis.is_some()
+            || parameter.default_value.is_some()
+            || parameter.hooks.is_some()
+            || name == THIS
+            || SUPERGLOBALS.contains(&name)
+            || seen.contains(&name)
+        {
+            return Some(parameter.span());
+        }
+        seen.push(name);
+    }
+    closure
+        .body
+        .statements
+        .iter()
+        .find_map(|statement| outside_statement(statement, false, true))
+}
+
+/// A statement on the list: a call, `if` without `else` and `foreach`, each with braces,
+/// `continue;` inside a `foreach` of the same function, since PHP rejects it outside a
+/// loop, and `return;` in a void closure, since PHP rejects it where a value is due.
+fn outside_statement(statement: &Statement<'_>, in_loop: bool, void: bool) -> Option<Span> {
+    match statement {
+        Statement::Return(Return {
+            value: None,
+            terminator: Terminator::Semicolon(_),
+            ..
+        }) if void => None,
+        Statement::Expression(ExpressionStatement {
+            expression,
+            terminator: Terminator::Semicolon(_),
+        }) if matches!(expression, Expression::Call(_)) => outside_expression(expression),
+        Statement::If(If {
+            condition,
+            body: IfBody::Statement(body),
+            ..
+        }) if body.else_if_clauses.is_empty() && body.else_clause.is_none() => {
+            outside_expression(condition).or_else(|| outside_block(body.statement, in_loop, void))
+        }
+        Statement::Foreach(foreach) => {
+            let targets = match &foreach.target {
+                ForeachTarget::Value(target) => vec![target.value],
+                ForeachTarget::KeyValue(target) => vec![target.key, target.value],
+            };
+            // PHP rejects writing to `$this` or to `$GLOBALS` as a whole.
+            let target = targets.into_iter().find_map(|target| match target {
+                Expression::Variable(Variable::Direct(variable))
+                    if variable.name != THIS && !SUPERGLOBALS.contains(&variable.name) =>
+                {
+                    None
+                }
+                other => Some(other.span()),
+            });
+            outside_expression(foreach.expression)
+                .or(target)
+                .or_else(|| match &foreach.body {
+                    ForeachBody::Statement(body) => outside_block(body, true, void),
+                    other => Some(other.span()),
+                })
+        }
+        Statement::Continue(Continue {
+            level: None,
+            terminator: Terminator::Semicolon(_),
+            ..
+        }) if in_loop => None,
+        other => Some(other.span()),
+    }
+}
+
+/// A `{ .. }` block whose statements are all on the list.
+fn outside_block(statement: &Statement<'_>, in_loop: bool, void: bool) -> Option<Span> {
+    match statement {
+        Statement::Block(block) => block
+            .statements
+            .iter()
+            .find_map(|inner| outside_statement(inner, in_loop, void)),
+        other => Some(other.span()),
+    }
 }
 
 /// True for a public static method with a body and no attribute, the only form of a hook

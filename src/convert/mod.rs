@@ -355,8 +355,8 @@ const LEFT_OUT_CODES: [&str; 4] = [
     "incompatible-parameter-count",
 ];
 
-/// True for Mago's `incompatible-property-type` finding in a configuration property of a
-/// model or its docblock: PHP never checks a docblock, and the tool reads the property as a
+/// True for Mago's `incompatible-property-type` finding in the docblock of a configuration
+/// property of a model: PHP never checks a docblock, and the tool reads the property as a
 /// literal and leaves it out (P2R-490).
 fn model_docblock(issue: &Issue, models: &[models::Model]) -> bool {
     issue.code.as_deref() == Some("incompatible-property-type")

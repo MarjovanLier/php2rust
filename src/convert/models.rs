@@ -1063,8 +1063,8 @@ pub(super) struct Model {
     /// Each relation method, and `getRouteKeyName`, by its lowercase name: left out of the
     /// output, or why it stops (P2R-470, P2R-472, P2R-480, P2R-482).
     pub(super) relations: HashMap<Vec<u8>, Result<(), String>>,
-    /// Each configuration property that P2R-401 reads, from the end of the member before it,
-    /// so with its docblock, to its own end (P2R-490).
+    /// The gap before each configuration property that P2R-401 reads, which holds its
+    /// docblock (P2R-490).
     pub(super) configuration: Vec<Span>,
 }
 
@@ -1825,8 +1825,9 @@ fn names_attribute(hint: &Hint<'_>, names: &ResolvedNames<'_>) -> bool {
     }
 }
 
-/// The configuration properties of a model that P2R-401 reads as literals and leaves out,
-/// each from the end of the member before it, so with its docblock, to its own end (P2R-490).
+/// The gap before each configuration property of a model that P2R-401 reads as a literal
+/// and leaves out, from the end of the member before it to its start, which holds its
+/// docblock (P2R-490).
 fn configuration(
     class: &Class<'_>,
     names: &ResolvedNames<'_>,
@@ -1842,7 +1843,9 @@ fn configuration(
                 Member::Table(_) | Member::Casts(_) | Member::LeftOut
             )
         {
-            spans.push(span.from_start(before.end));
+            // Only the gap before the declaration: Mago puts the docblock finding there, and
+            // the native-type variants, which PHP refuses, inside the declaration.
+            spans.push(Span::new(span.file_id, before.end, span.start));
         }
         before = span;
     }

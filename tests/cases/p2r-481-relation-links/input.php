@@ -48,11 +48,18 @@ final class Permission extends Model
     }
 }
 
+// Model declares getRouteKeyName itself here, which PHP counts for an #[\Override].
 final class Address extends Model
 {
     protected $fillable = ['street'];
 
     public $timestamps = false;
+
+    #[\Override]
+    public function getRouteKeyName(): string
+    {
+        return 'street';
+    }
 }
 
 $role = Role::create(['name' => 'admin']);

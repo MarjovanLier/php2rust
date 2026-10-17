@@ -1886,8 +1886,8 @@ fn relation_methods(
     relations
 }
 
-/// `Ok` for a relation method that P2R-470 admits, or the first condition it fails
-/// (P2R-472).
+/// `Ok` for a relation method that P2R-470 admits, or the first of its conditions, in its
+/// order, that the method fails (P2R-472).
 fn relation_verdict(
     method: &Method<'_>,
     names: &ResolvedNames<'_>,
@@ -1895,6 +1895,14 @@ fn relation_verdict(
     included: &HashSet<FileId>,
     columns: &[Column],
 ) -> Result<(), String> {
+    // PHP gives these names their own rules (`__clone(): HasMany` fails to compile), which
+    // Mago does not check.
+    if method.name.value.starts_with(b"__") {
+        return Err(
+            "a relation method whose name starts with __ is not supported, because PHP gives such names their own rules (P2R-472)"
+                .to_owned(),
+        );
+    }
     // After create Laravel reads a column the map left out through a relation of its name.
     if let Some(column) = columns.iter().find(|column| {
         column

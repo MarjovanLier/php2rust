@@ -56,9 +56,11 @@ because Laravel runs the observers there and the store does not. `ObservedBy` mu
 `--include`, and each observer must be a class that the input or `--include` declares, with
 its parents, interfaces and traits, none of them built into PHP.
 A relation method such as `public function posts(): HasMany { return
-$this->hasMany(Post::class); }` leaves the output, as `casts()` does, when its return type is
-one of Laravel's relation classes from `--include` with its own helper, it takes no
-parameter and its name equals no column; every use of the relation still stops.
+$this->hasMany(Post::class); }` leaves the output, as `casts()` does, when it is `public`
+with no other modifier, no parameter and no attribute, its name equals no column and does
+not start with `__`, its return type is one of nine Laravel relation classes from
+`--include`, and its body is that one `return` of the matching helper with string or
+`X::class` arguments. Any other relation method, and every use of a relation, still stops.
 `M::create([..])`, `M::find($id)` and `M::query()->where('c', $v)->first()` convert against a
 store the output keeps in memory, one list of rows per model and thread that starts empty:
 a table that a migration seeds stops, and the store holds no row that a seeder or another

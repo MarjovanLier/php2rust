@@ -1,0 +1,2 @@
+input.php:15:5: PHP fails to parse an empty attribute group #[], which Mago accepts (P2R-500)
+input.php:22:1: PHP fails to parse an empty attribute group #[], which Mago accepts (P2R-500)

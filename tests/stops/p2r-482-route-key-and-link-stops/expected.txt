@@ -7,6 +7,7 @@ input.php:74:21: getRouteKeyName is supported only as public function getRouteKe
 input.php:84:21: getRouteKeyName is supported only as public function getRouteKeyName(): string { return '<text>'; } with a string whose escapes PHP accepts, and with no attribute or with #[\Override] when Model declares a getRouteKeyName that is not private (P2R-482)
 input.php:94:22: getRouteKeyName is supported only as public function getRouteKeyName(): string { return '<text>'; } with a string whose escapes PHP accepts, and with no attribute or with #[\Override] when Model declares a getRouteKeyName that is not private (P2R-482)
 input.php:96:16: Cannot return a non-referenceable value from function `App\Referenced::getRouteKeyName`. (invalid-return-statement)
+input.php:105:5: PHP fails to parse an empty attribute group #[], which Mago accepts (P2R-500)
 input.php:106:21: getRouteKeyName is supported only as public function getRouteKeyName(): string { return '<text>'; } with a string whose escapes PHP accepts, and with no attribute or with #[\Override] when Model declares a getRouteKeyName that is not private (P2R-482)
 input.php:125:12: this class has no method of that name (P2R-135)
 input.php:134:5: PHP may read an attribute of a model through this member (an accessor, an override of a method of Model or of a trait the model uses, another property, constant or trait), so the model takes no struct (P2R-401)

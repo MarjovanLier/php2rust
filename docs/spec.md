@@ -4761,13 +4761,15 @@ files with the factories included and made no other file stop.
   in place of P2R-401's stop, when its only modifier is `public`, it has
   no parameters and no return by reference, its declared return type is
   `string`, its body is one statement `return '<text>';` with a string
-  literal whose escapes P2R-49 accepts, and its only attribute, if any,
-  is one whose name PHP resolves to `\Override` (`#[\Override]`, or
-  `#[Override]` after `use Override;`, as P2R-221 reads it) while `Model`
-  or a trait that `Model` uses at any depth declares `getRouteKeyName`
-  (PHP refuses an `#[\Override]` that overrides nothing and does not
-  count a trait of the model itself, Mago does not report it, and a
-  stand-in `Model` can reach it). A call of it still stops (P2R-135).
+  literal whose escapes P2R-49 accepts, and it has no attribute group or
+  one group of one attribute whose name PHP resolves to `\Override`
+  (`#[\Override]`, or `#[Override]` after `use Override;`, as P2R-221
+  reads it) while `Model` or a parent, interface or trait of it at any
+  depth declares a `getRouteKeyName` that is not private. PHP refuses an
+  `#[\Override]` that overrides nothing, and it counts neither a trait of
+  the model itself nor a private method; it also fails to parse an empty
+  `#[]`. Mago reports none of these, and a stand-in `Model` can reach
+  them. A call of it still stops (P2R-135).
 - **P2R-481** A link (condition 9 of P2R-470) is one of these, written
   in exactly this letter case with positional arguments that are not
   unpacked: `withTimestamps()` with no argument, `withPivot('<a>', ..)`

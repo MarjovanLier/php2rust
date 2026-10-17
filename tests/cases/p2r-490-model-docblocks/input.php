@@ -44,6 +44,9 @@ final class Event extends Model
      */
     protected $guarded = [];
 
+    /**
+     * @var false
+     */
     public $timestamps = false;
 }
 

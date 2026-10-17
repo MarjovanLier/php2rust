@@ -33,6 +33,12 @@ trait HidesAttributes
     protected array $hidden = [];
 }
 
+// A trait whose $fillable has a native type, which conflicts with a model's own.
+trait FillsTyped
+{
+    protected array $fillable = [];
+}
+
 namespace Illuminate\Database\Eloquent;
 
 use Illuminate\Database\Eloquent\Concerns\GuardsAttributes;

@@ -1,7 +1,7 @@
 //! Every Mago crate, direct and transitive, resolves to the one pinned version (P2R-81), and
 //! the tool and the tests lock one `regex` version (P2R-263).
 
-const PIN: &str = "1.55.0";
+const PIN: &str = "1.57.0";
 
 #[test]
 fn every_mago_crate_uses_the_pinned_version() {

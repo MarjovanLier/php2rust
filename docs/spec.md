@@ -4824,7 +4824,7 @@ files with the factories included and made no other file stop.
   model, on another property of a model, and on a model property that
   P2R-401 does not read, which takes the struct away.
 
-## 51. Input that PHP refuses and Mago lets through (milestone 2, slice 41)
+## 51. Input that PHP refuses and Mago lets through (milestone 2, slices 41 and 43)
 
 The reviews of slices 39 and 40 found two ways in which input that PHP
 refuses reaches the output. Mago's parser accepts an empty attribute
@@ -4834,7 +4834,10 @@ converts such a file. And Mago's analyser obeys a `@mago-expect` or
 `@mago-ignore` comment by dropping the findings it names, so the
 comment can hide a finding that PHP enforces, such as a native type that
 a model leaves out or a missing class, while the tool reports Mago's
-findings as its problems (P2R-11).
+findings as its problems (P2R-11). The spec review of slice 43 found two
+more forms that Mago's parser reads and PHP's does not, anywhere in the
+input: a comparison chained to another of its level, and a float such as
+`1._0`.
 
 - **P2R-500** An empty attribute group `#[]`, also with only whitespace
   or comments inside, anywhere in the input, MUST stop the conversion
@@ -4849,6 +4852,20 @@ findings as its problems (P2R-11).
   input: `@ignore-nullable-return`, `@ignore-falsable-return` and an
   inline `@var` change the types it infers, and the tool tracks null and
   false itself (P2R-106).
+- **P2R-502** A comparison whose operand is, without parentheses, a
+  comparison of its own level MUST stop the conversion with a message that
+  says PHP fails to parse it, anywhere in the input: PHP's equality
+  operators (`==`, `!=`, `===`, `!==`, `<>`, `<=>`) share one level and
+  its relational operators (`<`, `<=`, `>`, `>=`) another, and neither
+  chains, while Mago reads `1 < 2 < 3` and `$a == $b == $c`; main
+  converted the second to `a == (b == c)`. A comparison of the other
+  level, as in `$a < $b == $c`, which PHP reads as `($a < $b) == $c`,
+  does not stop by this rule.
+- **P2R-503** A float literal with `_` that does not stand between two
+  digits MUST stop the conversion with a message that says PHP fails to
+  parse it, anywhere in the input: Mago reads `1._0` as `1.0`, and its
+  parser refuses the other misplaced forms (`1_.0`, `1_e1`, `1.0_`,
+  `1__0`, `0x_1F`).
 
 ## 52. Data hook bodies kept to a closed list (milestone 2, slice 43, draft)
 
@@ -4872,8 +4889,9 @@ Laravel app and the hooks of P2R-380's case folder write.
   are plain variables other than a superglobal; `continue;` inside a
   `foreach` of the same function; and `return;` in a closure. Each ends
   with `;` or with its braces. The expressions are a literal; a
-  double-quoted string whose parts are text and plain variables (`$x`,
-  `{$x}`); an array literal `[..]` of values and `key => value` pairs,
+  double-quoted string without a `b` prefix whose parts are text and
+  plain variables (`$x`, `{$x}`); an array literal `[..]` of values and
+  `key => value` pairs,
   with no `...`, `&` or empty element; a plain variable; a read of a
   property (`->` or `?->` with a plain name), of an array key (`$a[..]`
   with an index) or of a class constant (`C::NAME`, `C::class`); a call
@@ -4887,14 +4905,20 @@ Laravel app and the hooks of P2R-380's case folder write.
   `void`, and parameters that each have a type P2R-380 allows a hook
   parameter or `callable`, no attribute, modifier, `&`, `...` or default,
   a name other than `$this` or a superglobal, and no name twice. A plain
-  name, of a function or a class, is a name other than `self`, `parent`
-  and `static`, and `C` above is one; a plain variable is `$name` other
+  name, of a function or a class, is a name whose last part, in any
+  letter case, is not `self`, `parent` or `static` and not one of PHP's
+  keywords or the type names it reserves (`int`, `float`, `bool`,
+  `string`, `true`, `false`, `null`, `void`, `iterable`, `object` and
+  `mixed`), since PHP fails to parse `new match` and `list::m()`, which
+  Mago reads; `enum` is not one, because Laravel names a rule class
+  `Enum`. `C` above is a plain name; a plain variable is `$name` other
   than `$this`. Anything
   else stops with a message that names the list, pointing at the first
-  part outside it. The check runs after P2R-380's, so a form that both
+  part outside it in the order of the source. The check runs after P2R-380's, so a form that both
   refuse prints P2R-380's line, and P2R-380's refused forms (such as a
-  string escape PHP rejects, `\self` or `$http_response_header`) still
-  stop inside the list. A hook that stops is not left out, so the Mago
+  string escape PHP rejects, `\self` or `$http_response_header`) and
+  those of section 51 (`#[]`, a chained comparison, `1._0`) still stop
+  inside the list. A hook that stops is not left out, so the Mago
   findings that P2R-380 drops inside a left-out hook print as well.
 
 ## Spec checklist

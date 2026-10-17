@@ -338,6 +338,8 @@ the others are findings of the Mago analyser. In short:
   than the two above, `print`, `printf`, `exit`, heredoc, global constants other than
   `true` and `false`, and built-in functions other than those above. `in_array()`
   without `true` as its third argument, because PHP then compares loosely.
+- An empty attribute group `#[]`, which PHP fails to parse and Mago accepts, and a comment
+  with `@mago-expect` or `@mago-ignore`, which would hide a Mago finding.
 - A parameter default that is not a literal, `null`, `[]` or an enum case, a `null`
   default for a type that is not nullable, and a default before a parameter without
   one. Named arguments in another order than the parameters, a positional argument
@@ -656,7 +658,7 @@ php2rust refuses some valid PHP that version 1 converts in other forms:
 The tests need PHP 8.5 on `PATH` and the Rust toolchain pinned in
 `rust-toolchain.toml` (`rustup toolchain install` installs it). Each folder under
 `tests/cases`, `tests/stops` and `tests/errors` is one test, and `cargo test` also checks
-that each requirement from P2R-07 to P2R-49 and from P2R-100 to P2R-491 starts the name of
+that each requirement from P2R-07 to P2R-49 and from P2R-100 to P2R-501 starts the name of
 a case or stop folder.
 To rewrite every
 `expected.rs` and `expected.txt` from the current output:

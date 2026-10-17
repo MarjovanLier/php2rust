@@ -26,8 +26,25 @@ final class Author extends Model
 
     public $timestamps = false;
 
+    // Names that PHP gives their own rules: it refuses both of these.
+    public function __clone(): HasMany
+    {
+        return $this->hasMany(Post::class);
+    }
+
+    public function __destruct(): HasMany
+    {
+        return $this->hasMany(Post::class);
+    }
+
     // Named like the column title in another letter case.
     public function Title(): HasMany
+    {
+        return $this->hasMany(Post::class);
+    }
+
+    // The column comes before the modifier in P2R-470's order.
+    protected function name(): HasMany
     {
         return $this->hasMany(Post::class);
     }
@@ -84,6 +101,11 @@ final class Author extends Model
     }
 
     public function either(): HasMany|HasOne
+    {
+        return $this->hasMany(Post::class);
+    }
+
+    public function both(): HasMany&\Countable
     {
         return $this->hasMany(Post::class);
     }

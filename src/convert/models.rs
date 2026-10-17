@@ -1969,7 +1969,15 @@ fn relation_verdict(
     let admitted = |argument: &Argument<'_>| match argument {
         Argument::Positional(positional) if positional.ellipsis.is_none() => {
             match positional.value {
-                Expression::Literal(Literal::String(_)) => true,
+                // PHP refuses to parse an escape such as "\u{zz}", which Mago accepts, and
+                // a left-out method never reaches P2R-49's check of it.
+                Expression::Literal(Literal::String(string)) => {
+                    string
+                        .value
+                        .is_some_and(|bytes| std::str::from_utf8(bytes).is_ok())
+                        && !(matches!(string.kind, LiteralStringKind::DoubleQuoted)
+                            && printer::octal_overflow(string.raw))
+                }
                 Expression::Access(Access::ClassConstant(access)) => {
                     matches!(&access.constant, ClassLikeConstantSelector::Identifier(constant)
                         if constant.value.eq_ignore_ascii_case(b"class"))
@@ -1982,7 +1990,7 @@ fn relation_verdict(
         _ => false,
     };
     if !arguments.arguments.iter().all(admitted) {
-        return Err("an argument of a relation helper is supported only as a positional string literal or X::class naming a class (P2R-472)".to_owned());
+        return Err("an argument of a relation helper is supported only as a positional string literal whose escapes PHP accepts (P2R-49) or X::class naming a class (P2R-472)".to_owned());
     }
     Ok(())
 }

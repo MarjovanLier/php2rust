@@ -4025,8 +4025,8 @@ and its gain is typed attribute reads.
   stop the model (P2R-131). Its body may hold the properties `$table`,
   `$fillable`, `$guarded`, `$hidden` and `$casts`, each `protected` with
   a literal value (a string, or a list or map of strings and `C::class`),
-  the method `protected function casts(): array { return [..]; }` with a
-  literal map and no attribute (PHP checks an attribute's arguments and
+  the method `protected function casts(): array { return [..]; }`, its
+  name in any letter case, with a literal map and no attribute (PHP checks an attribute's arguments and
   an `#[\Override]` when it loads the class, and the output leaves the
   method out), which is read with `$casts`, its entries winning on a
   shared key as in Laravel, the trait uses `HasFactory` and

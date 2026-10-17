@@ -51,20 +51,8 @@ class BelongsToMany extends Relation
     }
 }
 
-namespace Illuminate\Database\Eloquent\Concerns;
-
-// Model takes getRouteKeyName from a trait here, which PHP counts for an #[\Override].
-trait HasRouteKeys
-{
-    public function getRouteKeyName(): string
-    {
-        return 'id';
-    }
-}
-
 namespace Illuminate\Database\Eloquent;
 
-use Illuminate\Database\Eloquent\Concerns\HasRouteKeys;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
@@ -72,8 +60,6 @@ use Illuminate\Database\Eloquent\Relations\HasOne;
 
 abstract class Model
 {
-    use HasRouteKeys;
-
     /** @var array<string, list<array<string, mixed>>> */
     private static array $rows = [];
 
@@ -83,6 +69,11 @@ abstract class Model
     public function __get(string $key): mixed
     {
         return $this->attributes[$key] ?? null;
+    }
+
+    public function getRouteKeyName(): string
+    {
+        return 'id';
     }
 
     /**

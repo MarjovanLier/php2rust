@@ -9,9 +9,9 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 
-// getRouteKeyName forms that P2R-480 does not admit (P2R-482): an #[\Override] that
-// overrides nothing here, another modifier, a parameter, a nullable type, a body that is
-// no literal, an escape PHP refuses, and a return by reference.
+// getRouteKeyName forms that P2R-480 does not admit (P2R-482): an #[\Override] while
+// Model takes the method only from a trait, another modifier, a parameter, a nullable
+// type, a body that is no literal, an escape PHP refuses, and a return by reference.
 final class OverridesNothing extends Model
 {
     protected $table = 'items';

@@ -1,8 +1,9 @@
 <?php
 
 // A small stand-in for Eloquent: the parts these tests name. It is not the framework. Its
-// Model declares no getRouteKeyName, so an #[\Override] on one overrides nothing, which PHP
-// refuses. It declares relation classes with the links these tests chain.
+// Model declares no getRouteKeyName itself and takes one from a trait, which P2R-480 does
+// not count for an #[\Override]. It declares relation classes with the links these tests
+// chain.
 
 namespace Illuminate\Database\Eloquent\Relations;
 
@@ -58,13 +59,26 @@ trait HasFactory
     }
 }
 
+namespace Illuminate\Database\Eloquent\Concerns;
+
+trait HasRouteKeys
+{
+    public function getRouteKeyName(): string
+    {
+        return 'id';
+    }
+}
+
 namespace Illuminate\Database\Eloquent;
 
+use Illuminate\Database\Eloquent\Concerns\HasRouteKeys;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 
 abstract class Model
 {
+    use HasRouteKeys;
+
     /** @var array<string, mixed> */
     private array $attributes = [];
 

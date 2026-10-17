@@ -2876,12 +2876,110 @@ fn reserved_class_name(name: &[u8]) -> bool {
 }
 
 /// The problem of a hook body outside the closed list of P2R-510.
-const HOOK_BODY: &str = "a hook's body is supported only as calls, if without else and foreach before one return of a value, built from literals, arrays, variables, reads of a property, an array key or a class constant, calls and new with positional arguments, !, &&, ||, ??, comparisons, ., double-quoted strings with plain variables inside, and closures (function or static function with typed parameters, : void and no use) whose bodies hold those statements, continue; and return;; PHP rejects some other forms when it compiles the file, Mago does not report them, and the tool reads nothing else of a hook (P2R-510)";
+const HOOK_BODY: &str = "a hook's body is supported only as calls, if without else and foreach, with continue; inside a foreach, followed by one return of a value on a method that is not void or never; its expressions are literals, arrays, plain variables, reads of a property, an array key or a class constant, calls and new with positional arguments, !, &&, ||, ??, comparisons, . and double-quoted strings with plain variables inside, and closures (function or static function, typed parameters, : void, no use) whose bodies hold the same statements and return;, because PHP rejects some other forms when it compiles the file, Mago does not report them, and the tool reads nothing else of a hook (P2R-510)";
+
+/// PHP's keywords and the type names it reserves, which PHP does not read as a function or
+/// class name, where Mago reads `new match` and `list::m()` (P2R-510). `enum` is no
+/// keyword there: Laravel names a rule class `Enum`.
+const RESERVED_WORDS: [&[u8]; 81] = [
+    b"__halt_compiler",
+    b"abstract",
+    b"and",
+    b"array",
+    b"as",
+    b"break",
+    b"callable",
+    b"case",
+    b"catch",
+    b"class",
+    b"clone",
+    b"const",
+    b"continue",
+    b"declare",
+    b"default",
+    b"die",
+    b"do",
+    b"echo",
+    b"else",
+    b"elseif",
+    b"empty",
+    b"enddeclare",
+    b"endfor",
+    b"endforeach",
+    b"endif",
+    b"endswitch",
+    b"endwhile",
+    b"eval",
+    b"exit",
+    b"extends",
+    b"final",
+    b"finally",
+    b"fn",
+    b"for",
+    b"foreach",
+    b"function",
+    b"global",
+    b"goto",
+    b"if",
+    b"implements",
+    b"include",
+    b"include_once",
+    b"instanceof",
+    b"insteadof",
+    b"interface",
+    b"isset",
+    b"list",
+    b"match",
+    b"namespace",
+    b"new",
+    b"or",
+    b"print",
+    b"private",
+    b"protected",
+    b"public",
+    b"readonly",
+    b"require",
+    b"require_once",
+    b"return",
+    b"static",
+    b"switch",
+    b"throw",
+    b"trait",
+    b"try",
+    b"unset",
+    b"use",
+    b"var",
+    b"while",
+    b"xor",
+    b"yield",
+    b"int",
+    b"float",
+    b"bool",
+    b"string",
+    b"true",
+    b"false",
+    b"null",
+    b"void",
+    b"iterable",
+    b"object",
+    b"mixed",
+];
+
+/// A function or class name that is not `self`, `parent`, `static` or a reserved word, in
+/// any letter case, judged by its last part.
+fn plain_name(name: &[u8]) -> bool {
+    let last = name.rsplit(|byte| *byte == b'\\').next().unwrap_or(name);
+    !reserved_class_name(name)
+        && !RESERVED_WORDS
+            .iter()
+            .any(|word| last.eq_ignore_ascii_case(word))
+}
 
 /// The first part of a hook body outside the closed list of P2R-510: statements of
 /// `outside_statement`, then one `return` of a value. PHP compiles every form on the list
 /// once its own checks hold, where the list of forms it rejects (`Unchecked`) never closed.
 fn outside_hook_body(method: &Method<'_>) -> Option<Span> {
+    // `hook_form` admits only a method with a body.
     let MethodBody::Concrete(block) = &method.body else {
         return Some(method.span());
     };
@@ -2893,17 +2991,17 @@ fn outside_hook_body(method: &Method<'_>) -> Option<Span> {
         .return_type_hint
         .as_ref()
         .is_some_and(|hint| matches!(hint.hint, Hint::Void(_) | Hint::Never(_)));
-    match last {
-        Statement::Return(Return {
-            value: Some(value),
-            terminator: Terminator::Semicolon(_),
-            ..
-        }) if !returns_nothing => before
-            .iter()
-            .find_map(|statement| outside_statement(statement, false, false))
-            .or_else(|| outside_expression(value)),
-        other => Some(other.span()),
-    }
+    before
+        .iter()
+        .find_map(|statement| outside_statement(statement, false, false))
+        .or_else(|| match last {
+            Statement::Return(Return {
+                value: Some(value),
+                terminator: Terminator::Semicolon(_),
+                ..
+            }) if !returns_nothing => outside_expression(value),
+            other => Some(other.span()),
+        })
 }
 
 /// The first part of `expression` outside the list of P2R-510.
@@ -2947,7 +3045,7 @@ fn outside_expression(expression: &Expression<'_>) -> Option<Span> {
         }
         Expression::Call(Call::Function(call)) => {
             let callee = match call.function {
-                Expression::Identifier(name) if !reserved_class_name(name.value()) => None,
+                Expression::Identifier(name) if plain_name(name.value()) => None,
                 callee if plain_variable(callee) => None,
                 other => Some(other.span()),
             };
@@ -3001,10 +3099,10 @@ fn plain_variable(expression: &Expression<'_>) -> bool {
     matches!(expression, Expression::Variable(Variable::Direct(variable)) if variable.name != THIS)
 }
 
-/// A class written as a plain name, not `self`, `parent` or `static`.
+/// A class written as a plain name.
 fn outside_class(class: &Expression<'_>) -> Option<Span> {
     match class {
-        Expression::Identifier(name) if !reserved_class_name(name.value()) => None,
+        Expression::Identifier(name) if plain_name(name.value()) => None,
         other => Some(other.span()),
     }
 }

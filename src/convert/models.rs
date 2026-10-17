@@ -2110,12 +2110,16 @@ fn inherits_route_key(codebase: &CodebaseMetadata) -> bool {
         let Some(class) = codebase.get_class_like(&name) else {
             continue;
         };
-        let declared = codebase
+        // A class's own declaration replaces the ones of its traits and parents, so its
+        // visibility decides.
+        if let Some(method) = codebase
             .get_method(&name, b"getroutekeyname")
             .and_then(|method| method.method_metadata.as_ref())
-            .is_some_and(|method| method.visibility != Visibility::Private);
-        if declared {
-            return true;
+        {
+            if method.visibility != Visibility::Private {
+                return true;
+            }
+            continue;
         }
         pending.extend(
             class

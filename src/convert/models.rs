@@ -40,8 +40,8 @@ impl Converter<'_> {
     }
 
     /// Refuses what keeps a model from converting: the reason it has no struct, and each
-    /// method that leaves it the struct, except a relation method that P2R-470 admits
-    /// (P2R-401, P2R-472).
+    /// method that leaves it the struct, except a relation method that P2R-470 admits and
+    /// a getRouteKeyName that P2R-480 admits (P2R-401, P2R-472, P2R-482).
     pub(super) fn model_shape(&mut self, declaration: &Class<'_>) {
         let key = self.name_key(&declaration.name, declaration.name.value);
         let model = self.models.iter().find(|model| model.key == key);
@@ -1879,10 +1879,9 @@ fn relation_methods(
             .is_some_and(|hint| names_relation(&hint.hint, names))
             || this_call(method).is_some();
         if lower == b"getroutekeyname" {
-            relations.entry(lower).or_insert_with(|| {
-                let inherited = tree_methods(codebase, vec![MODEL.to_vec()]);
-                route_key_verdict(method, inherited.contains(b"getroutekeyname".as_slice()))
-            });
+            relations
+                .entry(lower)
+                .or_insert_with(|| route_key_verdict(method, inherits_route_key(codebase)));
         } else if relation {
             relations
                 .entry(lower)
@@ -1991,12 +1990,14 @@ fn relation_verdict(
         return Err("an argument of a relation helper is supported only as a positional string literal whose escapes PHP accepts (P2R-49) or X::class naming a class (P2R-472)".to_owned());
     }
     if let Some(link) = links.iter().find(|link| !admitted_link(link, helper)) {
-        let name = match &link.method {
-            ClassLikeMemberSelector::Identifier(name) => String::from_utf8_lossy(name.value),
-            _ => "a dynamic name".into(),
+        let call = match &link.method {
+            ClassLikeMemberSelector::Identifier(name) => {
+                format!("the call {}(..)", String::from_utf8_lossy(name.value))
+            }
+            _ => "a call with a dynamic name".to_owned(),
         };
         return Err(format!(
-            "the call {name}(..) chained after a relation helper is not supported; only withTimestamps(), withPivot('..') and wherePivotNull('..') after belongsToMany, and limit(n) and with('..'), each with literal arguments, are (P2R-482)"
+            "{call} chained after a relation helper is not supported; only withTimestamps(), withPivot('..') and wherePivotNull('..') after belongsToMany, and limit(n) and with('..'), each with literal arguments, are (P2R-482)"
         ));
     }
     Ok(())
@@ -2096,20 +2097,48 @@ fn plain_string(string: &LiteralString<'_>) -> bool {
             && printer::octal_overflow(string.raw))
 }
 
+/// True when `Model` or a parent, interface or trait of it at any depth declares a
+/// `getRouteKeyName` that is not private, which PHP needs for an `#[\Override]` on the
+/// model's own; a trait of the model itself does not count (P2R-480).
+fn inherits_route_key(codebase: &CodebaseMetadata) -> bool {
+    let mut pending: Vec<Vec<u8>> = vec![MODEL.to_vec()];
+    let mut seen: HashSet<Vec<u8>> = HashSet::new();
+    while let Some(name) = pending.pop() {
+        if !seen.insert(name.clone()) {
+            continue;
+        }
+        let Some(class) = codebase.get_class_like(&name) else {
+            continue;
+        };
+        let declared = codebase
+            .get_method(&name, b"getroutekeyname")
+            .and_then(|method| method.method_metadata.as_ref())
+            .is_some_and(|method| method.visibility != Visibility::Private);
+        if declared {
+            return true;
+        }
+        pending.extend(
+            class
+                .direct_parent_class
+                .iter()
+                .chain(class.direct_parent_interfaces.iter())
+                .chain(class.used_traits.iter())
+                .map(|parent| parent.as_bytes().to_ascii_lowercase()),
+        );
+    }
+    false
+}
+
 /// `Ok` for a `getRouteKeyName` that P2R-480 admits, or the message of P2R-482. Its one
 /// attribute, if any, resolves to `\Override` here, as P2R-401 refuses any other;
-/// `inherited` says whether `Model` or one of its traits declares the method.
+/// `inherited` is what `inherits_route_key` says.
 fn route_key_verdict(method: &Method<'_>, inherited: bool) -> Result<(), String> {
-    let attributes = method
-        .attribute_lists
-        .iter()
-        .flat_map(|list| list.attributes.iter())
-        .count();
     // PHP refuses an #[\Override] that overrides nothing, as on a stand-in Model, and it
-    // does not count a trait of the model itself.
-    let attribute = match attributes {
-        0 => true,
-        1 => inherited,
+    // does not count a trait of the model itself; it also fails to parse an empty #[],
+    // which Mago accepts.
+    let attribute = match method.attribute_lists.as_slice() {
+        [] => true,
+        [list] if list.attributes.len() == 1 => inherited,
         _ => false,
     };
     let body = matches!(&method.body, MethodBody::Concrete(block)
@@ -2128,7 +2157,7 @@ fn route_key_verdict(method: &Method<'_>, inherited: bool) -> Result<(), String>
     {
         Ok(())
     } else {
-        Err("getRouteKeyName is supported only as public function getRouteKeyName(): string { return '<column>'; }, with #[\\Override] or no attribute (P2R-482)".to_owned())
+        Err("getRouteKeyName is supported only as public function getRouteKeyName(): string { return '<text>'; } with a string whose escapes PHP accepts, and with no attribute or with #[\\Override] when Model declares a getRouteKeyName that is not private (P2R-482)".to_owned())
     }
 }
 

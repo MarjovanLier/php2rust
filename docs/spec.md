@@ -4026,7 +4026,9 @@ and its gain is typed attribute reads.
   `$fillable`, `$guarded`, `$hidden` and `$casts`, each `protected` with
   a literal value (a string, or a list or map of strings and `C::class`),
   the method `protected function casts(): array { return [..]; }` with a
-  literal map, which is read with `$casts`, its entries winning on a
+  literal map and no attribute (PHP checks an attribute's arguments and
+  an `#[\Override]` when it loads the class, and the output leaves the
+  method out), which is read with `$casts`, its entries winning on a
   shared key as in Laravel, the trait uses `HasFactory` and
   `SoftDeletes` (resolving to
   `\Illuminate\Database\Eloquent\Factories\HasFactory` and
@@ -4048,7 +4050,8 @@ and its gain is typed attribute reads.
   `getRouteKeyName`, each name compared in any letter case, as Laravel
   and PHP compare them. Everything else stops the
   model and leaves it without a struct, because PHP may read an attribute
-  through it differently: such a method, a constant, another property or
+  through it differently: such a method, a `casts()` method of another
+  form (with an attribute too), a constant, another property or
   trait; an attribute on the class (P2R-07) other than the
   `#[ObservedBy]` of P2R-460, whose forms section 47 limits because an
   observer may change a model it reads; `abstract`, `readonly` or

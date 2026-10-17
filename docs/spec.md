@@ -4657,7 +4657,7 @@ run an observer method stopped.
   and an included observer that PHP refuses to declare for a reason
   other than a missing name, are review concerns of P2R-460.
 
-## 48. Relation methods on models (milestone 2, slice 38, draft)
+## 48. Relation methods on models (milestone 2, slice 38)
 
 Most models of the app declare relation methods such as
 `public function journalLines(): HasMany { return

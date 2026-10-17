@@ -4041,8 +4041,10 @@ and its gain is typed attribute reads.
   union, has a name that starts with `boot` or `initialize` (Laravel runs
   boot<Trait> and initialize<Trait> when it boots or builds the model),
   has any other attribute (such as `#[Boot]` or `#[Initialize]`, which
-  Laravel runs the same way), or overrides a method of `Model` or of a
-  trait it uses at any depth (`booted`, `getAttribute`), other than
+  Laravel runs the same way), or overrides a method of `Model`, of a
+  trait it uses or of a trait the model uses, at any depth (`booted`,
+  `getAttribute`, the `getDeletedAtColumn` of `SoftDeletes`, which
+  Laravel calls on every model it builds), other than
   `getRouteKeyName`, each name compared in any letter case, as Laravel
   and PHP compare them. Everything else stops the
   model and leaves it without a struct, because PHP may read an attribute
@@ -4679,7 +4681,8 @@ leaves out `casts()`, while every use of the relation keeps stopping.
   struct (no `get..Attribute` or `set..Attribute` name, no return type
   that names `Casts\Attribute`, no `boot` or `initialize` prefix, no
   attribute other than `#[\Override]` and no override of a method of
-  `Model` or of a trait it uses, each name in any letter case) MAY be a
+  `Model`, of a trait it uses or of a trait the model uses, each name in
+  any letter case), other than `getRouteKeyName`, MAY be a
   relation method and MUST then be left out of the output when it meets
   each of these conditions, which are checked in this order:
   1. its name does not start with `__` (PHP gives such names their own

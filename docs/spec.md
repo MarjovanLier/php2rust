@@ -4721,7 +4721,7 @@ leaves out `casts()`, while every use of the relation keeps stopping.
   that names the first condition of P2R-470 it fails: for example a
   relation named like a column (after `create` Laravel reads the
   relation in place of a column the map left out), a method without a
-  modifier, without a return type or with the return type
+  modifier (condition 4), without a return type or with the return type
   `MorphToMany`, `PendingHasThroughRelationship` or a class the input
   declares (condition 8), a chained call such as `->withTimestamps()`
   (condition 9), or the helper `morphToMany`, `morphedByMany` or

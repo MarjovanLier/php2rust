@@ -4832,14 +4832,19 @@ comment can hide a finding that PHP enforces, such as a native type that
 a model leaves out or a missing class, while the tool reports Mago's
 findings as its problems (P2R-11).
 
-- **P2R-500** An empty attribute group `#[]`, anywhere in the input,
-  MUST stop the conversion with a message that says PHP fails to parse
-  it.
+- **P2R-500** An empty attribute group `#[]`, also with only whitespace
+  or comments inside, anywhere in the input, MUST stop the conversion
+  with a message that says PHP fails to parse it. When it lies inside the
+  span of another problem, P2R-03 prints that problem instead, and the
+  conversion stops either way.
 - **P2R-501** A comment in the input whose text contains `@mago-expect`
   or `@mago-ignore` MUST stop the conversion with a message that says it
   would hide a Mago finding, because the tool cannot tell which hidden
   finding PHP enforces. Such a comment in an included file is not read
-  (P2R-340).
+  (P2R-340). Mago 1.57's analyser obeys no other suppression from the
+  input: `@ignore-nullable-return`, `@ignore-falsable-return` and an
+  inline `@var` change the types it infers, and the tool tracks null and
+  false itself (P2R-106).
 
 ## Spec checklist
 

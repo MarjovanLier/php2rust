@@ -1,0 +1,4 @@
+input.php:9:12: PHP fails to parse a comparison chained to another of its group, such as 1 < 2 < 3 or $a == $b == $c, which Mago accepts (P2R-502)
+input.php:14:12: PHP fails to parse a comparison chained to another of its group, such as 1 < 2 < 3 or $a == $b == $c, which Mago accepts (P2R-502)
+input.php:19:12: PHP fails to parse a comparison chained to another of its group, such as 1 < 2 < 3 or $a == $b == $c, which Mago accepts (P2R-502)
+input.php:24:12: PHP fails to parse a comparison chained to another of its group, such as 1 < 2 < 3 or $a == $b == $c, which Mago accepts (P2R-502)

@@ -245,6 +245,35 @@ final class Arrays extends Data
     }
 }
 
+// PHP fails to parse a reserved word as a class name, which Mago reads; a b prefix is not
+// on the list; and the first part outside the list in the source prints, here the
+// assignment before the bare return.
+final class Words extends Data
+{
+    public function __construct(public string $number) {}
+
+    public static function rules(): array
+    {
+        return ['a' => [new match]];
+    }
+
+    public static function messages(): array
+    {
+        return ['a' => list::m()];
+    }
+
+    public static function attributes(): array
+    {
+        return ['a' => b"x $a"];
+    }
+
+    public static function redirect(): string
+    {
+        $x = 1;
+        return;
+    }
+}
+
 // A class is a plain name; parentheses are not on the list.
 final class Names extends Data
 {

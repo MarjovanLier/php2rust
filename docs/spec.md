@@ -4803,10 +4803,12 @@ the output (P2R-401, P2R-402, P2R-411), so the docblock changes no
 output. A throwaway spike that dropped the finding cleared nine model
 files with the factories included and made no other file stop.
 
-- **P2R-490** Mago's `incompatible-property-type` finding MUST NOT stop
-  the conversion when its primary span lies inside the declaration of a
-  property of a model (P2R-401) that P2R-401 reads and leaves out of the
-  output: `$table`, `$fillable`, `$guarded`, `$hidden` or `$casts`
+- **P2R-490** Mago's `incompatible-property-type` finding, which Mago
+  places on the type in the docblock, MUST NOT stop the conversion when
+  its primary span lies between the end of the member before a property
+  declaration (or the class's opening brace) and the end of that
+  declaration, for a property of a model (P2R-401) that P2R-401 reads and
+  leaves out of the output: `$table`, `$fillable`, `$guarded`, `$hidden` or `$casts`
   declared `protected` without a native type and with a literal value of
   the form P2R-401 reads, or `public $timestamps` with `true` or `false`.
 - **P2R-491** Every other Mago finding still stops, also inside such a

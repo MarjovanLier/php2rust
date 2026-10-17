@@ -238,7 +238,7 @@ requirement IDs.
   the same stdout bytes, the same output file bytes and the same stderr
   bytes.
 - **P2R-07** Only the constructs that sections 3 to 5, 11 to 19 and 21 to
-  49 list as converting may convert. Any other construct MUST stop the conversion,
+  50 list as converting may convert. Any other construct MUST stop the conversion,
   which means it is reported as a problem under P2R-03. Examples that stop
   in version 1 (section 16 converts `namespace`, `use` and class
   constants, and section 17 two casts):
@@ -619,7 +619,7 @@ requirement IDs.
   stderr MUST equal `expected.txt`, its stdout MUST be empty, no output file
   may be created, and every file in the folder MUST be unchanged.
 - **P2R-75** Every requirement ID from P2R-07 to P2R-49 and from P2R-100 to
-  P2R-482 MUST appear in the name of at least one case or stop folder. A
+  P2R-491 MUST appear in the name of at least one case or stop folder. A
   test MUST check this from the folder names.
 - **P2R-76** One command named in the README MUST rewrite every `expected.rs`
   and `expected.txt` from the current tool output; CI MUST NOT run it. A
@@ -4790,6 +4790,32 @@ files with the factories included and made no other file stop.
   such as a `getRouteKeyName` with another attribute, keeps P2R-401's
   rule and message.
 
+## 50. Docblock types of model configuration (milestone 2, slice 40, draft)
+
+After section 49, nine models of the app stop only on Mago's
+`incompatible-property-type` finding. They write `/** @var list<string>
+*/ protected $fillable` or `/** @var array<string, string> */ protected
+$casts`, while Laravel 12.35.1 declares `@var array<int, string>` and
+`@var array` on the traits of `Model`, and Mago holds that a property's
+docblock type must not change in a subclass. PHP never checks a docblock,
+and the tool reads these properties as literals and leaves them out of
+the output (P2R-401, P2R-402, P2R-411), so the docblock changes no
+output. A throwaway spike that dropped the finding cleared nine model
+files with the factories included and made no other file stop.
+
+- **P2R-490** Mago's `incompatible-property-type` finding MUST NOT stop
+  the conversion when its primary span lies inside the declaration of a
+  property of a model (P2R-401) that P2R-401 reads and leaves out of the
+  output: `$table`, `$fillable`, `$guarded`, `$hidden` or `$casts`
+  declared `protected` without a native type and with a literal value of
+  the form P2R-401 reads, or `public $timestamps` with `true` or `false`.
+- **P2R-491** Every other Mago finding still stops, also inside such a
+  declaration (a cast class that does not exist, for example, because
+  Laravel throws when it casts the attribute), and so does
+  `incompatible-property-type` on any other property: on a class that is
+  no model, on another property of a model, and on a model property that
+  P2R-401 does not read, which takes the struct away.
+
 ## Spec checklist
 
 - [x] No `[NEEDS CLARIFICATION]` markers left. Decided in review: problems
@@ -4798,7 +4824,7 @@ files with the factories included and made no other file stop.
   takes its element type from the same variable or the declared type it
   flows into (P2R-21); a file of only functions becomes a library (P2R-33).
 - [x] Every requirement is testable: P2R-07 to P2R-49 and P2R-100 to
-  P2R-482 by case and stop folders (P2R-75 enforces this), P2R-01 to P2R-06
+  P2R-491 by case and stop folders (P2R-75 enforces this), P2R-01 to P2R-06
   by error folders and tests, P2R-50 to P2R-52 by P2R-71, the rest by CI or
   a file in the
   repository. Stated review concerns (P2R-05 partial write, P2R-72 case

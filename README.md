@@ -55,6 +55,10 @@ its reads convert unless an observer has a `retrieved` method, and `create` on i
 because Laravel runs the observers there and the store does not. `ObservedBy` must come from
 `--include`, and each observer must be a class that the input or `--include` declares, with
 its parents, interfaces and traits, none of them built into PHP.
+A relation method such as `public function posts(): HasMany { return
+$this->hasMany(Post::class); }` leaves the output, as `casts()` does, when its return type is
+one of Laravel's relation classes from `--include` with its own helper, it takes no
+parameter and its name equals no column; every use of the relation still stops.
 `M::create([..])`, `M::find($id)` and `M::query()->where('c', $v)->first()` convert against a
 store the output keeps in memory, one list of rows per model and thread that starts empty:
 a table that a migration seeds stops, and the store holds no row that a seeder or another
@@ -640,7 +644,7 @@ php2rust refuses some valid PHP that version 1 converts in other forms:
 The tests need PHP 8.5 on `PATH` and the Rust toolchain pinned in
 `rust-toolchain.toml` (`rustup toolchain install` installs it). Each folder under
 `tests/cases`, `tests/stops` and `tests/errors` is one test, and `cargo test` also checks
-that each requirement from P2R-07 to P2R-49 and from P2R-100 to P2R-462 starts the name of
+that each requirement from P2R-07 to P2R-49 and from P2R-100 to P2R-472 starts the name of
 a case or stop folder.
 To rewrite every
 `expected.rs` and `expected.txt` from the current output:

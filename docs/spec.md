@@ -4068,7 +4068,7 @@ and its gain is typed attribute reads.
   one of the others and an override of it. A Mago finding in the model's
   declaration, its name included, stops the conversion by P2R-11 and
   leaves the struct (`@use HasFactory<XFactory>` needs `--include` of
-  the factory classes).
+  the factory classes), except the docblock finding that P2R-490 drops.
 - **P2R-402** The casts `'integer'` and `'int'`, `'string'`, and
   `'boolean'` and `'bool'` in `$casts` or `casts()` MUST give the column
   the Rust type `i64`, `String` or `bool`, whatever its type in the

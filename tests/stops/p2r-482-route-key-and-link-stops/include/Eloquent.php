@@ -46,6 +46,18 @@ class BelongsToMany extends Relation
     }
 }
 
+namespace Illuminate\Database\Eloquent\Factories;
+
+// A trait that declares getRouteKeyName; PHP does not count it for an #[\Override] in the
+// model that uses it.
+trait HasFactory
+{
+    public function getRouteKeyName(): string
+    {
+        return 'id';
+    }
+}
+
 namespace Illuminate\Database\Eloquent;
 
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;

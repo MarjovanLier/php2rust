@@ -24,3 +24,9 @@ function codeOf(Code $code): string
 {
     return $code->code;
 }
+
+// Only whitespace or a comment inside counts as empty too.
+function twice(#[ ] int $value, #[/* none */] int $other): int
+{
+    return $value + $other;
+}

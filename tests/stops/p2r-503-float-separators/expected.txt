@@ -1,0 +1,1 @@
+input.php:9:17: PHP fails to parse a float with _ not between two digits, such as 1._0, which Mago accepts (P2R-503)

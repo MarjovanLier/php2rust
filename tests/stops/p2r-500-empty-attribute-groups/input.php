@@ -25,6 +25,14 @@ function codeOf(Code $code): string
     return $code->code;
 }
 
+// Main converted this class, which PHP fails to parse.
+final readonly class Point
+{
+    public function __construct(#[] public int $x)
+    {
+    }
+}
+
 // Only whitespace or a comment inside counts as empty too.
 function twice(#[ ] int $value, #[/* none */] int $other): int
 {

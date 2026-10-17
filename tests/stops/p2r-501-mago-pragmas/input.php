@@ -24,4 +24,11 @@ function third(int $value): int
     return $value + 1;
 }
 
-echo first(1), second(2), third(3), "\n";
+function twice(int $value): int
+{
+    return $value * 2;
+}
+
+// Main converted this to twice("1"), which rustc rejects; PHP throws a TypeError.
+// @mago-expect analysis:invalid-argument
+echo first(1), second(2), third(3), twice("1"), "\n";

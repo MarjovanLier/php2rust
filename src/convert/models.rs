@@ -1879,9 +1879,10 @@ fn relation_methods(
             .is_some_and(|hint| names_relation(&hint.hint, names))
             || this_call(method).is_some();
         if lower == b"getroutekeyname" {
-            relations
-                .entry(lower)
-                .or_insert_with(|| route_key_verdict(method, overridden));
+            relations.entry(lower).or_insert_with(|| {
+                let inherited = tree_methods(codebase, vec![MODEL.to_vec()]);
+                route_key_verdict(method, inherited.contains(b"getroutekeyname".as_slice()))
+            });
         } else if relation {
             relations
                 .entry(lower)
@@ -2096,17 +2097,19 @@ fn plain_string(string: &LiteralString<'_>) -> bool {
 }
 
 /// `Ok` for a `getRouteKeyName` that P2R-480 admits, or the message of P2R-482. Its one
-/// attribute, if any, resolves to `\Override` here, as P2R-401 refuses any other.
-fn route_key_verdict(method: &Method<'_>, overridden: &HashSet<Vec<u8>>) -> Result<(), String> {
+/// attribute, if any, resolves to `\Override` here, as P2R-401 refuses any other;
+/// `inherited` says whether `Model` or one of its traits declares the method.
+fn route_key_verdict(method: &Method<'_>, inherited: bool) -> Result<(), String> {
     let attributes = method
         .attribute_lists
         .iter()
         .flat_map(|list| list.attributes.iter())
         .count();
-    // PHP refuses an #[\Override] that overrides nothing, as on a stand-in Model.
+    // PHP refuses an #[\Override] that overrides nothing, as on a stand-in Model, and it
+    // does not count a trait of the model itself.
     let attribute = match attributes {
         0 => true,
-        1 => overridden.contains(b"getroutekeyname".as_slice()),
+        1 => inherited,
         _ => false,
     };
     let body = matches!(&method.body, MethodBody::Concrete(block)
@@ -2137,7 +2140,6 @@ fn model_methods(
     class: &Class<'_>,
     names: &ResolvedNames<'_>,
 ) -> HashSet<Vec<u8>> {
-    let mut found = HashSet::new();
     let mut pending: Vec<Vec<u8>> = vec![MODEL.to_vec()];
     for member in class.members.iter() {
         if let ClassLikeMember::TraitUse(trait_use) = member {
@@ -2149,6 +2151,13 @@ fn model_methods(
             );
         }
     }
+    tree_methods(codebase, pending)
+}
+
+/// The lowercase names of the methods of the class-likes `pending` and of their traits at
+/// any depth.
+fn tree_methods(codebase: &CodebaseMetadata, mut pending: Vec<Vec<u8>>) -> HashSet<Vec<u8>> {
+    let mut found = HashSet::new();
     let mut seen: HashSet<Vec<u8>> = HashSet::new();
     while let Some(name) = pending.pop() {
         if !seen.insert(name.clone()) {

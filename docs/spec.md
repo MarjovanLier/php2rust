@@ -4043,7 +4043,8 @@ and its gain is typed attribute reads.
   has any other attribute (such as `#[Boot]` or `#[Initialize]`, which
   Laravel runs the same way), or overrides a method of `Model` or of a
   trait it uses at any depth (`booted`, `getAttribute`), other than
-  `getRouteKeyName`. Everything else stops the
+  `getRouteKeyName`, each name compared in any letter case, as Laravel
+  and PHP compare them. Everything else stops the
   model and leaves it without a struct, because PHP may read an attribute
   through it differently: such a method, a constant, another property or
   trait; an attribute on the class (P2R-07) other than the
@@ -4669,50 +4670,64 @@ map leaves out is not held, and `getAttribute` then calls a method of
 that name in any letter case as a relation. Only a relation method named
 like a column can therefore change a column read. A throwaway spike that let such
 methods through cleared twelve model files when the factories are
-included (`--include database/factories`) and made no other file stop.
-This section leaves a relation method out of the output, as P2R-401
+included (`--include database/factories`) and made no other file stop;
+under the one `return` of P2R-470 nine clear, because three chain a call
+such as `->withTimestamps()`. This section leaves a relation method out of the output, as P2R-401
 leaves out `casts()`, while every use of the relation keeps stopping.
 
 - **P2R-470** A method of a model (P2R-401) that P2R-401 lets keep the
-  struct (no `get..Attribute` or `set..Attribute` name, no `boot` or
-  `initialize` prefix, no override of a method of `Model` or of a trait
-  it uses) MAY be a relation method and MUST then be left out of the
-  output: its only modifier is `public` (PHP rejects `readonly`, a set
-  visibility or a doubled modifier on a method, and Mago does not report
-  them), it has no parameters and no attribute (`#[\Override]`
-  included), it does not return by reference, its name equals no column of the model's table in
-  any letter case, it declares a return type that PHP resolves to a
-  class of `\Illuminate\Database\Eloquent\Relations` declared in a file
-  that `--include` reads (P2R-340), not nullable and no union, and its
-  body is one statement `return $this-><helper>(..);` with the helper of
-  that type: `belongsTo` for `BelongsTo`, `hasMany` for `HasMany`,
-  `hasOne` for `HasOne`, `belongsToMany` for `BelongsToMany`,
-  `hasManyThrough` for `HasManyThrough`, `hasOneThrough` for
-  `HasOneThrough`, `morphTo` for `MorphTo`, `morphMany` for `MorphMany`
-  or `morphOne` for `MorphOne`, written in exactly that letter case.
-  Its arguments are positional, each a
-  string literal or `X::class` naming a class (`self::class`,
-  `static::class` and `parent::class` stop).
+  struct (no `get..Attribute` or `set..Attribute` name, no return type
+  that names `Casts\Attribute`, no `boot` or `initialize` prefix, no
+  attribute other than `#[\Override]` and no override of a method of
+  `Model` or of a trait it uses, each name in any letter case) MAY be a
+  relation method and MUST then be left out of the output when it meets
+  each of these conditions, which are checked in this order:
+  1. its name does not start with `__` (PHP gives such names their own
+     rules, `__clone(): HasMany` fails to compile, and Mago does not
+     report it);
+  2. its name equals no column of the model's table in any letter case;
+  3. it has no parameters;
+  4. its only modifier is `public` (a method without a modifier fails;
+     PHP rejects `readonly`, a set visibility or a doubled modifier on a
+     method, and Mago does not report them);
+  5. it has no attribute (`#[\Override]` included);
+  6. it does not return by reference;
+  7. its return type is not nullable, a union or an intersection;
+  8. it declares a return type that PHP resolves to `BelongsTo`,
+     `HasMany`, `HasOne`, `BelongsToMany`, `HasManyThrough`,
+     `HasOneThrough`, `MorphTo`, `MorphMany` or `MorphOne` of
+     `\Illuminate\Database\Eloquent\Relations`, declared in a file that
+     `--include` reads (P2R-340);
+  9. its body is one statement `return $this-><name>(..);`;
+  10. `<name>` is the helper of that type, written in exactly that letter
+      case: `belongsTo` for `BelongsTo`, `hasMany` for `HasMany`, `hasOne`
+      for `HasOne`, `belongsToMany` for `BelongsToMany`, `hasManyThrough`
+      for `HasManyThrough`, `hasOneThrough` for `HasOneThrough`, `morphTo`
+      for `MorphTo`, `morphMany` for `MorphMany` and `morphOne` for
+      `MorphOne`;
+  11. its arguments are positional and not unpacked, each a string
+      literal or `X::class` naming a class (`self::class`,
+      `static::class`, `parent::class`, a constant and a call stop).
 - **P2R-471** A call of a relation method (`$m->journalLines()`), a read
   of a relation as a property (`$m->journalLines`, which has no field of
   the struct, P2R-134) and every other use of the relation MUST still
   stop. A method of another form keeps P2R-401's stop.
-- **P2R-472** A method of a model whose declared return type resolves to
-  a class of `\Illuminate\Database\Eloquent\Relations`, or whose body is
-  one `return $this-><name>(..);`, and that P2R-470 does not admit, is a
-  relation method that stops with a message that names the first
-  condition it fails; any other method keeps P2R-401's message. These
-  are such conditions: a relation
-  method named like a column of its table in any letter case (after
-  `create` Laravel reads the relation in place of a column the map left
-  out), with a parameter, any modifier other than `public`, an attribute
-  (`#[\Override]` too), a return by reference, a
-  return type of another class (a relation class the input declares,
-  `MorphToMany`, `PendingHasThroughRelationship`), a nullable or union
-  return type, a helper that does not match the return type
-  (`morphToMany`, `morphedByMany`, `through`), a named or unpacked
-  argument, or a body other than the one `return`; a method with a name
-  or an override that P2R-401 treats otherwise keeps P2R-401's rule.
+- **P2R-472** A method of a model that P2R-401 lets keep the struct,
+  other than `getRouteKeyName`, whose declared return type names a class
+  of `\Illuminate\Database\Eloquent\Relations` (also inside `?`, a union
+  or an intersection) or whose body is one `return $this-><name>(..);`
+  (a plain call such as `return $this->formatName();` counts), and that
+  P2R-470 does not admit, is a relation method that stops with a message
+  that names the first condition of P2R-470 it fails: for example a
+  relation named like a column (after `create` Laravel reads the
+  relation in place of a column the map left out), a method without a
+  modifier, without a return type or with the return type
+  `MorphToMany`, `PendingHasThroughRelationship` or a class the input
+  declares (condition 8), a chained call such as `->withTimestamps()`
+  (condition 9), or the helper `morphToMany`, `morphedByMany` or
+  `through` (condition 10). A method that P2R-401 does not let keep the
+  struct, `getRouteKeyName` and every other method keep P2R-401's rule
+  and message.
 
 ## Spec checklist
 

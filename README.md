@@ -60,11 +60,13 @@ $this->hasMany(Post::class); }` leaves the output, as `casts()` does, when it is
 with no other modifier, no parameter and no attribute, its name equals no column and does
 not start with `__`, its return type is one of nine Laravel relation classes from
 `--include`, and its body is that one `return` of the matching helper with string or
-`X::class` arguments, optionally followed by `withTimestamps()`, `withPivot('..')` or
-`wherePivotNull('..')` (after `belongsToMany`), `limit(n)` or `with('..')`. Any other
-relation method, and every use of a relation, still stops. `public function
-getRouteKeyName(): string { return '<column>'; }`, with `#[\Override]` or no attribute, also
-leaves the output, because Laravel calls it only for route binding.
+`X::class` arguments, optionally followed by one or more of `withTimestamps()`,
+`withPivot('..')` and `wherePivotNull('..')` (after `belongsToMany`), `limit(n)` and
+`with('..')`. Any other relation method, and every use of a relation, still stops. `public
+function getRouteKeyName(): string { return '<text>'; }` also leaves the output, because
+Laravel calls it only for route binding, `getRouteKey()` and API resources; it may carry
+`#[\Override]` (or `#[Override]` after `use Override;`) when `Model` declares the method, and a
+call of it still stops.
 `M::create([..])`, `M::find($id)` and `M::query()->where('c', $v)->first()` convert against a
 store the output keeps in memory, one list of rows per model and thread that starts empty:
 a table that a migration seeds stops, and the store holds no row that a seeder or another

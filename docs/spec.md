@@ -4701,7 +4701,9 @@ leaves out `casts()`, while every use of the relation keeps stopping.
      `HasOneThrough`, `MorphTo`, `MorphMany` or `MorphOne` of
      `\Illuminate\Database\Eloquent\Relations`, declared in a file that
      `--include` reads (P2R-340);
-  9. its body is one statement `return $this-><name>(..);`;
+  9. its body is one statement `return $this-><name>(..);`, or that call
+     followed by links, `return $this-><name>(..)-><link>(..);`
+     (P2R-481);
   10. `<name>` is the helper of that type, written in exactly that letter
       case: `belongsTo` for `BelongsTo`, `hasMany` for `HasMany`, `hasOne`
       for `HasOne`, `belongsToMany` for `BelongsToMany`, `hasManyThrough`
@@ -4712,7 +4714,8 @@ leaves out `casts()`, while every use of the relation keeps stopping.
       literal whose escapes P2R-49 accepts (PHP refuses to parse
       `"\u{zz}"`, which Mago accepts, and a left-out method never reaches
       P2R-49) or `X::class` naming a class (`self::class`,
-      `static::class`, `parent::class`, a constant and a call stop).
+      `static::class`, `parent::class`, a constant and a call stop);
+  12. each link meets P2R-481.
 - **P2R-471** A call of a relation method (`$m->journalLines()`), a read
   of a relation as a property (`$m->journalLines`, which has no field of
   the struct, P2R-134) and every other use of the relation MUST still
@@ -4720,8 +4723,10 @@ leaves out `casts()`, while every use of the relation keeps stopping.
 - **P2R-472** A method of a model that P2R-401 lets keep the struct,
   other than `getRouteKeyName`, whose declared return type names a class
   of `\Illuminate\Database\Eloquent\Relations` (also inside `?`, a union
-  or an intersection) or whose body is one `return $this-><name>(..);`
-  (a plain call such as `return $this->formatName();` counts), and that
+  or an intersection) or whose body is one `return` of a call on
+  `$this`, also with calls chained after it (a plain call such as
+  `return $this->formatName();` counts, and so does
+  `return $this->a()->b();`), and that
   P2R-470 does not admit, is a relation method that stops with a message
   that names the first condition of P2R-470 it fails: for example a
   relation named like a column (after `create` Laravel reads the
@@ -4729,16 +4734,18 @@ leaves out `casts()`, while every use of the relation keeps stopping.
   modifier (condition 4), without a return type or with the return type
   `MorphToMany`, `PendingHasThroughRelationship` or a class the input
   declares (condition 8), a body that is not one return of a helper call
-  (condition 9), a link outside P2R-481's list (condition 12), or the helper `morphToMany`, `morphedByMany` or
-  `through` (condition 10). A method that P2R-401 does not let keep the
-  struct, `getRouteKeyName` and every other method keep P2R-401's rule
-  and message.
+  (condition 9), the helper `morphToMany`, `morphedByMany` or `through`
+  (condition 10), or a link outside P2R-481's list (condition 12). A
+  method that P2R-401 does not let keep the struct and every other method
+  keep P2R-401's rule and message; `getRouteKeyName` follows P2R-480 and
+  P2R-482.
 
 ## 49. Route keys and chained relations on models (milestone 2, slice 39, draft)
 
-After section 48, fifteen models of the app still stop on
-`#[\Override] public function getRouteKeyName(): string { return 'uuid';
-}`, and eight relation methods on a call chained after the helper, such
+After section 48, thirteen models of the app still stop on
+`#[Override] public function getRouteKeyName(): string { return 'uuid';
+}` (`User` declares one too but extends `Authenticatable`), and eight
+relation methods on a call chained after the helper, such
 as `->withTimestamps()`. Laravel 12.35.1 calls `getRouteKeyName` only
 from route model binding (`resolveRouteBindingQuery`,
 `resolveChildRouteBinding`, `HasUniqueStringIds`), `getRouteKey()` and
@@ -4750,26 +4757,33 @@ output. A throwaway spike that left both out cleared eight more model
 files with the factories included and made no other file stop.
 
 - **P2R-480** A method of a model named `getRouteKeyName` in any letter
-  case MUST be left out of the output, in place of P2R-401's stop, when
-  its only modifier is `public`, it has no parameters, no attribute other
-  than `#[\Override]`, no return by reference, the declared return type
-  `string` and a body of one statement `return '<text>';` with a string
-  literal. A call of it still stops (P2R-135).
-- **P2R-481** Condition 9 of P2R-470 also admits a helper call followed
-  by links, `return $this-><name>(..)-><link>(..)..;`, and a new
-  condition 12, checked last, requires each link to be one of these,
-  written in exactly this letter case with positional arguments that are
-  not unpacked: `withTimestamps()` with no argument, `withPivot('<a>',
-  ..)` with one or more string literals, `wherePivotNull('<a>')` with one
+  case that P2R-401 lets keep the struct MUST be left out of the output,
+  in place of P2R-401's stop, when its only modifier is `public`, it has
+  no parameters and no return by reference, its declared return type is
+  `string`, its body is one statement `return '<text>';` with a string
+  literal whose escapes P2R-49 accepts, and its only attribute, if any,
+  is one whose name PHP resolves to `\Override` (`#[\Override]`, or
+  `#[Override]` after `use Override;`, as P2R-221 reads it) while `Model`
+  or a trait of P2R-401's override set declares `getRouteKeyName` (PHP
+  refuses an `#[\Override]` that overrides nothing, Mago does not report
+  it, and a stand-in `Model` can reach it). A call of it still stops
+  (P2R-135).
+- **P2R-481** A link (condition 9 of P2R-470) is one of these, written
+  in exactly this letter case with positional arguments that are not
+  unpacked: `withTimestamps()` with no argument, `withPivot('<a>', ..)`
+  with one or more string literals, `wherePivotNull('<a>')` with one
   string literal, `limit(<n>)` with one integer literal, and
-  `with('<a>', ..)` with one or more string literals. `withTimestamps`,
-  `withPivot` and `wherePivotNull` need the return type `BelongsToMany`.
-  Conditions 10 and 11 apply to the helper call as before.
-- **P2R-482** These stop, each with a message that names the reason: a
-  `getRouteKeyName` of another form (the message names the form of
-  P2R-480), and a relation method whose link fails condition 12 (another
-  method name or letter case, another argument form, or a pivot link on
-  another return type). P2R-472's other messages are unchanged.
+  `with('<a>', ..)` with one or more string literals, each string literal
+  with escapes that P2R-49 accepts. `withTimestamps`, `withPivot` and
+  `wherePivotNull` need the return type `BelongsToMany`. Conditions 10
+  and 11 apply to the helper call, the innermost call on `$this`.
+- **P2R-482** These stop: a `getRouteKeyName` that P2R-401 lets keep the
+  struct and that P2R-480 does not admit, with a message that names the
+  form of P2R-480, and a relation method whose first failing condition is
+  12, with a message that names the first link, in source order, that
+  fails P2R-481. A method that P2R-401 does not let keep the struct,
+  such as a `getRouteKeyName` with another attribute, keeps P2R-401's
+  rule and message.
 
 ## Spec checklist
 

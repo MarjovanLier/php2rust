@@ -40,6 +40,14 @@ class PendingHasThroughRelationship
 {
 }
 
+trait SoftDeletes
+{
+    public function getDeletedAtColumn(): string
+    {
+        return 'deleted_at';
+    }
+}
+
 abstract class Model
 {
     /** @var array<string, mixed> */

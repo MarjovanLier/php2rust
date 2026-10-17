@@ -10,6 +10,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Relations\HasOne;
 use Illuminate\Database\Eloquent\Relations\MorphToMany;
+use Illuminate\Database\Eloquent\SoftDeletes;
 
 final class Post extends Model
 {
@@ -156,6 +157,57 @@ final class Author extends Model
         return ($this->hasMany(Post::class));
     }
 
+    // Methods that fail two conditions get the earlier one: a parameter (3) before the
+    // modifier (4), the modifier (4) before the attribute (5), the attribute (5) before
+    // the reference (6), and the reference (6) before a nullable type (7).
+    protected function paramFirst(int $limit): HasMany
+    {
+        return $this->hasMany(Post::class);
+    }
+
+    #[\Override]
+    protected function modifierFirst(): HasMany
+    {
+        return $this->hasMany(Post::class);
+    }
+
+    #[\Override]
+    public function &attributeFirst(): HasMany
+    {
+        return $this->hasMany(Post::class);
+    }
+
+    public function &referenceFirst(): ?HasMany
+    {
+        return $this->hasMany(Post::class);
+    }
+
+    // A relation type alone triggers P2R-472, and so does a plain call alone.
+    public function nothing(): ?HasMany
+    {
+        return null;
+    }
+
+    public function formatted(): string
+    {
+        return $this->label();
+    }
+
+    public function viaStatic(): HasMany
+    {
+        return $this->hasMany(static::class);
+    }
+
+    public function viaParent(): HasMany
+    {
+        return $this->hasMany(parent::class);
+    }
+
+    public function viaConstant(): HasMany
+    {
+        return $this->hasMany(PHP_EOL);
+    }
+
     public function label(): string
     {
         return 'author';
@@ -175,5 +227,19 @@ final class Accessor extends Model
     public function getTitleAttribute(): BelongsTo
     {
         return $this->belongsTo(Post::class);
+    }
+}
+
+// An override of a method of a trait the model uses keeps P2R-401's rule too: Laravel
+// calls getDeletedAtColumn on every model it builds.
+final class Trashed extends Model
+{
+    use SoftDeletes;
+
+    public $timestamps = false;
+
+    public function getDeletedAtColumn(): HasMany
+    {
+        return $this->hasMany(Post::class);
     }
 }

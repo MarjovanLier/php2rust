@@ -658,7 +658,7 @@ php2rust refuses some valid PHP that version 1 converts in other forms:
 The tests need PHP 8.5 on `PATH` and the Rust toolchain pinned in
 `rust-toolchain.toml` (`rustup toolchain install` installs it). Each folder under
 `tests/cases`, `tests/stops` and `tests/errors` is one test, and `cargo test` also checks
-that each requirement from P2R-07 to P2R-49 and from P2R-100 to P2R-501 starts the name of
+that each requirement from P2R-07 to P2R-49 and from P2R-100 to P2R-510 starts the name of
 a case or stop folder.
 To rewrite every
 `expected.rs` and `expected.txt` from the current output:

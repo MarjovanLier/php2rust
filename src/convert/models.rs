@@ -2230,6 +2230,7 @@ fn casts_method(method: &Method<'_>) -> Option<HashMap<String, Option<Kind>>> {
     // the output leaves the method out, so nothing else would see them.
     if !protected
         || !returns_array
+        || method.ampersand.is_some()
         || !method.parameter_list.parameters.is_empty()
         || !method.attribute_lists.is_empty()
     {

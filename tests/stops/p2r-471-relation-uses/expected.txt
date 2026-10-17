@@ -1,0 +1,3 @@
+input.php:39:5: this class has no method of that name (P2R-135)
+input.php:44:12: this class has no property of that name (P2R-134)
+input.php:49:5: this class has no method of that name (P2R-135)

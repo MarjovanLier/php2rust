@@ -17,5 +17,5 @@ input.php:134:7: PHP rejects a modifier written twice and a second visibility (P
 input.php:143:15: PHP rejects a second property of one name in a class (P2R-401)
 input.php:152:12: PHP rejects a second property of one name in a class (P2R-401)
 input.php:164:24: PHP rejects a second method of one name in a class (P2R-401)
-input.php:175:21: a method of a model is not supported yet (P2R-401)
+input.php:175:21: the body of a relation method is supported only as one return $this-><helper>(..); (P2R-472)
 input.php:189:12: this class has no property of that name (P2R-134)

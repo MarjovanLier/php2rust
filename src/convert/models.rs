@@ -1881,7 +1881,7 @@ fn relation_methods(
         if lower == b"getroutekeyname" {
             relations
                 .entry(lower)
-                .or_insert_with(|| route_key_verdict(method, inherits_route_key(codebase)));
+                .or_insert_with(|| route_key_verdict(method, model_route_key(codebase)));
         } else if relation {
             relations
                 .entry(lower)
@@ -2097,45 +2097,20 @@ fn plain_string(string: &LiteralString<'_>) -> bool {
             && printer::octal_overflow(string.raw))
 }
 
-/// True when `Model` or a parent, interface or trait of it at any depth declares a
-/// `getRouteKeyName` that is not private, which PHP needs for an `#[\Override]` on the
-/// model's own; a trait of the model itself does not count (P2R-480).
-fn inherits_route_key(codebase: &CodebaseMetadata) -> bool {
-    let mut pending: Vec<Vec<u8>> = vec![MODEL.to_vec()];
-    let mut seen: HashSet<Vec<u8>> = HashSet::new();
-    while let Some(name) = pending.pop() {
-        if !seen.insert(name.clone()) {
-            continue;
-        }
-        let Some(class) = codebase.get_class_like(&name) else {
-            continue;
-        };
-        // A class's own declaration replaces the ones of its traits and parents, so its
-        // visibility decides.
-        if let Some(method) = codebase
-            .get_method(&name, b"getroutekeyname")
-            .and_then(|method| method.method_metadata.as_ref())
-        {
-            if method.visibility != Visibility::Private {
-                return true;
-            }
-            continue;
-        }
-        pending.extend(
-            class
-                .direct_parent_class
-                .iter()
-                .chain(class.direct_parent_interfaces.iter())
-                .chain(class.used_traits.iter())
-                .map(|parent| parent.as_bytes().to_ascii_lowercase()),
-        );
-    }
-    false
+/// True when `Model` itself declares a `getRouteKeyName` that is not private, as Laravel's
+/// does, which PHP needs for an `#[\Override]` on the model's own. A method that `Model`
+/// takes from a trait, an interface or a parent does not count: a trait use can alias it to
+/// private, which only over-stops on a stand-in `Model` (P2R-480).
+fn model_route_key(codebase: &CodebaseMetadata) -> bool {
+    codebase
+        .get_method(MODEL, b"getroutekeyname")
+        .and_then(|method| method.method_metadata.as_ref())
+        .is_some_and(|method| method.visibility != Visibility::Private)
 }
 
 /// `Ok` for a `getRouteKeyName` that P2R-480 admits, or the message of P2R-482. Its one
 /// attribute, if any, resolves to `\Override` here, as P2R-401 refuses any other;
-/// `inherited` is what `inherits_route_key` says.
+/// `inherited` is what `model_route_key` says.
 fn route_key_verdict(method: &Method<'_>, inherited: bool) -> Result<(), String> {
     // PHP refuses an #[\Override] that overrides nothing, as on a stand-in Model, and it
     // does not count a trait of the model itself; it also fails to parse an empty #[],

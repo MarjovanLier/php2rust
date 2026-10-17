@@ -238,7 +238,7 @@ requirement IDs.
   the same stdout bytes, the same output file bytes and the same stderr
   bytes.
 - **P2R-07** Only the constructs that sections 3 to 5, 11 to 19 and 21 to
-  48 list as converting may convert. Any other construct MUST stop the conversion,
+  49 list as converting may convert. Any other construct MUST stop the conversion,
   which means it is reported as a problem under P2R-03. Examples that stop
   in version 1 (section 16 converts `namespace`, `use` and class
   constants, and section 17 two casts):
@@ -619,7 +619,7 @@ requirement IDs.
   stderr MUST equal `expected.txt`, its stdout MUST be empty, no output file
   may be created, and every file in the folder MUST be unchanged.
 - **P2R-75** Every requirement ID from P2R-07 to P2R-49 and from P2R-100 to
-  P2R-472 MUST appear in the name of at least one case or stop folder. A
+  P2R-482 MUST appear in the name of at least one case or stop folder. A
   test MUST check this from the folder names.
 - **P2R-76** One command named in the README MUST rewrite every `expected.rs`
   and `expected.txt` from the current tool output; CI MUST NOT run it. A
@@ -4728,11 +4728,48 @@ leaves out `casts()`, while every use of the relation keeps stopping.
   relation in place of a column the map left out), a method without a
   modifier (condition 4), without a return type or with the return type
   `MorphToMany`, `PendingHasThroughRelationship` or a class the input
-  declares (condition 8), a chained call such as `->withTimestamps()`
-  (condition 9), or the helper `morphToMany`, `morphedByMany` or
+  declares (condition 8), a body that is not one return of a helper call
+  (condition 9), a link outside P2R-481's list (condition 12), or the helper `morphToMany`, `morphedByMany` or
   `through` (condition 10). A method that P2R-401 does not let keep the
   struct, `getRouteKeyName` and every other method keep P2R-401's rule
   and message.
+
+## 49. Route keys and chained relations on models (milestone 2, slice 39, draft)
+
+After section 48, fifteen models of the app still stop on
+`#[\Override] public function getRouteKeyName(): string { return 'uuid';
+}`, and eight relation methods on a call chained after the helper, such
+as `->withTimestamps()`. Laravel 12.35.1 calls `getRouteKeyName` only
+from route model binding (`resolveRouteBindingQuery`,
+`resolveChildRouteBinding`, `HasUniqueStringIds`), `getRouteKey()` and
+API resources, which no form of sections 42 to 47 reaches. A relation
+method runs only when code calls it or reads the relation, which P2R-471
+stops, or through `$with`, `$touches` and the other properties that
+P2R-401 refuses, so a call chained after the helper never runs in the
+output. A throwaway spike that left both out cleared eight more model
+files with the factories included and made no other file stop.
+
+- **P2R-480** A method of a model named `getRouteKeyName` in any letter
+  case MUST be left out of the output, in place of P2R-401's stop, when
+  its only modifier is `public`, it has no parameters, no attribute other
+  than `#[\Override]`, no return by reference, the declared return type
+  `string` and a body of one statement `return '<text>';` with a string
+  literal. A call of it still stops (P2R-135).
+- **P2R-481** Condition 9 of P2R-470 also admits a helper call followed
+  by links, `return $this-><name>(..)-><link>(..)..;`, and a new
+  condition 12, checked last, requires each link to be one of these,
+  written in exactly this letter case with positional arguments that are
+  not unpacked: `withTimestamps()` with no argument, `withPivot('<a>',
+  ..)` with one or more string literals, `wherePivotNull('<a>')` with one
+  string literal, `limit(<n>)` with one integer literal, and
+  `with('<a>', ..)` with one or more string literals. `withTimestamps`,
+  `withPivot` and `wherePivotNull` need the return type `BelongsToMany`.
+  Conditions 10 and 11 apply to the helper call as before.
+- **P2R-482** These stop, each with a message that names the reason: a
+  `getRouteKeyName` of another form (the message names the form of
+  P2R-480), and a relation method whose link fails condition 12 (another
+  method name or letter case, another argument form, or a pivot link on
+  another return type). P2R-472's other messages are unchanged.
 
 ## Spec checklist
 
@@ -4742,7 +4779,7 @@ leaves out `casts()`, while every use of the relation keeps stopping.
   takes its element type from the same variable or the declared type it
   flows into (P2R-21); a file of only functions becomes a library (P2R-33).
 - [x] Every requirement is testable: P2R-07 to P2R-49 and P2R-100 to
-  P2R-472 by case and stop folders (P2R-75 enforces this), P2R-01 to P2R-06
+  P2R-482 by case and stop folders (P2R-75 enforces this), P2R-01 to P2R-06
   by error folders and tests, P2R-50 to P2R-52 by P2R-71, the rest by CI or
   a file in the
   repository. Stated review concerns (P2R-05 partial write, P2R-72 case

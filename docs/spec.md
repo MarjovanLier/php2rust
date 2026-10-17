@@ -4889,7 +4889,8 @@ Laravel app and the hooks of P2R-380's case folder write.
   are plain variables other than a superglobal; `continue;` inside a
   `foreach` of the same function; and `return;` in a closure. Each ends
   with `;` or with its braces. The expressions are a literal (a string
-  in single or double quotes with no part inside, an integer, a float,
+  in single or double quotes with no part inside, with or without a `b`
+  prefix, an integer, a float,
   `true`, `false` or `null`, with no sign; not a heredoc or nowdoc); a
   double-quoted string without a `b` prefix whose parts are text and
   plain variables (`$x`, `{$x}`); an array literal `[..]` of values and

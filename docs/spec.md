@@ -4820,7 +4820,7 @@ files with the factories included and made no other file stop.
   model, on another property of a model, and on a model property that
   P2R-401 does not read, which takes the struct away.
 
-## 51. Input that PHP refuses and Mago lets through (milestone 2, slice 41, draft)
+## 51. Input that PHP refuses and Mago lets through (milestone 2, slice 41)
 
 The reviews of slices 39 and 40 found two ways in which input that PHP
 refuses reaches the output. Mago's parser accepts an empty attribute

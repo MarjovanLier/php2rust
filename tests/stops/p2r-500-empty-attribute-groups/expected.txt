@@ -1,5 +1,6 @@
-input.php:15:5: PHP fails to parse an empty attribute group #[], which Mago accepts (P2R-500)
+input.php:15:5: PHP may read an attribute of a model through this member (an accessor, an override of a method of Model or of a trait the model uses, another property, constant or trait), so the model takes no struct (P2R-401)
 input.php:22:1: PHP fails to parse an empty attribute group #[], which Mago accepts (P2R-500)
+input.php:25:12: this class has no property of that name (P2R-134)
 input.php:31:33: PHP fails to parse an empty attribute group #[], which Mago accepts (P2R-500)
 input.php:37:16: PHP fails to parse an empty attribute group #[], which Mago accepts (P2R-500)
 input.php:37:33: PHP fails to parse an empty attribute group #[], which Mago accepts (P2R-500)

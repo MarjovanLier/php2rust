@@ -274,6 +274,27 @@ final class Words extends Data
     }
 }
 
+// PHP fails to parse a closure before ->, ?-> or [..], which Mago reads.
+final class Bases extends Data
+{
+    public function __construct(public string $number) {}
+
+    public static function rules(): array
+    {
+        return ['a' => [static function (): void {}->bindTo(null)]];
+    }
+
+    public static function messages(): array
+    {
+        return ['a' => [static function (): void {}?->x]];
+    }
+
+    public static function attributes(): array
+    {
+        return ['a' => [static function (): void {}[0]]];
+    }
+}
+
 // A class is a plain name; parentheses are not on the list.
 final class Names extends Data
 {

@@ -1423,7 +1423,7 @@ fn model_fields(
             Member::Other => {
                 return Err((
                     member.span(),
-                    "PHP may read an attribute of a model through this member (an accessor, an override of a method of Model, another property, constant or trait), so the model takes no struct (P2R-401)".to_owned(),
+                    "PHP may read an attribute of a model through this member (an accessor, an override of a method of Model or of a trait the model uses, another property, constant or trait), so the model takes no struct (P2R-401)".to_owned(),
                 ));
             }
         }

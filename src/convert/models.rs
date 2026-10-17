@@ -1120,7 +1120,6 @@ pub(super) fn find(
     let folded = migrations.map(|migrations| fold(migrations, &keyed));
     let tables = folded.as_ref().map(|(tables, _)| tables);
     let public = public_properties(codebase);
-    let overridden = model_methods(codebase);
     let observed_included = codebase
         .get_class_like(OBSERVED_BY)
         .is_some_and(|attribute| included.contains(&attribute.span.file_id));
@@ -1143,6 +1142,7 @@ pub(super) fn find(
                 }),
             };
             let refused = observers.as_ref().err().copied();
+            let overridden = model_methods(codebase, class, names);
             let (fields, store) =
                 match model_fields(class, names, tables, &public, &overridden, refused) {
                     Ok((fields, store)) => (Ok(fields), store),
@@ -2029,11 +2029,26 @@ fn this_call<'m, 'a>(method: &'m Method<'a>) -> Option<(&'a [u8], &'m ArgumentLi
         .then_some((name.value, &call.argument_list))
 }
 
-/// The lowercase names of the methods of Eloquent's model and its traits at any depth,
-/// which a method of a model would override (P2R-401).
-fn model_methods(codebase: &CodebaseMetadata) -> HashSet<Vec<u8>> {
+/// The lowercase names of the methods of Eloquent's model, of the traits the model `class`
+/// uses (`SoftDeletes` calls `getDeletedAtColumn` on every model it builds) and of their
+/// traits at any depth, which a method of the model would override (P2R-401).
+fn model_methods(
+    codebase: &CodebaseMetadata,
+    class: &Class<'_>,
+    names: &ResolvedNames<'_>,
+) -> HashSet<Vec<u8>> {
     let mut found = HashSet::new();
     let mut pending: Vec<Vec<u8>> = vec![MODEL.to_vec()];
+    for member in class.members.iter() {
+        if let ClassLikeMember::TraitUse(trait_use) = member {
+            pending.extend(
+                trait_use
+                    .trait_names
+                    .iter()
+                    .map(|name| resolved(names, name, name.value())),
+            );
+        }
+    }
     let mut seen: HashSet<Vec<u8>> = HashSet::new();
     while let Some(name) = pending.pop() {
         if !seen.insert(name.clone()) {

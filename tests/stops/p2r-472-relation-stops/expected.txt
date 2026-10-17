@@ -40,5 +40,5 @@ input.php:201:21: an argument of a relation helper is supported only as a positi
 input.php:206:21: an argument of a relation helper is supported only as a positional string literal or X::class naming a class (P2R-472)
 input.php:211:21: a method of a model is not supported yet (P2R-401)
 input.php:216:21: a method of a model is not supported yet (P2R-401)
-input.php:227:5: PHP may read an attribute of a model through this member (an accessor, an override of a method of Model, another property, constant or trait), so the model takes no struct (P2R-401)
-input.php:241:5: PHP may read an attribute of a model through this member (an accessor, an override of a method of Model, another property, constant or trait), so the model takes no struct (P2R-401)
+input.php:227:5: PHP may read an attribute of a model through this member (an accessor, an override of a method of Model or of a trait the model uses, another property, constant or trait), so the model takes no struct (P2R-401)
+input.php:241:5: PHP may read an attribute of a model through this member (an accessor, an override of a method of Model or of a trait the model uses, another property, constant or trait), so the model takes no struct (P2R-401)

@@ -1063,6 +1063,9 @@ pub(super) struct Model {
     /// Each relation method, and `getRouteKeyName`, by its lowercase name: left out of the
     /// output, or why it stops (P2R-470, P2R-472, P2R-480, P2R-482).
     pub(super) relations: HashMap<Vec<u8>, Result<(), String>>,
+    /// Each configuration property that P2R-401 reads, from the end of the member before it,
+    /// so with its docblock, to its own end (P2R-490).
+    pub(super) configuration: Vec<Span>,
 }
 
 /// A field of a model's struct (P2R-401).
@@ -1159,6 +1162,7 @@ pub(super) fn find(
                 store,
                 observers: observers.unwrap_or_default(),
                 relations: relation_methods(class, names, codebase, included, &overridden, tables),
+                configuration: configuration(class, names, &overridden),
             }
         })
         .collect();
@@ -1819,6 +1823,30 @@ fn names_attribute(hint: &Hint<'_>, names: &ResolvedNames<'_>) -> bool {
         Hint::Parenthesized(inner) => names_attribute(inner.hint, names),
         _ => false,
     }
+}
+
+/// The configuration properties of a model that P2R-401 reads as literals and leaves out,
+/// each from the end of the member before it, so with its docblock, to its own end (P2R-490).
+fn configuration(
+    class: &Class<'_>,
+    names: &ResolvedNames<'_>,
+    overridden: &HashSet<Vec<u8>>,
+) -> Vec<Span> {
+    let mut spans = Vec::new();
+    let mut before = class.left_brace;
+    for member in class.members.iter() {
+        let span = member.span();
+        if matches!(member, ClassLikeMember::Property(_))
+            && matches!(
+                model_member(member, names, overridden),
+                Member::Table(_) | Member::Casts(_) | Member::LeftOut
+            )
+        {
+            spans.push(span.from_start(before.end));
+        }
+        before = span;
+    }
+    spans
 }
 
 /// Laravel's namespace of relation classes, lowercase.

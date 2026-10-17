@@ -261,6 +261,7 @@ fn analyse(
                 .iter()
                 .filter(|issue| reported(issue))
                 .filter(|issue| !library || issue.code.as_deref() != Some("duplicate-definition"))
+                .filter(|issue| !model_docblock(issue, &models))
                 .filter_map(|issue| {
                     let code = LEFT_OUT_CODES
                         .iter()
@@ -353,6 +354,28 @@ const LEFT_OUT_CODES: [&str; 4] = [
     "mixed-method-access",
     "incompatible-parameter-count",
 ];
+
+/// True for Mago's `incompatible-property-type` finding in a configuration property of a
+/// model or its docblock: PHP never checks a docblock, and the tool reads the property as a
+/// literal and leaves it out (P2R-490).
+fn model_docblock(issue: &Issue, models: &[models::Model]) -> bool {
+    issue.code.as_deref() == Some("incompatible-property-type")
+        && issue
+            .annotations
+            .iter()
+            .find(|annotation| annotation.kind == AnnotationKind::Primary)
+            .is_some_and(|annotation| {
+                let found = annotation.span;
+                models
+                    .iter()
+                    .flat_map(|model| model.configuration.iter())
+                    .any(|span| {
+                        span.file_id == found.file_id
+                            && span.start.offset <= found.start.offset
+                            && found.end.offset <= span.end.offset
+                    })
+            })
+}
 
 /// Mago findings that refuse the conversion (P2R-11).
 fn reported(issue: &Issue) -> bool {

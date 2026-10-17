@@ -2221,12 +2221,18 @@ fn tree_methods(codebase: &CodebaseMetadata, mut pending: Vec<Vec<u8>>) -> HashS
     found
 }
 
-/// `protected function casts(): array { return [..]; }` with a literal map.
+/// `protected function casts(): array { return [..]; }` with a literal map and no attribute.
 fn casts_method(method: &Method<'_>) -> Option<HashMap<String, Option<Kind>>> {
     let protected = matches!(method.modifiers.as_slice(), [Modifier::Protected(_)]);
     let returns_array =
         matches!(&method.return_type_hint, Some(hint) if matches!(hint.hint, Hint::Array(_)));
-    if !protected || !returns_array || !method.parameter_list.parameters.is_empty() {
+    // PHP checks an attribute's arguments and an #[\Override] when it loads the class, and
+    // the output leaves the method out, so nothing else would see them.
+    if !protected
+        || !returns_array
+        || !method.parameter_list.parameters.is_empty()
+        || !method.attribute_lists.is_empty()
+    {
         return None;
     }
     let MethodBody::Concrete(block) = &method.body else {

@@ -320,25 +320,20 @@ fn analyse(
     }
 }
 
-/// The input that PHP refuses and Mago lets through: an empty attribute group, which Mago
-/// parses, and a comment that makes Mago drop a finding PHP may enforce (P2R-500,
-/// P2R-501).
+/// The input that PHP refuses and Mago lets through: forms that PHP fails to parse and
+/// Mago parses, and a comment that makes Mago drop a finding PHP may enforce (P2R-500 to
+/// P2R-503).
 fn screen(program: &Program<'_>) -> Vec<Problem> {
-    let mut empty: Vec<Span> = Vec::new();
-    EmptyGroups.walk_program(program, &mut empty);
+    let mut found: Vec<(Span, &str)> = Vec::new();
+    Unparsed.walk_program(program, &mut found);
     let pragma = |text: &[u8]| {
         [&b"@mago-expect"[..], b"@mago-ignore"]
             .iter()
             .any(|word| text.windows(word.len()).any(|window| window == *word))
     };
-    let groups = empty.into_iter().map(|span| {
-        spanned(
-            &span,
-            Origin::Tool,
-            "PHP fails to parse an empty attribute group #[], which Mago accepts (P2R-500)"
-                .to_owned(),
-        )
-    });
+    let unparsed = found
+        .into_iter()
+        .map(|(span, message)| spanned(&span, Origin::Tool, message.to_owned()));
     let comments = program
         .trivia
         .iter()
@@ -350,17 +345,81 @@ fn screen(program: &Program<'_>) -> Vec<Problem> {
                 "a @mago-expect or @mago-ignore comment is not supported, because it would hide a Mago finding that PHP may enforce (P2R-501)".to_owned(),
             )
         });
-    groups.chain(comments).collect()
+    unparsed.chain(comments).collect()
 }
 
-/// Collects the span of each empty attribute group `#[]` (P2R-500).
-struct EmptyGroups;
+/// Collects each form that PHP fails to parse and Mago parses, with its problem (P2R-500,
+/// P2R-502, P2R-503).
+struct Unparsed;
 
-impl<'ast, 'arena> Walker<'ast, 'arena, Vec<Span>> for EmptyGroups {
-    fn walk_in_attribute_list(&self, list: &'ast AttributeList<'arena>, found: &mut Vec<Span>) {
+impl<'ast, 'arena> Walker<'ast, 'arena, Vec<(Span, &'static str)>> for Unparsed {
+    fn walk_in_attribute_list(
+        &self,
+        list: &'ast AttributeList<'arena>,
+        found: &mut Vec<(Span, &'static str)>,
+    ) {
         if list.attributes.is_empty() {
-            found.push(list.span());
+            found.push((
+                list.span(),
+                "PHP fails to parse an empty attribute group #[], which Mago accepts (P2R-500)",
+            ));
         }
+    }
+
+    // Mago reads `1 < 2 < 3` and `$a == $b == $c`, where PHP's comparisons do not chain
+    // within one group.
+    fn walk_in_binary(&self, binary: &'ast Binary<'arena>, found: &mut Vec<(Span, &'static str)>) {
+        let group = comparison_group(&binary.operator);
+        let chained = group.is_some()
+            && [binary.lhs, binary.rhs].iter().any(|operand| {
+                matches!(operand, Expression::Binary(inner)
+                    if comparison_group(&inner.operator) == group)
+            });
+        if chained {
+            found.push((
+                binary.span(),
+                "PHP fails to parse a comparison chained to another of its group, such as 1 < 2 < 3 or $a == $b == $c, which Mago accepts (P2R-502)",
+            ));
+        }
+    }
+
+    // Mago reads `1._0`, where PHP allows `_` in a number only between two digits.
+    fn walk_in_literal_float(
+        &self,
+        float: &'ast LiteralFloat<'arena>,
+        found: &mut Vec<(Span, &'static str)>,
+    ) {
+        let raw = float.raw;
+        let misplaced = raw.iter().enumerate().any(|(at, byte)| {
+            *byte == b'_'
+                && !(at > 0
+                    && raw[at - 1].is_ascii_digit()
+                    && raw.get(at + 1).is_some_and(u8::is_ascii_digit))
+        });
+        if misplaced {
+            found.push((
+                float.span,
+                "PHP fails to parse a float with _ not between two digits, such as 1._0, which Mago accepts (P2R-503)",
+            ));
+        }
+    }
+}
+
+/// The level of a comparison operator: PHP's equality operators share one and its
+/// relational operators another, and neither level chains.
+fn comparison_group(operator: &BinaryOperator<'_>) -> Option<u8> {
+    match operator {
+        BinaryOperator::Equal(_)
+        | BinaryOperator::NotEqual(_)
+        | BinaryOperator::Identical(_)
+        | BinaryOperator::NotIdentical(_)
+        | BinaryOperator::AngledNotEqual(_)
+        | BinaryOperator::Spaceship(_) => Some(0),
+        BinaryOperator::LessThan(_)
+        | BinaryOperator::LessThanOrEqual(_)
+        | BinaryOperator::GreaterThan(_)
+        | BinaryOperator::GreaterThanOrEqual(_) => Some(1),
+        _ => None,
     }
 }
 

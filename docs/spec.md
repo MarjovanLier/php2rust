@@ -4863,9 +4863,9 @@ input: a comparison chained to another of its level, and a float such as
   does not stop by this rule.
 - **P2R-503** A float literal with `_` that does not stand between two
   digits MUST stop the conversion with a message that says PHP fails to
-  parse it, anywhere in the input: Mago reads `1._0` as `1.0`, and its
-  parser refuses the other misplaced forms (`1_.0`, `1_e1`, `1.0_`,
-  `1__0`, `0x_1F`).
+  parse it, anywhere in the input: Mago reads `1._0` as `1.0`, and also
+  `1.5e_3` and `1._0e1`, while its parser refuses the other misplaced
+  forms tried (`1_.0`, `1_e1`, `1.0_`, `1__0`, `0x_1F`).
 
 ## 52. Data hook bodies kept to a closed list (milestone 2, slice 43, draft)
 

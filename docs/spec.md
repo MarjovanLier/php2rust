@@ -4709,7 +4709,9 @@ leaves out `casts()`, while every use of the relation keeps stopping.
       for `MorphTo`, `morphMany` for `MorphMany` and `morphOne` for
       `MorphOne`;
   11. its arguments are positional and not unpacked, each a string
-      literal or `X::class` naming a class (`self::class`,
+      literal whose escapes P2R-49 accepts (PHP refuses to parse
+      `"\u{zz}"`, which Mago accepts, and a left-out method never reaches
+      P2R-49) or `X::class` naming a class (`self::class`,
       `static::class`, `parent::class`, a constant and a call stop).
 - **P2R-471** A call of a relation method (`$m->journalLines()`), a read
   of a relation as a property (`$m->journalLines`, which has no field of

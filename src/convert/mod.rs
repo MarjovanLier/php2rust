@@ -23,6 +23,7 @@ use mago_reporting::{AnnotationKind, Issue, Level};
 use mago_span::{HasSpan, Span};
 use mago_syntax::cst::*;
 use mago_syntax::parser::parse_file;
+use mago_syntax::walker::Walker;
 
 use crate::printer::{self, RExpr};
 use crate::problem::{self, Origin, Problem};
@@ -150,6 +151,10 @@ fn analyse(
     if !errors.is_empty() {
         return Err(Failure::Invalid(problem::render_files(&named, errors)));
     }
+    let mut screened: Vec<Problem> = programs
+        .iter()
+        .flat_map(|program| screen(program))
+        .collect();
     let resolved: Vec<ResolvedNames<'_>> = programs
         .iter()
         .map(|program| NameResolver::new(&arena).resolve(program))
@@ -307,10 +312,55 @@ fn analyse(
         .map(|(problem, _)| problem)
         .collect();
     problems.append(&mut converter.problems);
+    problems.append(&mut screened);
     if problems.is_empty() {
         Ok(written)
     } else {
         Err(Failure::Refused(problem::render_files(&named, problems)))
+    }
+}
+
+/// The input that PHP refuses and Mago lets through: an empty attribute group, which Mago
+/// parses, and a comment that makes Mago drop a finding PHP may enforce (P2R-500,
+/// P2R-501).
+fn screen(program: &Program<'_>) -> Vec<Problem> {
+    let mut empty: Vec<Span> = Vec::new();
+    EmptyGroups.walk_program(program, &mut empty);
+    let pragma = |text: &[u8]| {
+        [&b"@mago-expect"[..], b"@mago-ignore"]
+            .iter()
+            .any(|word| text.windows(word.len()).any(|window| window == *word))
+    };
+    let groups = empty.into_iter().map(|span| {
+        spanned(
+            &span,
+            Origin::Tool,
+            "PHP fails to parse an empty attribute group #[], which Mago accepts (P2R-500)"
+                .to_owned(),
+        )
+    });
+    let comments = program
+        .trivia
+        .iter()
+        .filter(|trivia| trivia.kind.is_comment() && pragma(trivia.value))
+        .map(|trivia| {
+            spanned(
+                &trivia.span,
+                Origin::Tool,
+                "a @mago-expect or @mago-ignore comment is not supported, because it would hide a Mago finding that PHP may enforce (P2R-501)".to_owned(),
+            )
+        });
+    groups.chain(comments).collect()
+}
+
+/// Collects the span of each empty attribute group `#[]` (P2R-500).
+struct EmptyGroups;
+
+impl<'ast, 'arena> Walker<'ast, 'arena, Vec<Span>> for EmptyGroups {
+    fn walk_in_attribute_list(&self, list: &'ast AttributeList<'arena>, found: &mut Vec<Span>) {
+        if list.attributes.is_empty() {
+            found.push(list.span());
+        }
     }
 }
 

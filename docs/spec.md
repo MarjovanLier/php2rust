@@ -4765,7 +4765,9 @@ files with the factories included and made no other file stop.
   one group of one attribute whose name PHP resolves to `\Override`
   (`#[\Override]`, or `#[Override]` after `use Override;`, as P2R-221
   reads it) while `Model` or a parent, interface or trait of it at any
-  depth declares a `getRouteKeyName` that is not private. PHP refuses an
+  depth declares a `getRouteKeyName` that is not private, where a class
+  or trait that declares the method itself decides for everything above
+  it (its own method replaces those of its traits and parents). PHP refuses an
   `#[\Override]` that overrides nothing, and it counts neither a trait of
   the model itself nor a private method; it also fails to parse an empty
   `#[]`. Mago reports none of these, and a stand-in `Model` can reach

@@ -40,14 +40,15 @@ impl Converter<'_> {
     }
 
     /// Refuses what keeps a model from converting: the reason it has no struct, and each
-    /// relation, `getRouteKeyName` or scope, which leave it the struct (P2R-401).
+    /// method that leaves it the struct, except a relation method that P2R-470 admits
+    /// (P2R-401, P2R-472).
     pub(super) fn model_shape(&mut self, declaration: &Class<'_>) {
         let key = self.name_key(&declaration.name, declaration.name.value);
-        let reason = self
-            .models
-            .iter()
-            .find(|model| model.key == key)
-            .and_then(|model| model.fields.as_ref().err().cloned());
+        let model = self.models.iter().find(|model| model.key == key);
+        let reason = model.and_then(|model| model.fields.as_ref().err().cloned());
+        let relations = model
+            .map(|model| model.relations.clone())
+            .unwrap_or_default();
         if let Some((span, message)) = reason {
             self.refuse(&span, message);
         }
@@ -72,10 +73,15 @@ impl Converter<'_> {
                 ClassLikeMember::Method(method)
                     if !method.name.value.eq_ignore_ascii_case(b"casts") =>
                 {
-                    self.refuse(
-                        &method.name,
-                        "a method of a model is not supported yet (P2R-401)",
-                    );
+                    match relations.get(&method.name.value.to_ascii_lowercase()) {
+                        // Left out of the output, as casts() is (P2R-470).
+                        Some(Ok(())) => {}
+                        Some(Err(message)) => self.refuse(&method.name, message.clone()),
+                        None => self.refuse(
+                            &method.name,
+                            "a method of a model is not supported yet (P2R-401)",
+                        ),
+                    }
                 }
                 ClassLikeMember::Property(Property::Plain(plain)) => {
                     for item in plain.items.iter() {
@@ -1054,6 +1060,9 @@ pub(super) struct Model {
     pub(super) store: Result<StoreRules, String>,
     /// The lowercase names of the classes its `#[ObservedBy]` names (P2R-460).
     pub(super) observers: Vec<Vec<u8>>,
+    /// Each relation method by its lowercase name: left out of the output, or why it stops
+    /// (P2R-470, P2R-472).
+    pub(super) relations: HashMap<Vec<u8>, Result<(), String>>,
 }
 
 /// A field of a model's struct (P2R-401).
@@ -1149,6 +1158,7 @@ pub(super) fn find(
                 fields,
                 store,
                 observers: observers.unwrap_or_default(),
+                relations: relation_methods(class, names, codebase, included, &overridden, tables),
             }
         })
         .collect();
@@ -1692,7 +1702,7 @@ enum Member {
     CastsMethod(HashMap<String, Option<Kind>>),
     /// Another property or trait use that configures Eloquent.
     LeftOut,
-    /// A relation, `getRouteKeyName` or a scope, which stop but change no read.
+    /// A relation (P2R-470), `getRouteKeyName` or a scope, which change no read.
     KeepsReads,
     Other,
 }
@@ -1809,6 +1819,206 @@ fn names_attribute(hint: &Hint<'_>, names: &ResolvedNames<'_>) -> bool {
         Hint::Parenthesized(inner) => names_attribute(inner.hint, names),
         _ => false,
     }
+}
+
+/// Laravel's namespace of relation classes, lowercase.
+const RELATIONS: &[u8] = b"illuminate\\database\\eloquent\\relations\\";
+
+/// The relation classes that P2R-470 admits, by lowercase short name, each with the helper
+/// that builds it.
+const RELATION_HELPERS: [(&[u8], &[u8]); 9] = [
+    (b"belongsto", b"belongsTo"),
+    (b"hasmany", b"hasMany"),
+    (b"hasone", b"hasOne"),
+    (b"belongstomany", b"belongsToMany"),
+    (b"hasmanythrough", b"hasManyThrough"),
+    (b"hasonethrough", b"hasOneThrough"),
+    (b"morphto", b"morphTo"),
+    (b"morphmany", b"morphMany"),
+    (b"morphone", b"morphOne"),
+];
+
+/// Each relation method of a model by its lowercase name: `Ok` when P2R-470 admits it, or
+/// the first condition it fails. A method that P2R-401 treats otherwise, or that is no
+/// relation method, is not in the map (P2R-470, P2R-472).
+fn relation_methods(
+    class: &Class<'_>,
+    names: &ResolvedNames<'_>,
+    codebase: &CodebaseMetadata,
+    included: &HashSet<FileId>,
+    overridden: &HashSet<Vec<u8>>,
+    tables: Option<&Tables>,
+) -> HashMap<Vec<u8>, Result<(), String>> {
+    let table = class
+        .members
+        .iter()
+        .filter_map(|member| match model_member(member, names, overridden) {
+            Member::Table(table) => Some(table),
+            _ => None,
+        })
+        .next_back()
+        .unwrap_or_else(|| table_name(&String::from_utf8_lossy(class.name.value)));
+    // A model whose table is unknown takes no struct and stops (P2R-401).
+    let columns: &[Column] = match tables.and_then(|tables| tables.get(&table)) {
+        Some(Table::Known(columns)) => columns,
+        _ => &[],
+    };
+    let mut relations = HashMap::new();
+    for member in class.members.iter() {
+        let ClassLikeMember::Method(method) = member else {
+            continue;
+        };
+        let lower = method.name.value.to_ascii_lowercase();
+        let relation = method
+            .return_type_hint
+            .as_ref()
+            .is_some_and(|hint| names_relation(&hint.hint, names))
+            || this_call(method).is_some();
+        if relation
+            && lower != b"getroutekeyname"
+            && matches!(model_member(member, names, overridden), Member::KeepsReads)
+        {
+            relations
+                .entry(lower)
+                .or_insert_with(|| relation_verdict(method, names, codebase, included, columns));
+        }
+    }
+    relations
+}
+
+/// `Ok` for a relation method that P2R-470 admits, or the first condition it fails
+/// (P2R-472).
+fn relation_verdict(
+    method: &Method<'_>,
+    names: &ResolvedNames<'_>,
+    codebase: &CodebaseMetadata,
+    included: &HashSet<FileId>,
+    columns: &[Column],
+) -> Result<(), String> {
+    // After create Laravel reads a column the map left out through a relation of its name.
+    if let Some(column) = columns.iter().find(|column| {
+        column
+            .name
+            .as_bytes()
+            .eq_ignore_ascii_case(method.name.value)
+    }) {
+        return Err(format!(
+            "a relation method named like the column {} of its table is not supported, because after create Laravel reads that column through the relation when the map leaves it out (P2R-472)",
+            column.name
+        ));
+    }
+    let refused = if !method.parameter_list.parameters.is_empty() {
+        Some("a relation method with a parameter is not supported (P2R-472)")
+    } else if !matches!(method.modifiers.as_slice(), [Modifier::Public(_)]) {
+        Some("a relation method is supported only with the one modifier public (P2R-472)")
+    } else if !method.attribute_lists.is_empty() {
+        Some("an attribute on a relation method is not supported, #[\\Override] too (P2R-472)")
+    } else if method.ampersand.is_some() {
+        Some("a relation method that returns by reference is not supported (P2R-472)")
+    } else {
+        None
+    };
+    if let Some(message) = refused {
+        return Err(message.to_owned());
+    }
+    let helper = match method.return_type_hint.as_ref().map(|hint| &hint.hint) {
+        Some(
+            Hint::Nullable(_) | Hint::Union(_) | Hint::Intersection(_) | Hint::Parenthesized(_),
+        ) => {
+            return Err(
+                "a relation method with a nullable, union or intersection return type is not supported (P2R-472)"
+                    .to_owned(),
+            );
+        }
+        Some(Hint::Identifier(identifier)) => {
+            let class = resolved(names, identifier, identifier.value());
+            let declared = codebase
+                .get_class_like(&class)
+                .is_some_and(|found| included.contains(&found.span.file_id));
+            class
+                .strip_prefix(RELATIONS)
+                .and_then(|short| RELATION_HELPERS.iter().find(|(name, _)| *name == short))
+                .filter(|_| declared)
+                .map(|(_, helper)| *helper)
+        }
+        _ => None,
+    };
+    let Some(helper) = helper else {
+        return Err("a relation method is supported only with the return type BelongsTo, HasMany, HasOne, BelongsToMany, HasManyThrough, HasOneThrough, MorphTo, MorphMany or MorphOne of Illuminate\\Database\\Eloquent\\Relations, declared in an included file (P2R-472)".to_owned());
+    };
+    let Some((called, arguments)) = this_call(method) else {
+        return Err(
+            "the body of a relation method is supported only as one return $this-><helper>(..); (P2R-472)"
+                .to_owned(),
+        );
+    };
+    if called != helper {
+        return Err(format!(
+            "a relation method of this return type is supported only as return $this->{}(..); (P2R-472)",
+            String::from_utf8_lossy(helper)
+        ));
+    }
+    let admitted = |argument: &Argument<'_>| match argument {
+        Argument::Positional(positional) if positional.ellipsis.is_none() => {
+            match positional.value {
+                Expression::Literal(Literal::String(_)) => true,
+                Expression::Access(Access::ClassConstant(access)) => {
+                    matches!(&access.constant, ClassLikeConstantSelector::Identifier(constant)
+                        if constant.value.eq_ignore_ascii_case(b"class"))
+                        && matches!(access.class, Expression::Identifier(identifier)
+                            if codebase.class_exists(&resolved(names, identifier, identifier.value())))
+                }
+                _ => false,
+            }
+        }
+        _ => false,
+    };
+    if !arguments.arguments.iter().all(admitted) {
+        return Err("an argument of a relation helper is supported only as a positional string literal or X::class naming a class (P2R-472)".to_owned());
+    }
+    Ok(())
+}
+
+/// True for a type that names a class of Laravel's relations, also inside `?`, a union or
+/// an intersection (P2R-472).
+fn names_relation(hint: &Hint<'_>, names: &ResolvedNames<'_>) -> bool {
+    match hint {
+        Hint::Identifier(identifier) => {
+            resolved(names, identifier, identifier.value()).starts_with(RELATIONS)
+        }
+        Hint::Nullable(nullable) => names_relation(nullable.hint, names),
+        Hint::Union(union) => {
+            names_relation(union.left, names) || names_relation(union.right, names)
+        }
+        Hint::Intersection(intersection) => {
+            names_relation(intersection.left, names) || names_relation(intersection.right, names)
+        }
+        Hint::Parenthesized(inner) => names_relation(inner.hint, names),
+        _ => false,
+    }
+}
+
+/// The name and arguments of the call in a body that is one `return $this-><name>(..);`.
+fn this_call<'m, 'a>(method: &'m Method<'a>) -> Option<(&'a [u8], &'m ArgumentList<'a>)> {
+    let MethodBody::Concrete(block) = &method.body else {
+        return None;
+    };
+    let [
+        Statement::Return(Return {
+            value: Some(value), ..
+        }),
+    ] = block.statements.as_slice()
+    else {
+        return None;
+    };
+    let Expression::Call(Call::Method(call)) = value else {
+        return None;
+    };
+    let ClassLikeMemberSelector::Identifier(name) = &call.method else {
+        return None;
+    };
+    matches!(call.object, Expression::Variable(Variable::Direct(this)) if this.name == b"$this")
+        .then_some((name.value, &call.argument_list))
 }
 
 /// The lowercase names of the methods of Eloquent's model and its traits at any depth,

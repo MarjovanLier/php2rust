@@ -67,6 +67,19 @@ final class Positional extends Model
     }
 }
 
+// The form has no &; before, only a Mago finding stopped this one.
+final class ByReference extends Model
+{
+    protected $table = 'codes';
+
+    public $timestamps = false;
+
+    protected function &casts(): array
+    {
+        return ['code' => 'string'];
+    }
+}
+
 // PHP accepts this one, but the form has no attribute, so it stops too.
 final class Marked extends Model
 {

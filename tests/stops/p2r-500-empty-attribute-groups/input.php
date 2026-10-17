@@ -6,8 +6,8 @@ namespace App;
 
 use Illuminate\Database\Eloquent\Model;
 
-// PHP fails to parse an empty attribute group #[], which Mago accepts (P2R-500): on the
-// casts() method of a model, which the output leaves out, and on a function.
+// PHP fails to parse an empty attribute group #[], which Mago accepts (P2R-500): on a
+// function, and on the casts() method of a model, where P2R-401's wider span prints.
 final class Code extends Model
 {
     public $timestamps = false;

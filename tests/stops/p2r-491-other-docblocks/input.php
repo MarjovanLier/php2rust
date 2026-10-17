@@ -11,6 +11,10 @@ use Illuminate\Database\Eloquent\Model;
 // property that P2R-401 does not read, and on a class that is no model.
 final class Code extends Model
 {
+    // The parent's native type left out, which PHP refuses; Mago puts this variant of the
+    // finding inside the declaration.
+    protected $hidden = ['code'];
+
     /**
      * @var array<string, string>
      */

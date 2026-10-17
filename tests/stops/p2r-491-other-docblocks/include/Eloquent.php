@@ -27,15 +27,23 @@ trait HasAttributes
     protected $appends = [];
 }
 
+// Unlike Laravel's, this trait gives $hidden a native type, which a model must repeat.
+trait HidesAttributes
+{
+    protected array $hidden = [];
+}
+
 namespace Illuminate\Database\Eloquent;
 
 use Illuminate\Database\Eloquent\Concerns\GuardsAttributes;
 use Illuminate\Database\Eloquent\Concerns\HasAttributes;
+use Illuminate\Database\Eloquent\Concerns\HidesAttributes;
 
 abstract class Model
 {
     use GuardsAttributes;
     use HasAttributes;
+    use HidesAttributes;
 
     /** @var array<string, mixed> */
     private array $attributes = [];

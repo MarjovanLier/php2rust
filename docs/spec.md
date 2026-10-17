@@ -238,7 +238,7 @@ requirement IDs.
   the same stdout bytes, the same output file bytes and the same stderr
   bytes.
 - **P2R-07** Only the constructs that sections 3 to 5, 11 to 19 and 21 to
-  51 list as converting may convert. Any other construct MUST stop the conversion,
+  52 list as converting may convert. Any other construct MUST stop the conversion,
   which means it is reported as a problem under P2R-03. Examples that stop
   in version 1 (section 16 converts `namespace`, `use` and class
   constants, and section 17 two casts):
@@ -619,7 +619,7 @@ requirement IDs.
   stderr MUST equal `expected.txt`, its stdout MUST be empty, no output file
   may be created, and every file in the folder MUST be unchanged.
 - **P2R-75** Every requirement ID from P2R-07 to P2R-49 and from P2R-100 to
-  P2R-501 MUST appear in the name of at least one case or stop folder. A
+  P2R-510 MUST appear in the name of at least one case or stop folder. A
   test MUST check this from the folder names.
 - **P2R-76** One command named in the README MUST rewrite every `expected.rs`
   and `expected.txt` from the current tool output; CI MUST NOT run it. A
@@ -3668,6 +3668,7 @@ forms of those attributes that the app uses.
   tag or nothing (Mago
   takes a tag of `Data` over a real method of its trait or interface).
   Nothing of it enters the Rust output; its docblock is not part of it.
+  Its body must also keep to the closed list of P2R-510.
   Its signature must keep to forms that PHP always compiles: each
   parameter or return type is a class name, `int`, `float`, `string`,
   `bool`, `array`, `iterable` or `object`, with or without `?`, or
@@ -4849,6 +4850,53 @@ findings as its problems (P2R-11).
   inline `@var` change the types it infers, and the tool tracks null and
   false itself (P2R-106).
 
+## 52. Data hook bodies kept to a closed list (milestone 2, slice 43, draft)
+
+The review of slice 41 found 18 forms in the body of a Data hook
+(P2R-380) that PHP rejects when it compiles the file, that Mago does
+not report, and that P2R-380's list of refused forms does not name,
+such as a static variable declared twice, `goto` to a label that does
+not exist, `unset($this)`, a positional argument after a named one,
+`[] = $a`, a `match` with two `default` arms and a nowdoc with a bad
+indentation; main converts a file with any of them. That list has not
+closed after several slices, so this section turns it around: a hook
+body converts only when every part of it is on a closed list of forms
+that PHP compiles. The list holds the forms that the 15 hooks of the
+Laravel app and the hooks of P2R-380's case folder write.
+
+- **P2R-510** The body of a hook that P2R-380 leaves out MUST hold only
+  statements of this list followed by one `return` of a value, on a
+  method whose return type is not `void` or `never`. The statements are
+  a call; `if (..) { .. }` without `elseif` or `else`; `foreach (.. as
+  $v) { .. }` and `foreach (.. as $k => $v) { .. }`, whose key and value
+  are plain variables other than a superglobal; `continue;` inside a
+  `foreach` of the same function; and `return;` in a closure. Each ends
+  with `;` or with its braces. The expressions are a literal; a
+  double-quoted string whose parts are text and plain variables (`$x`,
+  `{$x}`); an array literal `[..]` of values and `key => value` pairs,
+  with no `...`, `&` or empty element; a plain variable; a read of a
+  property (`->` or `?->` with a plain name), of an array key (`$a[..]`
+  with an index) or of a class constant (`C::NAME`, `C::class`); a call
+  of a function by a plain name or a plain variable, of a method (`->`
+  or `?->`), or of a static method of a plain class name, `self` or
+  `static`, each with a plain method name and positional arguments
+  without `...`; `new C` or `new C(..)` with positional arguments
+  without `...`; `!`; the operators `&&`, `||`, `??`, `===`, `!==`,
+  `==`, `!=`, `<`, `<=`, `>`, `>=` and `.`; and a closure, `function` or
+  `static function`, with no attribute, `&` or `use`, the return type
+  `void`, and parameters that each have a type P2R-380 allows a hook
+  parameter or `callable`, no attribute, modifier, `&`, `...` or default,
+  a name other than `$this` or a superglobal, and no name twice. A plain
+  name, of a function or a class, is a name other than `self`, `parent`
+  and `static`, and `C` above is one; a plain variable is `$name` other
+  than `$this`. Anything
+  else stops with a message that names the list, pointing at the first
+  part outside it. The check runs after P2R-380's, so a form that both
+  refuse prints P2R-380's line, and P2R-380's refused forms (such as a
+  string escape PHP rejects, `\self` or `$http_response_header`) still
+  stop inside the list. A hook that stops is not left out, so the Mago
+  findings that P2R-380 drops inside a left-out hook print as well.
+
 ## Spec checklist
 
 - [x] No `[NEEDS CLARIFICATION]` markers left. Decided in review: problems
@@ -4857,7 +4905,7 @@ findings as its problems (P2R-11).
   takes its element type from the same variable or the declared type it
   flows into (P2R-21); a file of only functions becomes a library (P2R-33).
 - [x] Every requirement is testable: P2R-07 to P2R-49 and P2R-100 to
-  P2R-501 by case and stop folders (P2R-75 enforces this), P2R-01 to P2R-06
+  P2R-510 by case and stop folders (P2R-75 enforces this), P2R-01 to P2R-06
   by error folders and tests, P2R-50 to P2R-52 by P2R-71, the rest by CI or
   a file in the
   repository. Stated review concerns (P2R-05 partial write, P2R-72 case
@@ -4870,16 +4918,10 @@ findings as its problems (P2R-11).
   included collection classes behave as Laravel 12.35.1's do in
   `count()`, `isEmpty()`, `isNotEmpty()`, `first()` and iteration, with
   the element type as their second template parameter, which the tool
-  does not check, and in P2R-380 a PHP
-  compile-time error, deprecation or warning in the body of a left-out
-  method that Mago does not report and P2R-380 does not list, such as
-  `yield` in a method that returns `array`, `unset($this)`, a closure
-  parameter named `$this` or with a default that names `static`, a
-  closure parameter named like a variable of its `use` list, `continue`
-  that targets a `switch`, `goto` into a loop, `[] = [1]`, an
-  assignment to `$GLOBALS`, a static variable
-  declared twice or an attribute that PHP
-  rejects there, because the tool does not read that body, and in P2R-400
+  does not check, and in P2R-510 a PHP
+  compile-time error, deprecation or warning inside a form on its list
+  that its checks and P2R-380's do not name, because the tool reads
+  nothing else of a left-out hook, and in P2R-400
   a macro of the query builder in a chain on `DB::table(..)`, whose body
   the tool does not read, a Carbon macro on a `now()` chain, a callable
   passed as a string or a class's array into such a chain, in P2R-410

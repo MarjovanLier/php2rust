@@ -4742,10 +4742,10 @@ leaves out `casts()`, while every use of the relation keeps stopping.
 
 ## 49. Route keys and chained relations on models (milestone 2, slice 39)
 
-After section 48, thirteen models of the app still stop on
+After section 48, thirteen models of the app still show a stop on
 `#[Override] public function getRouteKeyName(): string { return 'uuid';
-}` (`User` declares one too but extends `Authenticatable`), and eight
-relation methods on a call chained after the helper, such
+}` (`User` declares one too but extends `Authenticatable`, and
+`EventLog`'s is hidden by its P2R-173 stop), and eight relation methods on a call chained after the helper, such
 as `->withTimestamps()`. Laravel 12.35.1 calls `getRouteKeyName` only
 from route model binding (`resolveRouteBindingQuery`,
 `resolveChildRouteBinding`, `HasUniqueStringIds`), `getRouteKey()` and
@@ -4764,10 +4764,10 @@ files with the factories included and made no other file stop.
   literal whose escapes P2R-49 accepts, and its only attribute, if any,
   is one whose name PHP resolves to `\Override` (`#[\Override]`, or
   `#[Override]` after `use Override;`, as P2R-221 reads it) while `Model`
-  or a trait of P2R-401's override set declares `getRouteKeyName` (PHP
-  refuses an `#[\Override]` that overrides nothing, Mago does not report
-  it, and a stand-in `Model` can reach it). A call of it still stops
-  (P2R-135).
+  or a trait that `Model` uses at any depth declares `getRouteKeyName`
+  (PHP refuses an `#[\Override]` that overrides nothing and does not
+  count a trait of the model itself, Mago does not report it, and a
+  stand-in `Model` can reach it). A call of it still stops (P2R-135).
 - **P2R-481** A link (condition 9 of P2R-470) is one of these, written
   in exactly this letter case with positional arguments that are not
   unpacked: `withTimestamps()` with no argument, `withPivot('<a>', ..)`

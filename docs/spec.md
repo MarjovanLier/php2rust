@@ -4697,7 +4697,12 @@ leaves out `casts()`, while every use of the relation keeps stopping.
   of a relation as a property (`$m->journalLines`, which has no field of
   the struct, P2R-134) and every other use of the relation MUST still
   stop. A method of another form keeps P2R-401's stop.
-- **P2R-472** These stop, with a message that names the form: a relation
+- **P2R-472** A method of a model whose declared return type resolves to
+  a class of `\Illuminate\Database\Eloquent\Relations`, or whose body is
+  one `return $this-><name>(..);`, and that P2R-470 does not admit, is a
+  relation method that stops with a message that names the first
+  condition it fails; any other method keeps P2R-401's message. These
+  are such conditions: a relation
   method named like a column of its table in any letter case (after
   `create` Laravel reads the relation in place of a column the map left
   out), with a parameter, any modifier other than `public`, an attribute

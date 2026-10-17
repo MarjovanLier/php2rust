@@ -4740,7 +4740,7 @@ leaves out `casts()`, while every use of the relation keeps stopping.
   keep P2R-401's rule and message; `getRouteKeyName` follows P2R-480 and
   P2R-482.
 
-## 49. Route keys and chained relations on models (milestone 2, slice 39, draft)
+## 49. Route keys and chained relations on models (milestone 2, slice 39)
 
 After section 48, thirteen models of the app still stop on
 `#[Override] public function getRouteKeyName(): string { return 'uuid';

@@ -97,6 +97,47 @@ final class Referenced extends Model
     }
 }
 
+// An empty attribute group, which PHP fails to parse and Mago accepts.
+final class EmptyGroup extends Model
+{
+    protected $table = 'items';
+
+    #[]
+    public function getRouteKeyName(): string
+    {
+        return 'uuid';
+    }
+}
+
+// An admitted getRouteKeyName leaves the output, and a call of it still stops.
+final class Plain extends Model
+{
+    protected $table = 'items';
+
+    public function getRouteKeyName(): string
+    {
+        return 'uuid';
+    }
+}
+
+function keyOf(Plain $plain): string
+{
+    return $plain->getRouteKeyName();
+}
+
+// #[Override] without `use Override;` resolves to App\Override, another attribute, so
+// P2R-401's rule applies.
+final class Unresolved extends Model
+{
+    protected $table = 'items';
+
+    #[Override]
+    public function getRouteKeyName(): string
+    {
+        return 'uuid';
+    }
+}
+
 // Another attribute keeps P2R-401's rule, which takes the struct away.
 final class Marked extends Model
 {
@@ -165,5 +206,32 @@ final class Links extends Model
     public function helperFirst(): HasMany
     {
         return $this->hasmany(Links::class)->latest();
+    }
+
+    // Condition 11 comes before condition 12.
+    public function argumentFirst(): HasMany
+    {
+        return $this->hasMany(self::class)->latest();
+    }
+
+    // The other pivot links on another type, a constant in with(), and a dynamic name.
+    public function pivotColumns(): HasMany
+    {
+        return $this->hasMany(Links::class)->withPivot('a');
+    }
+
+    public function pivotNull(): HasMany
+    {
+        return $this->hasMany(Links::class)->wherePivotNull('a');
+    }
+
+    public function withConstant(): HasMany
+    {
+        return $this->hasMany(Links::class)->with(PHP_EOL);
+    }
+
+    public function dynamic(): HasMany
+    {
+        return $this->hasMany(Links::class)->{'latest'}();
     }
 }

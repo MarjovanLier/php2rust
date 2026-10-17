@@ -41,6 +41,6 @@ input.php:206:21: an argument of a relation helper is supported only as a positi
 input.php:212:21: an argument of a relation helper is supported only as a positional string literal whose escapes PHP accepts (P2R-49) or X::class naming a class (P2R-472)
 input.php:217:21: an argument of a relation helper is supported only as a positional string literal whose escapes PHP accepts (P2R-49) or X::class naming a class (P2R-472)
 input.php:222:21: a method of a model is not supported yet (P2R-401)
-input.php:227:21: getRouteKeyName is supported only as public function getRouteKeyName(): string { return '<column>'; }, with #[\Override] or no attribute (P2R-482)
+input.php:227:21: getRouteKeyName is supported only as public function getRouteKeyName(): string { return '<text>'; } with a string whose escapes PHP accepts, and with no attribute or with #[\Override] when Model declares a getRouteKeyName that is not private (P2R-482)
 input.php:238:5: PHP may read an attribute of a model through this member (an accessor, an override of a method of Model or of a trait the model uses, another property, constant or trait), so the model takes no struct (P2R-401)
 input.php:252:5: PHP may read an attribute of a model through this member (an accessor, an override of a method of Model or of a trait the model uses, another property, constant or trait), so the model takes no struct (P2R-401)

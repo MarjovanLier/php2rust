@@ -4790,7 +4790,7 @@ files with the factories included and made no other file stop.
   such as a `getRouteKeyName` with another attribute, keeps P2R-401's
   rule and message.
 
-## 50. Docblock types of model configuration (milestone 2, slice 40, draft)
+## 50. Docblock types of model configuration (milestone 2, slice 40)
 
 After section 49, nine models of the app stop only on Mago's
 `incompatible-property-type` finding. They write `/** @var list<string>

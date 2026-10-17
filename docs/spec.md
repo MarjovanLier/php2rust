@@ -238,7 +238,7 @@ requirement IDs.
   the same stdout bytes, the same output file bytes and the same stderr
   bytes.
 - **P2R-07** Only the constructs that sections 3 to 5, 11 to 19 and 21 to
-  50 list as converting may convert. Any other construct MUST stop the conversion,
+  51 list as converting may convert. Any other construct MUST stop the conversion,
   which means it is reported as a problem under P2R-03. Examples that stop
   in version 1 (section 16 converts `namespace`, `use` and class
   constants, and section 17 two casts):
@@ -619,7 +619,7 @@ requirement IDs.
   stderr MUST equal `expected.txt`, its stdout MUST be empty, no output file
   may be created, and every file in the folder MUST be unchanged.
 - **P2R-75** Every requirement ID from P2R-07 to P2R-49 and from P2R-100 to
-  P2R-491 MUST appear in the name of at least one case or stop folder. A
+  P2R-501 MUST appear in the name of at least one case or stop folder. A
   test MUST check this from the folder names.
 - **P2R-76** One command named in the README MUST rewrite every `expected.rs`
   and `expected.txt` from the current tool output; CI MUST NOT run it. A
@@ -4820,6 +4820,27 @@ files with the factories included and made no other file stop.
   model, on another property of a model, and on a model property that
   P2R-401 does not read, which takes the struct away.
 
+## 51. Input that PHP refuses and Mago lets through (milestone 2, slice 41, draft)
+
+The reviews of slices 39 and 40 found two ways in which input that PHP
+refuses reaches the output. Mago's parser accepts an empty attribute
+group `#[]`, which PHP fails to parse; inside a member that the output
+leaves out, such as `casts()` (P2R-401), nothing else sees it, so main
+converts such a file. And Mago's analyser obeys a `@mago-expect` or
+`@mago-ignore` comment by dropping the findings it names, so the
+comment can hide a finding that PHP enforces, such as a native type that
+a model leaves out or a missing class, while the tool reports Mago's
+findings as its problems (P2R-11).
+
+- **P2R-500** An empty attribute group `#[]`, anywhere in the input,
+  MUST stop the conversion with a message that says PHP fails to parse
+  it.
+- **P2R-501** A comment in the input whose text contains `@mago-expect`
+  or `@mago-ignore` MUST stop the conversion with a message that says it
+  would hide a Mago finding, because the tool cannot tell which hidden
+  finding PHP enforces. Such a comment in an included file is not read
+  (P2R-340).
+
 ## Spec checklist
 
 - [x] No `[NEEDS CLARIFICATION]` markers left. Decided in review: problems
@@ -4828,7 +4849,7 @@ files with the factories included and made no other file stop.
   takes its element type from the same variable or the declared type it
   flows into (P2R-21); a file of only functions becomes a library (P2R-33).
 - [x] Every requirement is testable: P2R-07 to P2R-49 and P2R-100 to
-  P2R-491 by case and stop folders (P2R-75 enforces this), P2R-01 to P2R-06
+  P2R-501 by case and stop folders (P2R-75 enforces this), P2R-01 to P2R-06
   by error folders and tests, P2R-50 to P2R-52 by P2R-71, the rest by CI or
   a file in the
   repository. Stated review concerns (P2R-05 partial write, P2R-72 case

@@ -208,6 +208,17 @@ final class Author extends Model
         return $this->hasMany(PHP_EOL);
     }
 
+    // PHP refuses to parse the first escape and wraps the second; Mago reads both.
+    public function badEscape(): HasMany
+    {
+        return $this->hasMany(Post::class, "\u{zz}");
+    }
+
+    public function octalEscape(): HasMany
+    {
+        return $this->hasMany(Post::class, "\400");
+    }
+
     public function label(): string
     {
         return 'author';

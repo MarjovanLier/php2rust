@@ -74,7 +74,7 @@ impl Converter<'_> {
                     if !method.name.value.eq_ignore_ascii_case(b"casts") =>
                 {
                     match relations.get(&method.name.value.to_ascii_lowercase()) {
-                        // Left out of the output, as casts() is (P2R-470).
+                        // Left out of the output, as casts() is (P2R-470, P2R-480).
                         Some(Ok(())) => {}
                         Some(Err(message)) => self.refuse(&method.name, message.clone()),
                         None => self.refuse(
@@ -1060,8 +1060,8 @@ pub(super) struct Model {
     pub(super) store: Result<StoreRules, String>,
     /// The lowercase names of the classes its `#[ObservedBy]` names (P2R-460).
     pub(super) observers: Vec<Vec<u8>>,
-    /// Each relation method by its lowercase name: left out of the output, or why it stops
-    /// (P2R-470, P2R-472).
+    /// Each relation method, and `getRouteKeyName`, by its lowercase name: left out of the
+    /// output, or why it stops (P2R-470, P2R-472, P2R-480, P2R-482).
     pub(super) relations: HashMap<Vec<u8>, Result<(), String>>,
 }
 
@@ -1838,9 +1838,9 @@ const RELATION_HELPERS: [(&[u8], &[u8]); 9] = [
     (b"morphone", b"morphOne"),
 ];
 
-/// Each relation method of a model by its lowercase name: `Ok` when P2R-470 admits it, or
-/// the first condition it fails. A method that P2R-401 treats otherwise, or that is no
-/// relation method, is not in the map (P2R-470, P2R-472).
+/// Each relation method of a model, and `getRouteKeyName`, by its lowercase name: `Ok` when
+/// P2R-470 or P2R-480 admits it, or why it stops. A method that P2R-401 treats otherwise, or
+/// that is no relation method, is not in the map (P2R-470, P2R-472, P2R-480, P2R-482).
 fn relation_methods(
     class: &Class<'_>,
     names: &ResolvedNames<'_>,
@@ -1869,15 +1869,20 @@ fn relation_methods(
             continue;
         };
         let lower = method.name.value.to_ascii_lowercase();
+        // P2R-401 takes the struct away for another kind of method, and its rule wins.
+        if !matches!(model_member(member, names, overridden), Member::KeepsReads) {
+            continue;
+        }
         let relation = method
             .return_type_hint
             .as_ref()
             .is_some_and(|hint| names_relation(&hint.hint, names))
             || this_call(method).is_some();
-        if relation
-            && lower != b"getroutekeyname"
-            && matches!(model_member(member, names, overridden), Member::KeepsReads)
-        {
+        if lower == b"getroutekeyname" {
+            relations
+                .entry(lower)
+                .or_insert_with(|| route_key_verdict(method, overridden));
+        } else if relation {
             relations
                 .entry(lower)
                 .or_insert_with(|| relation_verdict(method, names, codebase, included, columns));
@@ -1954,9 +1959,9 @@ fn relation_verdict(
     let Some(helper) = helper else {
         return Err("a relation method is supported only with the return type BelongsTo, HasMany, HasOne, BelongsToMany, HasManyThrough, HasOneThrough, MorphTo, MorphMany or MorphOne of Illuminate\\Database\\Eloquent\\Relations, declared in an included file (P2R-472)".to_owned());
     };
-    let Some((called, arguments)) = this_call(method) else {
+    let Some((called, arguments, links)) = this_call(method) else {
         return Err(
-            "the body of a relation method is supported only as one return $this-><helper>(..); (P2R-472)"
+            "the body of a relation method is supported only as one return $this-><helper>(..);, with the links of P2R-481 after the helper (P2R-472)"
                 .to_owned(),
         );
     };
@@ -1969,15 +1974,7 @@ fn relation_verdict(
     let admitted = |argument: &Argument<'_>| match argument {
         Argument::Positional(positional) if positional.ellipsis.is_none() => {
             match positional.value {
-                // PHP refuses to parse an escape such as "\u{zz}", which Mago accepts, and
-                // a left-out method never reaches P2R-49's check of it.
-                Expression::Literal(Literal::String(string)) => {
-                    string
-                        .value
-                        .is_some_and(|bytes| std::str::from_utf8(bytes).is_ok())
-                        && !(matches!(string.kind, LiteralStringKind::DoubleQuoted)
-                            && printer::octal_overflow(string.raw))
-                }
+                Expression::Literal(Literal::String(string)) => plain_string(string),
                 Expression::Access(Access::ClassConstant(access)) => {
                     matches!(&access.constant, ClassLikeConstantSelector::Identifier(constant)
                         if constant.value.eq_ignore_ascii_case(b"class"))
@@ -1991,6 +1988,15 @@ fn relation_verdict(
     };
     if !arguments.arguments.iter().all(admitted) {
         return Err("an argument of a relation helper is supported only as a positional string literal whose escapes PHP accepts (P2R-49) or X::class naming a class (P2R-472)".to_owned());
+    }
+    if let Some(link) = links.iter().find(|link| !admitted_link(link, helper)) {
+        let name = match &link.method {
+            ClassLikeMemberSelector::Identifier(name) => String::from_utf8_lossy(name.value),
+            _ => "a dynamic name".into(),
+        };
+        return Err(format!(
+            "the call {name}(..) chained after a relation helper is not supported; only withTimestamps(), withPivot('..') and wherePivotNull('..') after belongsToMany, and limit(n) and with('..'), each with literal arguments, are (P2R-482)"
+        ));
     }
     Ok(())
 }
@@ -2014,8 +2020,12 @@ fn names_relation(hint: &Hint<'_>, names: &ResolvedNames<'_>) -> bool {
     }
 }
 
-/// The name and arguments of the call in a body that is one `return $this-><name>(..);`.
-fn this_call<'m, 'a>(method: &'m Method<'a>) -> Option<(&'a [u8], &'m ArgumentList<'a>)> {
+/// The name and arguments of the call on `$this` in a body that is one `return
+/// $this-><name>(..);`, with the calls chained after it in source order (P2R-470, P2R-481).
+#[allow(clippy::type_complexity)]
+fn this_call<'a>(
+    method: &Method<'a>,
+) -> Option<(&'a [u8], &'a ArgumentList<'a>, Vec<&'a MethodCall<'a>>)> {
     let MethodBody::Concrete(block) = &method.body else {
         return None;
     };
@@ -2027,14 +2037,96 @@ fn this_call<'m, 'a>(method: &'m Method<'a>) -> Option<(&'a [u8], &'m ArgumentLi
     else {
         return None;
     };
-    let Expression::Call(Call::Method(call)) = value else {
-        return None;
+    let mut expression: &'a Expression<'a> = value;
+    let mut links = Vec::new();
+    loop {
+        let Expression::Call(Call::Method(call)) = expression else {
+            return None;
+        };
+        if matches!(call.object, Expression::Variable(Variable::Direct(this)) if this.name == b"$this")
+        {
+            let ClassLikeMemberSelector::Identifier(name) = &call.method else {
+                return None;
+            };
+            links.reverse();
+            return Some((name.value, &call.argument_list, links));
+        }
+        links.push(call);
+        expression = call.object;
+    }
+}
+
+/// True for a call chained after the relation helper `helper` that P2R-481 admits.
+fn admitted_link(link: &MethodCall<'_>, helper: &[u8]) -> bool {
+    let ClassLikeMemberSelector::Identifier(name) = &link.method else {
+        return false;
     };
-    let ClassLikeMemberSelector::Identifier(name) = &call.method else {
-        return None;
+    let mut values = Vec::new();
+    for argument in link.argument_list.arguments.iter() {
+        match argument {
+            Argument::Positional(positional) if positional.ellipsis.is_none() => {
+                values.push(positional.value);
+            }
+            _ => return false,
+        }
+    }
+    let text = |value: &&Expression<'_>| matches!(value, Expression::Literal(Literal::String(string)) if plain_string(string));
+    let pivot = helper == b"belongsToMany";
+    match name.value {
+        b"withTimestamps" => pivot && values.is_empty(),
+        b"withPivot" => pivot && !values.is_empty() && values.iter().all(text),
+        b"wherePivotNull" => pivot && values.len() == 1 && values.iter().all(text),
+        b"limit" => matches!(
+            values.as_slice(),
+            [Expression::Literal(Literal::Integer(_))]
+        ),
+        b"with" => !values.is_empty() && values.iter().all(text),
+        _ => false,
+    }
+}
+
+/// True for a string literal whose escapes P2R-49 accepts. PHP refuses to parse an escape
+/// such as "\u{zz}", which Mago accepts, and a left-out method never reaches P2R-49.
+fn plain_string(string: &LiteralString<'_>) -> bool {
+    string
+        .value
+        .is_some_and(|bytes| std::str::from_utf8(bytes).is_ok())
+        && !(matches!(string.kind, LiteralStringKind::DoubleQuoted)
+            && printer::octal_overflow(string.raw))
+}
+
+/// `Ok` for a `getRouteKeyName` that P2R-480 admits, or the message of P2R-482. Its one
+/// attribute, if any, resolves to `\Override` here, as P2R-401 refuses any other.
+fn route_key_verdict(method: &Method<'_>, overridden: &HashSet<Vec<u8>>) -> Result<(), String> {
+    let attributes = method
+        .attribute_lists
+        .iter()
+        .flat_map(|list| list.attributes.iter())
+        .count();
+    // PHP refuses an #[\Override] that overrides nothing, as on a stand-in Model.
+    let attribute = match attributes {
+        0 => true,
+        1 => overridden.contains(b"getroutekeyname".as_slice()),
+        _ => false,
     };
-    matches!(call.object, Expression::Variable(Variable::Direct(this)) if this.name == b"$this")
-        .then_some((name.value, &call.argument_list))
+    let body = matches!(&method.body, MethodBody::Concrete(block)
+        if matches!(block.statements.as_slice(), [Statement::Return(Return {
+            value: Some(Expression::Literal(Literal::String(string))), ..
+        })] if plain_string(string)));
+    if attribute
+        && body
+        && matches!(method.modifiers.as_slice(), [Modifier::Public(_)])
+        && method.parameter_list.parameters.is_empty()
+        && method.ampersand.is_none()
+        && matches!(
+            method.return_type_hint.as_ref().map(|hint| &hint.hint),
+            Some(Hint::String(_))
+        )
+    {
+        Ok(())
+    } else {
+        Err("getRouteKeyName is supported only as public function getRouteKeyName(): string { return '<column>'; }, with #[\\Override] or no attribute (P2R-482)".to_owned())
+    }
 }
 
 /// The lowercase names of the methods of Eloquent's model, of the traits the model `class`

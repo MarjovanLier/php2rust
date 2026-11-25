@@ -1913,7 +1913,7 @@ fn relation_methods(
         if lower == b"getroutekeyname" {
             relations
                 .entry(lower)
-                .or_insert_with(|| route_key_verdict(method, model_route_key(codebase)));
+                .or_insert_with(|| route_key_verdict(method, names, model_route_key(codebase)));
         } else if relation {
             relations
                 .entry(lower)
@@ -2142,13 +2142,18 @@ fn model_route_key(codebase: &CodebaseMetadata) -> bool {
 /// `Ok` for a `getRouteKeyName` that P2R-480 admits, or the message of P2R-482. Its one
 /// attribute, if any, resolves to `\Override` here, as P2R-401 refuses any other;
 /// `inherited` is what `model_route_key` says.
-fn route_key_verdict(method: &Method<'_>, inherited: bool) -> Result<(), String> {
+fn route_key_verdict(
+    method: &Method<'_>,
+    names: &ResolvedNames<'_>,
+    inherited: bool,
+) -> Result<(), String> {
+    let form = MemberForm::of_method(method, names);
     // PHP refuses an #[\Override] that overrides nothing, as on a stand-in Model, and it
     // does not count a trait of the model itself; it also fails to parse an empty #[],
     // which Mago accepts.
-    let attribute = match method.attribute_lists.as_slice() {
+    let attribute = match form.attribute_groups.as_slice() {
         [] => true,
-        [list] if list.attributes.len() == 1 => inherited,
+        [group] if matches!(group.as_slice(), [name] if name == b"override") => inherited,
         _ => false,
     };
     let body = matches!(&method.body, MethodBody::Concrete(block)
@@ -2157,9 +2162,9 @@ fn route_key_verdict(method: &Method<'_>, inherited: bool) -> Result<(), String>
         })] if plain_string(string)));
     if attribute
         && body
-        && matches!(method.modifiers.as_slice(), [Modifier::Public(_)])
-        && method.parameter_list.parameters.is_empty()
-        && method.ampersand.is_none()
+        && form.only(ModifierKind::Public)
+        && form.parameters == 0
+        && !form.by_reference
         && matches!(
             method.return_type_hint.as_ref().map(|hint| &hint.hint),
             Some(Hint::String(_))

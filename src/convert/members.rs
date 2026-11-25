@@ -3,7 +3,7 @@
 //! stop message; the return type, the body and a property's value stay with the caller.
 
 use mago_names::ResolvedNames;
-use mago_syntax::cst::{AttributeList, Method, Modifier, Sequence};
+use mago_syntax::cst::{AttributeList, Method, Modifier, Property, Sequence};
 
 use super::models::resolved;
 
@@ -49,9 +49,41 @@ impl MemberForm {
         }
     }
 
+    pub(super) fn of_property(property: &Property<'_>, names: &ResolvedNames<'_>) -> Self {
+        let (modifiers, attribute_lists, name) = match property {
+            Property::Plain(plain) => (
+                &plain.modifiers,
+                &plain.attribute_lists,
+                plain.items.iter().next().map(|item| item.variable().name),
+            ),
+            Property::Hooked(hooked) => (
+                &hooked.modifiers,
+                &hooked.attribute_lists,
+                Some(hooked.item.variable().name),
+            ),
+        };
+        MemberForm {
+            name: name
+                .map(|name| name.strip_prefix(b"$").unwrap_or(name).to_vec())
+                .unwrap_or_default(),
+            modifiers: kinds(modifiers),
+            by_reference: false,
+            parameters: 0,
+            attribute_groups: groups(attribute_lists, names),
+        }
+    }
+
     /// True when `kind` is the member's one modifier.
     pub(super) fn only(&self, kind: ModifierKind) -> bool {
         self.modifiers == [kind]
+    }
+
+    /// True for an attribute other than `#[\Override]`.
+    pub(super) fn attributed_beyond_override(&self) -> bool {
+        self.attribute_groups
+            .iter()
+            .flatten()
+            .any(|name| name != b"override")
     }
 }
 
@@ -114,7 +146,8 @@ mod tests {
             .expect("a class");
         match class.members.iter().next().expect("a member") {
             ClassLikeMember::Method(method) => MemberForm::of_method(method, &names),
-            _ => panic!("a method"),
+            ClassLikeMember::Property(property) => MemberForm::of_property(property, &names),
+            _ => panic!("a method or property"),
         }
     }
 
@@ -141,6 +174,25 @@ mod tests {
                 vec![]
             ]
         );
+        assert!(found.attributed_beyond_override());
         assert!(found.only(ModifierKind::Protected));
+    }
+
+    #[test]
+    fn override_alone_is_not_another_attribute() {
+        assert!(
+            !form("#[\\Override] public function getRouteKeyName(): string {}")
+                .attributed_beyond_override()
+        );
+    }
+
+    #[test]
+    fn a_property_keeps_the_case_of_its_name() {
+        let found = form("#[Marker] protected $Table = 'users', $other;");
+        assert_eq!(found.name, b"Table");
+        assert!(found.only(ModifierKind::Protected));
+        assert!(!found.by_reference);
+        assert_eq!(found.parameters, 0);
+        assert_eq!(found.attribute_groups, [vec![b"vendor\\marker".to_vec()]]);
     }
 }

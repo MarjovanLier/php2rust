@@ -1729,25 +1729,24 @@ fn model_member(
                 Member::Other
             }
         }
-        // `public $timestamps = false;` changes only the date columns, which have no field.
-        ClassLikeMember::Property(Property::Plain(plain))
-            if matches!(plain.modifiers.as_slice(), [Modifier::Public(_)])
+        ClassLikeMember::Property(property @ Property::Plain(plain)) => {
+            let form = MemberForm::of_property(property, names);
+            // `public $timestamps = false;` changes only the date columns, which have no field.
+            if form.only(ModifierKind::Public)
                 && plain.hint.is_none()
-                && plain.attribute_lists.is_empty()
+                && form.attribute_groups.is_empty()
                 && matches!(plain.items.as_slice(), [PropertyItem::Concrete(item)]
                     if item.variable.name == b"$timestamps"
-                        && matches!(item.value, Expression::Literal(Literal::True(_) | Literal::False(_)))) =>
-        {
-            Member::LeftOut
-        }
-        ClassLikeMember::Property(Property::Plain(plain)) => {
-            let protected = matches!(plain.modifiers.as_slice(), [Modifier::Protected(_)]);
+                        && matches!(item.value, Expression::Literal(Literal::True(_) | Literal::False(_))))
+            {
+                return Member::LeftOut;
+            }
             let [PropertyItem::Concrete(item)] = plain.items.as_slice() else {
                 return Member::Other;
             };
-            if !protected
+            if !form.only(ModifierKind::Protected)
                 || plain.hint.is_some()
-                || !plain.attribute_lists.is_empty()
+                || !form.attribute_groups.is_empty()
                 || !MODEL_PROPERTIES.contains(&item.variable.name)
             {
                 return Member::Other;
@@ -1766,7 +1765,8 @@ fn model_member(
             }
         }
         ClassLikeMember::Method(method) => {
-            let lower = method.name.value.to_ascii_lowercase();
+            let form = MemberForm::of_method(method, names);
+            let lower = &form.name;
             if lower == b"casts" {
                 return match casts_method(method, names) {
                     Some(map) => Member::CastsMethod(map),
@@ -1785,20 +1785,10 @@ fn model_member(
                 .as_ref()
                 .is_some_and(|hint| names_attribute(&hint.hint, names));
             let lifecycle = lower.starts_with(b"boot") || lower.starts_with(b"initialize");
-            let attributed = method
-                .attribute_lists
-                .iter()
-                .flat_map(|list| list.attributes.iter())
-                .any(|attribute| {
-                    resolved(names, &attribute.name, attribute.name.value()) != b"override"
-                });
+            let attributed = form.attributed_beyond_override();
             if lower == b"getroutekeyname" && !attributed {
                 Member::KeepsReads
-            } else if accessor
-                || attribute
-                || lifecycle
-                || attributed
-                || overridden.contains(&lower)
+            } else if accessor || attribute || lifecycle || attributed || overridden.contains(lower)
             {
                 Member::Other
             } else {

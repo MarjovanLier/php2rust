@@ -2143,7 +2143,9 @@ fn route_key_verdict(
     // which Mago accepts.
     let attribute = match form.attribute_groups.as_slice() {
         [] => true,
-        [group] if matches!(group.as_slice(), [name] if name == b"override") => inherited,
+        [group] if matches!(group.attributes.as_slice(), [attribute] if attribute.name == b"override") => {
+            inherited
+        }
         _ => false,
     };
     let body = matches!(&method.body, MethodBody::Concrete(block)

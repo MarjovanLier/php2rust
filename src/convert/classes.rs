@@ -10,6 +10,7 @@ use mago_syntax::cst::*;
 use mago_syntax::walker::Walker;
 
 use super::control::emit;
+use super::members::{self, MemberForm, ModifierKind};
 use super::recursion::{self, Target};
 use super::variables::THIS;
 use super::{
@@ -951,49 +952,36 @@ impl Converter<'_> {
     /// P2R-135, P2R-152, P2R-155). `overrides` allows `#[Override]` on a method that
     /// implements a method of `ArrayAccess` (P2R-221).
     pub(super) fn method_shape(&mut self, method: &Method<'_>, overrides: bool) {
+        let form = MemberForm::of_method(method, self.analysed(method).resolved);
         // PHP rejects a repeated `#[Override]`, and Mago does not report it.
-        let attributes: Vec<&Attribute<'_>> = method
-            .attribute_lists
-            .iter()
-            .flat_map(|list| list.attributes.iter())
-            .collect();
-        let only_override = attributes.len() == 1
-            && attributes[0]
-                .argument_list
-                .as_ref()
-                .is_none_or(|list| list.arguments.is_empty())
-            && self.identifier_key(&attributes[0].name) == b"override";
-        if let Some(attributes) = method.attribute_lists.first()
+        let only_override = matches!(
+            form.attributes().collect::<Vec<_>>().as_slice(),
+            [attribute] if !attribute.arguments && attribute.name == b"override"
+        );
+        if let Some(group) = form.attribute_groups.first()
             && !(overrides && only_override)
         {
-            self.refuse(attributes, "attributes are not supported (P2R-07)");
+            self.refuse(group, "attributes are not supported (P2R-07)");
         }
-        if let Some(modifier) = method
-            .modifiers
-            .iter()
-            .find(|m| matches!(m, Modifier::Abstract(_)))
-        {
+        if let Some(modifier) = form.first(&[ModifierKind::Abstract]) {
             self.refuse(modifier, "an abstract method is not supported (P2R-135)");
         }
-        if method.ampersand.is_some() {
+        if form.by_reference {
             self.refuse(
                 &method.name,
                 "a method that returns by reference is not supported (P2R-135)",
             );
         }
         // PHP rejects these when it compiles the file; Mago does not report them.
-        if let Some(modifier) = doubled_modifier(&method.modifiers) {
+        if let Some(modifier) = form.doubled() {
             self.refuse(modifier, DOUBLED_MODIFIER);
         }
-        if let Some(modifier) = method.modifiers.iter().find(|m| {
-            matches!(
-                m,
-                Modifier::Readonly(_)
-                    | Modifier::PublicSet(_)
-                    | Modifier::ProtectedSet(_)
-                    | Modifier::PrivateSet(_)
-            )
-        }) {
+        if let Some(modifier) = form.first(&[
+            ModifierKind::Readonly,
+            ModifierKind::PublicSet,
+            ModifierKind::ProtectedSet,
+            ModifierKind::PrivateSet,
+        ]) {
             self.refuse(
                 modifier,
                 "PHP rejects readonly and a set visibility on a method (P2R-135)",
@@ -1003,22 +991,18 @@ impl Converter<'_> {
             if let Some(hint) = &method.return_type_hint {
                 self.refuse(hint, "PHP rejects a return type on a constructor (P2R-130)");
             }
-            if let Some(modifier) = method
-                .modifiers
-                .iter()
-                .find(|m| matches!(m, Modifier::Static(_)))
-            {
+            if let Some(modifier) = form.first(&[ModifierKind::Static]) {
                 self.refuse(modifier, "PHP rejects a static constructor (P2R-130)");
             }
         }
-        if !is_constructor(method) && method.name.value.starts_with(b"__") {
+        if !is_constructor(method) && form.name.starts_with(b"__") {
             self.refuse(
                 &method.name,
                 "a method whose name starts with __ is not supported (P2R-130)",
             );
         }
         // PHP prints a warning for it when it compiles the file; Mago reports nothing.
-        if !is_constructor(method) && final_private(&method.modifiers) {
+        if !is_constructor(method) && form.final_private() {
             self.refuse(
                 &method.name,
                 "a private method cannot be final, and PHP warns about it (P2R-135)",
@@ -2574,19 +2558,7 @@ pub(super) const DOUBLED_MODIFIER: &str =
 pub(super) fn doubled_modifier<'m, 'a>(
     modifiers: &'m Sequence<'a, Modifier<'a>>,
 ) -> Option<&'m Modifier<'a>> {
-    let kind = |modifier: &Modifier<'_>| match modifier {
-        Modifier::Public(_) | Modifier::Protected(_) | Modifier::Private(_) => 0,
-        Modifier::PublicSet(_) | Modifier::ProtectedSet(_) | Modifier::PrivateSet(_) => 1,
-        Modifier::Static(_) => 2,
-        Modifier::Final(_) => 3,
-        Modifier::Abstract(_) => 4,
-        Modifier::Readonly(_) => 5,
-    };
-    let mut seen = [false; 6];
-    modifiers.iter().find(|modifier| {
-        let at = kind(modifier);
-        std::mem::replace(&mut seen[at], true)
-    })
+    members::doubled_at(modifiers.iter().map(members::kind)).and_then(|at| modifiers.iter().nth(at))
 }
 
 /// The problem of a set visibility wider than the visibility its property is read with.
@@ -2618,27 +2590,8 @@ pub(super) fn parameter_modifier<'m, 'a>(
 pub(super) fn wider_set<'m, 'a>(
     modifiers: &'m Sequence<'a, Modifier<'a>>,
 ) -> Option<&'m Modifier<'a>> {
-    let width = |modifier: &Modifier<'_>| match modifier {
-        Modifier::Public(_) | Modifier::PublicSet(_) => 3,
-        Modifier::Protected(_) | Modifier::ProtectedSet(_) => 2,
-        Modifier::Private(_) | Modifier::PrivateSet(_) => 1,
-        _ => 0,
-    };
-    let read = modifiers
-        .iter()
-        .find(|m| {
-            matches!(
-                m,
-                Modifier::Public(_) | Modifier::Protected(_) | Modifier::Private(_)
-            )
-        })
-        .map_or(3, width);
-    modifiers.iter().find(|m| {
-        matches!(
-            m,
-            Modifier::PublicSet(_) | Modifier::ProtectedSet(_) | Modifier::PrivateSet(_)
-        ) && width(m) > read
-    })
+    let kinds: Vec<_> = modifiers.iter().map(members::kind).collect();
+    members::wider_set_at(&kinds).and_then(|at| modifiers.iter().nth(at))
 }
 
 /// The variables PHP declares in every scope, which a parameter may not take as its name.
@@ -2952,8 +2905,7 @@ fn static_modifier(parameter: &FunctionLikeParameter<'_>) -> bool {
 
 /// True for `final` and `private` together (P2R-130, P2R-156).
 fn final_private(modifiers: &Sequence<'_, Modifier<'_>>) -> bool {
-    modifiers.iter().any(|m| matches!(m, Modifier::Final(_)))
-        && modifiers.iter().any(|m| matches!(m, Modifier::Private(_)))
+    members::final_private(modifiers.iter().map(members::kind))
 }
 
 /// True for constant modifiers PHP rejects when it compiles the file, and Mago does not

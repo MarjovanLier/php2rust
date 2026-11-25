@@ -669,6 +669,44 @@ PHP2RUST_BLESS=1 cargo test --test folders
 
 Review the diff before you commit it.
 
+### Proofs
+
+Kani and Verus prove two checks that decide what converts. CI runs neither tool, so run
+the proofs by hand after you change one of these checks:
+
+| Proof | Tool | What it shows | Bound |
+|---|---|---|---|
+| `a_shift_converts_exactly_when_rust_accepts_its_count` (`src/convert/numbers.rs`) | Kani | A shift converts exactly when Rust accepts its count for every value (P2R-167) | none |
+| `octal_overflow_is_true_only_for_an_escape_above_377` (`src/printer.rs`) | Kani | No input panics, and a true answer points at an escape from `\400` to `\777` (P2R-49) | 6 bytes |
+| `octal_overflow_finds_an_escape_above_377_at_the_start` (`src/printer.rs`) | Kani | Such an escape at the start is always found (P2R-49) | 6 bytes |
+| `octal_overflow` (`verus/octal.rs`) | Verus | The scan follows the three-digit rule for every input, indexes in range and does not overflow (P2R-49) | none |
+
+Kani checks the real functions. Verus cannot build php2rust with its Mago dependencies,
+so `verus/octal.rs` holds a copy of `octal_overflow`. Change the copy when you change
+the function.
+
+Run every proof through `scripts/prove.sh`, which caps memory and time:
+
+```sh
+scripts/prove.sh kani --harness octal_overflow_is_true_only_for_an_escape_above_377
+scripts/prove.sh kani      # every Kani proof, one at a time
+scripts/prove.sh verus
+```
+
+Kani 0.68.0 and its solvers have no memory limit, and macOS refuses `ulimit -v`. The
+script runs the proof in its own process group and adds up the resident memory of every
+process in that group. If the total passes `PROVE_MAX_MB` (default 4096) or the run
+passes `PROVE_MAX_SECONDS` (default 900), the script stops the whole group. It refuses
+`-j`, because parallel proofs add their memory together. Verus also passes
+`PROVE_SOLVER_MB` (default 1024) to Z3, which enforces that limit itself. Measured
+peaks on 25 Nov 2026: 2.5 GB for a run of every Kani proof (the build included) and
+0.3 GB for Verus.
+
+Kani 0.68.0 compiles with its own `nightly-2026-08-21`. That nightly does not have
+`str::trim_prefix` as a stable function, and Mago 1.61 uses it. So the script turns on
+the feature `trim_prefix_suffix` for Kani builds only. Normal builds and CI do not use
+the flag.
+
 ## Licence
 
 MIT OR Apache-2.0, at your option.

@@ -1260,32 +1260,29 @@ impl Converter<'_> {
                 self.refuse(property, "a property hook is not supported (P2R-140)");
                 continue;
             };
-            let problem = if let Some(var) = &plain.var {
-                Some((var.span(), "var is not supported (P2R-140)"))
-            } else if let Some(attributes) = plain.attribute_lists.first() {
-                Some((attributes.span(), "attributes are not supported (P2R-07)"))
-            } else if let Some(modifier) = doubled_modifier(&plain.modifiers) {
-                Some((modifier.span(), DOUBLED_MODIFIER))
-            } else if let Some(modifier) = wider_set(&plain.modifiers) {
-                Some((modifier.span(), WIDER_SET))
-            } else if final_private(&plain.modifiers) {
+            let form = MemberForm::of_property(property, self.analysed(property).resolved);
+            let problem = if let Some(var) = form.var {
+                Some((var, "var is not supported (P2R-140)"))
+            } else if let Some(group) = form.attribute_groups.first() {
+                Some((group.span, "attributes are not supported (P2R-07)"))
+            } else if let Some(modifier) = form.doubled() {
+                Some((modifier.span, DOUBLED_MODIFIER))
+            } else if let Some(modifier) = form.wider_set() {
+                Some((modifier.span, WIDER_SET))
+            } else if form.final_private() {
                 Some((
                     plain.span(),
                     "PHP rejects a property that is both final and private (P2R-140)",
                 ))
             } else {
-                plain
-                    .modifiers
-                    .iter()
-                    .find(|m| {
-                        matches!(
-                            m,
-                            Modifier::Static(_) | Modifier::Readonly(_) | Modifier::Abstract(_)
-                        )
-                    })
+                form.first(&[
+                    ModifierKind::Static,
+                    ModifierKind::Readonly,
+                    ModifierKind::Abstract,
+                ])
                     .map(|modifier| {
                         (
-                            modifier.span(),
+                            modifier.span,
                             "a static, readonly or abstract declared property is not supported; PHP rejects a default on a readonly one (P2R-140)",
                         )
                     })

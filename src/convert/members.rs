@@ -179,6 +179,16 @@ mod tests {
     }
 
     #[test]
+    fn two_visibility_modifiers_are_not_one() {
+        let found = form("public private function f() {}");
+        assert_eq!(
+            found.modifiers,
+            [ModifierKind::Public, ModifierKind::Private]
+        );
+        assert!(!found.only(ModifierKind::Public));
+    }
+
+    #[test]
     fn override_alone_is_not_another_attribute() {
         assert!(
             !form("#[\\Override] public function getRouteKeyName(): string {}")

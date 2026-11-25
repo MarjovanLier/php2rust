@@ -1,1 +1,2 @@
+input.php:15:7: Invalid `#[Override]` attribute on `App\Account::getRouteKeyName`. (invalid-override-attribute)
 input.php:16:21: getRouteKeyName is supported only as public function getRouteKeyName(): string { return '<text>'; } with a string whose escapes PHP accepts, and with no attribute or with #[\Override] when Model declares a getRouteKeyName that is not private (P2R-482)

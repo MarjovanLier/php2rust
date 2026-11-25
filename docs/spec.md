@@ -224,7 +224,7 @@ requirement IDs.
   be written, or rustfmt cannot lay out the output (P2R-190). When any of
   these holds, the tool MUST exit 2 and MUST NOT
   print P2R-03 problems. Mago's parser recovers from broken input without
-  failing, so the parse check is explicit. One known exception: Mago 1.57
+  failing, so the parse check is explicit. One known exception: Mago 1.61
   recurses without end when a docblock type uses a cycle of
   `@psalm-type` or `@phpstan-type` aliases (`X = Y` and `Y = X`), in the
   input or in an included class whose method, its constructor included,
@@ -637,7 +637,7 @@ requirement IDs.
   exact version: direct dependencies as `=x.y.z`, `Cargo.lock` committed,
   and CI checks every `mago-*` entry in `Cargo.lock`. The pinned version's
   `PHPVersion::LATEST` MUST be PHP 8.5, because Mago always builds its
-  prelude with `LATEST`. Version 1 pins Mago 1.57.0.
+  prelude with `LATEST`. Version 1 pins Mago 1.61.0.
 - **P2R-82** The README MUST state what the tool does, how to install it
   (`cargo install --locked`), that it needs `rustfmt` on `PATH` (P2R-190),
   which rustup's minimal profile leaves out, how to run it, the supported
@@ -647,7 +647,7 @@ requirement IDs.
   P2R-76.
 - **P2R-83** The Rust toolchain MUST be pinned in `rust-toolchain.toml`. The
   `rust-version` in `Cargo.toml` MUST equal the `rust-version` of the pinned
-  Mago crates (1.99.0 for Mago 1.57.0), and the pinned toolchain MUST be at
+  Mago crates (1.100.0 for Mago 1.61.0), and the pinned toolchain MUST be at
   least that version. The tests MUST fail when `rustfmt --version` does not
   name the commit of the pinned rustc, because the layout of the expected
   files is that rustfmt's (P2R-190).
@@ -885,8 +885,8 @@ Sections 3 to 9 apply to nullable values unless this section says otherwise.
   qualified name (P2R-151); the other name checks here compare the short
   name, in any namespace. Mago's parser accepts a
   keyword there, so the tool checks the name itself. The built-in names
-  are those of Mago 1.57's stubs, which lack some class-likes PHP 8.5 has
-  (`ClosedGeneratorException`, `Dom\DOMException`, `Pdo\Odbc` and others,
+  are those of Mago 1.61's stubs, which lack some class-likes PHP 8.5 has
+  (`Dom\DOMException`, `Pdo\Odbc` and others,
   some only with an extension loaded); a name of those converts, where PHP
   stops with "Cannot redeclare". That is a known limit.
 - **P2R-112** An enum type `E` MUST map to the Rust enum `E` (P2R-20), passed
@@ -4844,7 +4844,7 @@ findings as its problems (P2R-11).
   or `@mago-ignore` MUST stop the conversion with a message that says it
   would hide a Mago finding, because the tool cannot tell which hidden
   finding PHP enforces. Such a comment in an included file is not read
-  (P2R-340). Mago 1.57's analyser obeys no other suppression from the
+  (P2R-340). Mago 1.61's analyser obeys no other suppression from the
   input: `@ignore-nullable-return`, `@ignore-falsable-return` and an
   inline `@var` change the types it infers, and the tool tracks null and
   false itself (P2R-106).

@@ -10,5 +10,6 @@ How a method or property is written (its modifiers, `&`, the number of parameter
 ## Consequences
 
 - A form check that applies to every member is added to `members.rs` once.
-- On 25 Nov 2026 the model members use the module; the move of the other kinds is in progress.
-- Promoted constructor properties are parameters, not members, and stay outside the module.
+- Model members, class and enum methods, declared properties, laravel-data hooks, interface methods and the constructor of an exception class read their form from the module.
+- The rules for a modifier written twice, a wider set visibility, and `final` with `private` live in `members.rs`; class declarations, constants and constructor parameters reach them through adapters in `classes.rs`.
+- Promoted constructor properties are parameters, not members, and stay outside the module. Checks that only compare a member's name (such as `__construct`) also stay where they are.

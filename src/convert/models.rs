@@ -23,6 +23,7 @@ use mago_syntax::parser::parse_file;
 use mago_syntax::walker::Walker;
 
 use super::lists::unparenthesized;
+use super::members::{MemberForm, ModifierKind};
 use super::{Converter, Mode, ParameterSignature, classes, filters, nulls, throws};
 use crate::names;
 use crate::printer::{self, BinOp, RExpr};
@@ -1331,7 +1332,7 @@ fn declared_tree(codebase: &CodebaseMetadata, name: &[u8], seen: &mut HashSet<Ve
 pub(super) const CONDITIONABLE: &[u8] = b"illuminate\\support\\traits\\conditionable";
 
 /// The lowercase fully qualified name of the name at `node`, written `raw`.
-fn resolved(names: &ResolvedNames<'_>, node: &impl HasSpan, raw: &[u8]) -> Vec<u8> {
+pub(super) fn resolved(names: &ResolvedNames<'_>, node: &impl HasSpan, raw: &[u8]) -> Vec<u8> {
     let full = names.resolve(&node.span().start).unwrap_or(raw);
     full.strip_prefix(b"\\")
         .unwrap_or(full)
@@ -1931,33 +1932,32 @@ fn relation_verdict(
     included: &HashSet<FileId>,
     columns: &[Column],
 ) -> Result<(), String> {
+    let form = MemberForm::of_method(method, names);
     // PHP gives these names their own rules (`__clone(): HasMany` fails to compile), which
     // Mago does not check.
-    if method.name.value.starts_with(b"__") {
+    if form.name.starts_with(b"__") {
         return Err(
             "a relation method whose name starts with __ is not supported, because PHP gives such names their own rules (P2R-472)"
                 .to_owned(),
         );
     }
     // After create Laravel reads a column the map left out through a relation of its name.
-    if let Some(column) = columns.iter().find(|column| {
-        column
-            .name
-            .as_bytes()
-            .eq_ignore_ascii_case(method.name.value)
-    }) {
+    if let Some(column) = columns
+        .iter()
+        .find(|column| column.name.as_bytes().eq_ignore_ascii_case(&form.name))
+    {
         return Err(format!(
             "a relation method named like the column {} of its table is not supported, because after create Laravel reads that column through the relation when the map leaves it out (P2R-472)",
             column.name
         ));
     }
-    let refused = if !method.parameter_list.parameters.is_empty() {
+    let refused = if form.parameters != 0 {
         Some("a relation method with a parameter is not supported (P2R-472)")
-    } else if !matches!(method.modifiers.as_slice(), [Modifier::Public(_)]) {
+    } else if !form.only(ModifierKind::Public) {
         Some("a relation method is supported only with the one modifier public (P2R-472)")
-    } else if !method.attribute_lists.is_empty() {
+    } else if !form.attribute_groups.is_empty() {
         Some("an attribute on a relation method is not supported, #[\\Override] too (P2R-472)")
-    } else if method.ampersand.is_some() {
+    } else if form.by_reference {
         Some("a relation method that returns by reference is not supported (P2R-472)")
     } else {
         None

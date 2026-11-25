@@ -794,7 +794,8 @@ impl Converter<'_> {
                 }
             };
             if index.is_some_and(|index| self.hook_name(index, method)) {
-                if !hook_form(method) {
+                let form = MemberForm::of_method(method, self.analysed(method).resolved);
+                if !hook_form(method, &form) {
                     self.refuse(&method.name, DATA_HOOK);
                 } else if hooks.contains(&lowercase(method)) {
                     // PHP rejects it when it compiles the file, and Mago does not report it.
@@ -804,7 +805,7 @@ impl Converter<'_> {
                     );
                 } else {
                     hooks.push(lowercase(method));
-                    if !self.hook_shape(method) {
+                    if !self.hook_shape(method, &form) {
                         self.left_out.push(method.span());
                     }
                 }
@@ -1039,10 +1040,10 @@ impl Converter<'_> {
     /// reports under a code that a left-out hook drops; true when it refused something
     /// (P2R-130, P2R-135, P2R-154, P2R-168, P2R-380). The tool reads nothing else of a
     /// hook, so the signature is kept to forms PHP always compiles.
-    fn hook_shape(&mut self, method: &Method<'_>) -> bool {
+    fn hook_shape(&mut self, method: &Method<'_>, form: &MemberForm) -> bool {
         let mut refused = !self.defaults_last(&method.parameter_list);
         // PHP deprecates `&` on a `void` method when it compiles the file.
-        if method.ampersand.is_some() {
+        if form.by_reference {
             self.refuse(
                 &method.name,
                 "a method that returns by reference is not supported (P2R-135)",
@@ -2824,18 +2825,17 @@ fn reserved_class_name(name: &[u8]) -> bool {
 /// that is left out (P2R-380). PHP checks an attribute such as `#[\Override]` when it loads
 /// the class, and rejects a modifier other than `public`, `static` and `final`, or one
 /// written twice, when it compiles the file.
-fn hook_form(method: &Method<'_>) -> bool {
-    let count =
-        |kind: fn(&Modifier<'_>) -> bool| method.modifiers.iter().filter(|m| kind(m)).count();
-    let statics = count(|m| matches!(m, Modifier::Static(_)));
-    let publics = count(|m| matches!(m, Modifier::Public(_)));
-    let finals = count(|m| matches!(m, Modifier::Final(_)));
+fn hook_form(method: &Method<'_>, form: &MemberForm) -> bool {
+    let count = |kind: ModifierKind| form.modifiers.iter().filter(|m| m.kind == kind).count();
+    let statics = count(ModifierKind::Static);
+    let publics = count(ModifierKind::Public);
+    let finals = count(ModifierKind::Final);
     matches!(method.body, MethodBody::Concrete(_))
-        && method.attribute_lists.is_empty()
+        && form.attribute_groups.is_empty()
         && statics == 1
         && publics <= 1
         && finals <= 1
-        && statics + publics + finals == method.modifiers.len()
+        && statics + publics + finals == form.modifiers.len()
 }
 
 /// True for a class declared `readonly` (P2R-130).

@@ -2,7 +2,7 @@
 name = "php2rust"
 version = "0.1.0"
 edition = "2024"
-rust-version = "1.99.0"
+rust-version = "1.100.0"
 license = "MIT OR Apache-2.0"
 description = "Convert typed PHP into normal, readable Rust, without AI"
 repository = "https://github.com/MarjovanLier/php2rust"
@@ -13,19 +13,19 @@ categories = ["command-line-utilities", "development-tools"]
 [dependencies]
 clap = { version = "4", features = ["derive"] }
 heck = "0.5"
-mago-allocator = "=1.57.0"
-mago-analyzer = "=1.57.0"
-mago-codex = "=1.57.0"
-mago-database = "=1.57.0"
-mago-names = "=1.57.0"
-mago-php-version = "=1.57.0"
-mago-prelude = { version = "=1.57.0", features = ["build"] }
-mago-reporting = "=1.57.0"
-mago-span = "=1.57.0"
-mago-syntax = "=1.57.0"
+mago-allocator = "=1.61.0"
+mago-analyzer = "=1.61.0"
+mago-codex = "=1.61.0"
+mago-database = "=1.61.0"
+mago-names = "=1.61.0"
+mago-php-version = "=1.61.0"
+mago-prelude = { version = "=1.61.0", features = ["build"] }
+mago-reporting = "=1.61.0"
+mago-span = "=1.61.0"
+mago-syntax = "=1.61.0"
 # Its words name the column types told to Mago (P2R-403); it was already in the lockfile
 # through Mago.
-mago-word = "=1.57.0"
+mago-word = "=1.61.0"
 # The version the output's patterns are checked against when they convert (P2R-260); both
 # were already in the lockfile through Mago.
 regex = "=1.13.1"

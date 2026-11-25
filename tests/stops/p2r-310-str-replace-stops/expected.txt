@@ -2,7 +2,7 @@ input.php:5:10: this name is the Rust name of a helper the output may hold, whic
 input.php:34:27: str_replace() with a string search and an array replacement is not supported, because PHP throws a TypeError (P2R-310)
 input.php:35:27: str_replace() with a string search and an array replacement is not supported, because PHP throws a TypeError (P2R-310)
 input.php:36:32: str_replace() converts on a string subject only (P2R-185, P2R-310)
-input.php:37:22: Possible argument type mismatch for argument #1 of `str_replace`: expected `array<array-key, string>|string`, but possibly received `list{string('a'), int(1)}`. (possibly-invalid-argument)
+input.php:37:28: a list literal in str_replace() converts only with string elements (P2R-310)
 input.php:38:22: only a list of plain values is supported (P2R-47)
 input.php:39:22: str_replace() converts only on strings, lists and maps of strings, and unions of a string and one of them (P2R-310)
 input.php:40:22: a union in str_replace() converts only with a string and one list or map of strings as its members (P2R-310)

@@ -91,13 +91,32 @@ fn crate_args() -> &'static [String] {
             "cannot build the crates of the map and pattern cases (P2R-243, P2R-263): {}",
             text(&build.stderr)
         );
-        let deps = target.join("release").join("deps");
+        // Cargo 1.100 puts each crate in `release/build/<crate>/<hash>/out`, with no
+        // shared `deps` folder, so rustc gets every `out` folder for the dependencies.
+        let read = |dir: &Path| -> Vec<PathBuf> {
+            fs::read_dir(dir)
+                .expect("readable build folder")
+                .map(|entry| entry.expect("readable build entry").path())
+                .collect()
+        };
+        let outs: Vec<PathBuf> = read(&target.join("release").join("build"))
+            .iter()
+            .flat_map(|krate| read(krate))
+            .map(|unit| unit.join("out"))
+            .filter(|out| out.is_dir())
+            .collect();
         let mut args = Vec::new();
         for name in ["indexmap", "regex"] {
             let prefix = format!("lib{name}-");
-            let rlibs: Vec<PathBuf> = fs::read_dir(&deps)
-                .expect("readable deps folder")
-                .map(|entry| entry.expect("readable deps entry").path())
+            let rlibs: Vec<PathBuf> = outs
+                .iter()
+                .filter(|out| {
+                    out.parent()
+                        .and_then(Path::parent)
+                        .and_then(Path::file_name)
+                        == Some(name.as_ref())
+                })
+                .flat_map(|out| read(out))
                 .filter(|path| {
                     path.file_name()
                         .and_then(|file| file.to_str())
@@ -108,8 +127,10 @@ fn crate_args() -> &'static [String] {
             args.push("--extern".to_owned());
             args.push(format!("{name}={}", rlibs[0].display()));
         }
-        args.push("-L".to_owned());
-        args.push(format!("dependency={}", deps.display()));
+        for out in &outs {
+            args.push("-L".to_owned());
+            args.push(format!("dependency={}", out.display()));
+        }
         args
     })
 }
@@ -119,8 +140,8 @@ fn crate_args() -> &'static [String] {
 fn check_toolchain() {
     let rustc = text(&run("rustc", &["--version"], &root()).stdout);
     assert!(
-        rustc.starts_with("rustc 1.99.0 "),
-        "the tests need the pinned rustc 1.99.0, found: {rustc}"
+        rustc.starts_with("rustc 1.100.0 "),
+        "the tests need the pinned rustc 1.100.0, found: {rustc}"
     );
     let rustfmt = run("rustfmt", &["--version"], &root());
     assert!(
@@ -128,7 +149,7 @@ fn check_toolchain() {
         "rustfmt is missing: {}",
         text(&rustfmt.stderr)
     );
-    // `rustc 1.99.0 (b940084d7 2026-09-28)`: the expected files are this rustfmt's layout
+    // `rustc 1.100.0 (0ef1bc386 2026-11-09)`: the expected files are this rustfmt's layout
     // (P2R-83, P2R-190).
     let commit = rustc.split(['(', ' ']).nth(3).unwrap_or_default();
     let rustfmt = text(&rustfmt.stdout);

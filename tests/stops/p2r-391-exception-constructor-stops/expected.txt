@@ -6,7 +6,6 @@ input.php:47:9: the constructor of an exception class must end with parent::__co
 input.php:55:29: the constructor of an exception class may not use $this, return, or another parent:: access (P2R-391)
 input.php:64:13: the constructor of an exception class may not use $this, return, or another parent:: access (P2R-391)
 input.php:73:33: PHP's Exception already declares a property of this name (P2R-391)
-input.php:75:29: Invalid argument type for argument #1 of `Exception::__construct`: expected `string`, but found `mixed`. (mixed-argument)
 input.php:88:13: a class whose parent exception class of the input has a constructor is not supported, because PHP would run the parent's constructor (P2R-391)
 input.php:91:7: check is already the Rust name of a function, a helper or another exception class (P2R-391)
 input.php:112:5: a class can have one constructor only (P2R-130)

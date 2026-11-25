@@ -14,6 +14,7 @@ input.php:131:5: isEmpty(), isNotEmpty() and first() of a collection do not conv
 input.php:141:12: first() of a collection of DateTime does not convert, because Option<PhpDateTime> stands for DateTime|false (P2R-442)
 input.php:149:19: the type Illuminate\Support\Collection<int, int|null> has no Rust type (P2R-22)
 input.php:157:21: the type Illuminate\Support\Collection<int, DateTime|false> has no Rust type (P2R-22)
+input.php:163:11: Template argument for `Illuminate\Database\Eloquent\Collection` does not satisfy its constraint. (invalid-template-parameter)
 input.php:165:17: the type Illuminate\Database\Eloquent\Collection<App\Code> has no Rust type (P2R-22)
 input.php:173:17: the type list<Illuminate\Support\Collection<int, string>> has no Rust type (P2R-22)
 input.php:181:17: a collection inside a list, a map, a shape or another collection is not supported (P2R-440)

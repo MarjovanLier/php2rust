@@ -8,6 +8,7 @@ use mago_syntax::cst::*;
 use mago_syntax::walker::Walker;
 
 use super::control::emit;
+use super::members::{MemberForm, ModifierKind};
 use super::{Converter, ParameterSignature, Signature, classes, helpers, throws};
 use crate::names;
 use crate::printer::{self, RExpr};
@@ -419,16 +420,17 @@ impl Converter<'_> {
             }
         }
         if let Some(constructor) = constructor(declaration) {
-            if let Some(modifier) = constructor
+            let form = MemberForm::of_method(constructor, self.analysed(constructor).resolved);
+            if let Some(modifier) = form
                 .modifiers
                 .iter()
-                .find(|m| !matches!(m, Modifier::Public(_) | Modifier::Final(_)))
+                .find(|m| !matches!(m.kind, ModifierKind::Public | ModifierKind::Final))
             {
                 self.refuse(
                     modifier,
                     "the constructor of an exception class may be public and final, and no other modifier is supported (P2R-391)",
                 );
-            } else if let Some(modifier) = classes::doubled_modifier(&constructor.modifiers) {
+            } else if let Some(modifier) = form.doubled() {
                 self.refuse(modifier, classes::DOUBLED_MODIFIER);
             }
             for parameter in constructor.parameter_list.parameters.iter() {
@@ -450,14 +452,14 @@ impl Converter<'_> {
                     "a property hook runs when the constructor sets the property, which the function does not do (P2R-391)",
                 );
             }
-            if constructor.ampersand.is_some() {
+            if form.by_reference {
                 self.refuse(
                     &constructor.name,
                     "the constructor of an exception class may not return by reference (P2R-391)",
                 );
             }
-            if let Some(attributes) = constructor.attribute_lists.first() {
-                self.refuse(attributes, "attributes are not supported (P2R-07)");
+            if let Some(group) = form.attribute_groups.first() {
+                self.refuse(group, "attributes are not supported (P2R-07)");
             }
         }
     }

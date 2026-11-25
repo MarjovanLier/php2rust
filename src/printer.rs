@@ -810,3 +810,44 @@ mod tests {
         assert_eq!(expr(&empty, false), "&mut []");
     }
 }
+
+/// Run with `scripts/prove.sh kani`, which caps memory and time. The proofs hold for
+/// inputs of up to 6 bytes; a longer input is not covered.
+#[cfg(kani)]
+mod proofs {
+    use super::*;
+
+    fn octal(byte: u8) -> bool {
+        (b'0'..=b'7').contains(&byte)
+    }
+
+    /// No input panics, and a true answer always points at `\` and three octal digits
+    /// from `\400` to `\777` (P2R-49).
+    #[kani::proof]
+    #[kani::unwind(8)]
+    fn octal_overflow_is_true_only_for_an_escape_above_377() {
+        let bytes: [u8; 6] = kani::any();
+        let len: usize = kani::any_where(|&len| len <= bytes.len());
+        let raw = &bytes[..len];
+        let found = octal_overflow(raw);
+        kani::cover!(found, "an escape above 377");
+        if found {
+            assert!(raw.windows(4).any(|w| {
+                w[0] == b'\\' && (b'4'..=b'7').contains(&w[1]) && octal(w[2]) && octal(w[3])
+            }));
+        }
+    }
+
+    /// An escape from `\400` to `\777` at the start is always found, whatever follows it
+    /// (P2R-49).
+    #[kani::proof]
+    #[kani::unwind(8)]
+    fn octal_overflow_finds_an_escape_above_377_at_the_start() {
+        let first: u8 = kani::any_where(|byte| (b'4'..=b'7').contains(byte));
+        let second: u8 = kani::any_where(|&byte| octal(byte));
+        let third: u8 = kani::any_where(|&byte| octal(byte));
+        let rest: [u8; 2] = kani::any();
+        let raw = [b'\\', first, second, third, rest[0], rest[1]];
+        assert!(octal_overflow(&raw));
+    }
+}

@@ -378,3 +378,26 @@ mod tests {
         assert_eq!(integer_as_float(&[b'1'; 400]), f64::INFINITY);
     }
 }
+
+/// Run with `scripts/prove.sh kani`, which caps memory and time.
+#[cfg(kani)]
+mod proofs {
+    use super::*;
+
+    /// A shift converts exactly when Rust accepts its count for every value, so converted
+    /// output never panics on `<<` or `>>` (P2R-167).
+    #[kani::proof]
+    fn a_shift_converts_exactly_when_rust_accepts_its_count() {
+        let count: i64 = kani::any();
+        let value: i64 = kani::any();
+        let op = if kani::any() { BinOp::Shl } else { BinOp::Shr };
+        let converts = shift_count_refusal(op, &RExpr::Int(count)).is_none();
+        let rust_accepts = u32::try_from(count)
+            .is_ok_and(|n| value.checked_shl(n).is_some() && value.checked_shr(n).is_some());
+        kani::cover!(converts, "a count that converts");
+        kani::cover!(!converts, "a count that stops");
+        assert_eq!(converts, rust_accepts);
+        let variable = RExpr::Var(String::from("n"));
+        assert!(shift_count_refusal(op, &variable).is_some());
+    }
+}

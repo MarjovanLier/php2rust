@@ -30,3 +30,7 @@ mago-word = "=1.61.0"
 # were already in the lockfile through Mago.
 regex = "=1.13.1"
 regex-syntax = "=0.8.11"
+
+# The Kani proofs sit behind cfg(kani); see scripts/prove.sh.
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(kani)'] }

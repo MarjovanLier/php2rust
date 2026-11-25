@@ -7,6 +7,7 @@ use mago_syntax::cst::*;
 
 use super::classes::MethodInfo;
 use super::control::emit;
+use super::members::{MemberForm, ModifierKind};
 use super::{Converter, Mode, Signature};
 use crate::types::RustType;
 
@@ -129,30 +130,22 @@ impl Converter<'_> {
                 );
                 continue;
             };
-            if let Some(attributes) = method.attribute_lists.first() {
-                self.refuse(attributes, "attributes are not supported (P2R-07)");
+            let form = MemberForm::of_method(method, self.analysed(method).resolved);
+            if let Some(group) = form.attribute_groups.first() {
+                self.refuse(group, "attributes are not supported (P2R-07)");
             }
             let rust_name = crate::names::rust_name(&String::from_utf8_lossy(method.name.value));
             // PHP rejects a body and every modifier but one `public`, which Mago's analyser
-            // does not report.
-            let problem = if method
-                .modifiers
-                .iter()
-                .any(|m| matches!(m, Modifier::Static(_)))
-            {
+            // does not report; a method with no modifier is public.
+            let problem = if form.first(&[ModifierKind::Static]).is_some() {
                 Some("a static method of an interface is not supported yet (P2R-370)")
-            } else if method
-                .modifiers
-                .iter()
-                .any(|m| !matches!(m, Modifier::Public(_)))
-                || method.modifiers.len() > 1
-            {
+            } else if !(form.modifiers.is_empty() || form.only(ModifierKind::Public)) {
                 Some("an interface method may carry only one public (P2R-370)")
             } else if matches!(method.body, MethodBody::Concrete(_)) {
                 Some("an interface method has no body (P2R-370)")
-            } else if method.name.value.starts_with(b"__") {
+            } else if form.name.starts_with(b"__") {
                 Some("a method whose name starts with __ is not supported (P2R-370)")
-            } else if method.ampersand.is_some() {
+            } else if form.by_reference {
                 Some("a method that returns by reference is not supported (P2R-370)")
             } else if rust_name
                 .as_deref()

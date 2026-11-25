@@ -70,6 +70,8 @@ pub(super) struct MemberForm {
     pub(super) parameters: usize,
     /// In source order.
     pub(super) attribute_groups: Vec<AttributeGroup>,
+    /// The span of a property's `var` keyword; none for a method.
+    pub(super) var: Option<Span>,
 }
 
 impl MemberForm {
@@ -80,20 +82,23 @@ impl MemberForm {
             by_reference: method.ampersand.is_some(),
             parameters: method.parameter_list.parameters.len(),
             attribute_groups: groups(&method.attribute_lists, names),
+            var: None,
         }
     }
 
     pub(super) fn of_property(property: &Property<'_>, names: &ResolvedNames<'_>) -> Self {
-        let (modifiers, attribute_lists, name) = match property {
+        let (modifiers, attribute_lists, name, var) = match property {
             Property::Plain(plain) => (
                 &plain.modifiers,
                 &plain.attribute_lists,
                 plain.items.iter().next().map(|item| item.variable().name),
+                &plain.var,
             ),
             Property::Hooked(hooked) => (
                 &hooked.modifiers,
                 &hooked.attribute_lists,
                 Some(hooked.item.variable().name),
+                &hooked.var,
             ),
         };
         MemberForm {
@@ -104,6 +109,7 @@ impl MemberForm {
             by_reference: false,
             parameters: 0,
             attribute_groups: groups(attribute_lists, names),
+            var: var.as_ref().map(HasSpan::span),
         }
     }
 
@@ -124,6 +130,13 @@ impl MemberForm {
     pub(super) fn doubled(&self) -> Option<&WrittenModifier> {
         doubled_at(self.modifiers.iter().map(|modifier| modifier.kind))
             .map(|at| &self.modifiers[at])
+    }
+
+    /// A set visibility wider than the read visibility, which PHP rejects when it compiles
+    /// the file and Mago does not report.
+    pub(super) fn wider_set(&self) -> Option<&WrittenModifier> {
+        let kinds: Vec<ModifierKind> = self.modifiers.iter().map(|m| m.kind).collect();
+        wider_set_at(&kinds).map(|at| &self.modifiers[at])
     }
 
     /// Both `final` and `private`.
@@ -355,6 +368,17 @@ mod tests {
         );
         assert!(form("final private function f() {}").final_private());
         assert!(!form("final public function f() {}").final_private());
+    }
+
+    #[test]
+    fn a_property_reads_var_and_a_wider_set_visibility() {
+        assert_eq!(form("var $a;").var.map(offset), Some(0));
+        assert_eq!(form("public $a;").var, None);
+        let found = form("private public(set) string $a;");
+        assert_eq!(
+            found.wider_set().map(|modifier| offset(modifier.span)),
+            Some(8)
+        );
     }
 
     #[test]

@@ -1768,7 +1768,7 @@ fn model_member(
         ClassLikeMember::Method(method) => {
             let lower = method.name.value.to_ascii_lowercase();
             if lower == b"casts" {
-                return match casts_method(method) {
+                return match casts_method(method, names) {
                     Some(map) => Member::CastsMethod(map),
                     None => Member::Other,
                 };
@@ -2222,17 +2222,20 @@ fn tree_methods(codebase: &CodebaseMetadata, mut pending: Vec<Vec<u8>>) -> HashS
 }
 
 /// `protected function casts(): array { return [..]; }` with a literal map and no attribute.
-fn casts_method(method: &Method<'_>) -> Option<HashMap<String, Option<Kind>>> {
-    let protected = matches!(method.modifiers.as_slice(), [Modifier::Protected(_)]);
+fn casts_method(
+    method: &Method<'_>,
+    names: &ResolvedNames<'_>,
+) -> Option<HashMap<String, Option<Kind>>> {
+    let form = MemberForm::of_method(method, names);
     let returns_array =
         matches!(&method.return_type_hint, Some(hint) if matches!(hint.hint, Hint::Array(_)));
     // PHP checks an attribute's arguments and an #[\Override] when it loads the class, and
     // the output leaves the method out, so nothing else would see them.
-    if !protected
+    if !form.only(ModifierKind::Protected)
         || !returns_array
-        || method.ampersand.is_some()
-        || !method.parameter_list.parameters.is_empty()
-        || !method.attribute_lists.is_empty()
+        || form.by_reference
+        || form.parameters != 0
+        || !form.attribute_groups.is_empty()
     {
         return None;
     }

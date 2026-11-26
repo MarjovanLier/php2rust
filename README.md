@@ -535,8 +535,11 @@ php2rust refuses some valid PHP that version 1 converts in other forms:
   where rustc would accept the code, for example `%` by a variable that is 0 on every
   path through an `if`.
 - A variable that may be null stays an `Option` after an assignment that PHP knows makes
-  it not null: after `if ($c === null) { $c = 0; }`, a plain use such as `$c + 1` or
-  `echo $c` stops. A new variable from `??` works: `$n = $c ?? 0;`.
+  it not null, except after `if ($c === null) { $c = 0; }` as a top-level statement of a
+  function or method for an `int`, `float`, `bool` or enum (P2R-293). Such a check
+  inside another block, or for a string, list or object, still leaves `$c` an `Option`,
+  so a plain use such as `$c + 1` or `echo $c` stops. A new variable from `??` works:
+  `$n = $c ?? 0;`.
 - A list holds `Option` elements only when its first write holds `null`:
   `$xs = [1, 2]; $xs[] = null;` stops.
 - A `for` step that reads a variable that a let-else in the loop body checks stops, also

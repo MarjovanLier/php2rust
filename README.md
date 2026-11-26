@@ -521,15 +521,10 @@ the others are findings of the Mago analyser. In short:
 
 php2rust refuses some valid PHP that version 1 converts in other forms:
 
-- After a literal list and an append (`$a = [1, 2]; $a[] = 3;`), Mago reads the list
-  type wrongly, so a read at a literal index (`$a[0]`, `$a[2]`) stops with a Mago error
-  such as `undefined-int-array-index`. A read at a variable index converts.
 - An empty list that is read while it is still empty (`$a = []; echo count($a);`) stops
   when its variable name also holds a list of another element type in the same body,
   for example as a `foreach` value, because php2rust takes the element type from every
   read and write of the name.
-- A variable that a `while (true)` loop assigns before each of two `break` statements,
-  and that is read after the loop, stops, because Mago gives it the type `mixed`.
 - `$s = "$s"` stops as an assignment of a variable to itself.
 - Every int overflow and every zero divisor that the tool can prove stops (P2R-50), also
   where rustc would accept the code, for example `%` by a variable that is 0 on every

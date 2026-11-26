@@ -1,0 +1,8 @@
+input.php:12:12: arithmetic on a value that may be null is not supported (P2R-106)
+input.php:20:12: a value that may be null cannot be joined into a string (P2R-106)
+input.php:26:9: the variable $x changes type from Option<f64> to i64 (P2R-34)
+input.php:36:12: arithmetic on a value that may be null is not supported (P2R-106)
+input.php:45:12: arithmetic on a value that may be null is not supported (P2R-106)
+input.php:51:9: the value assigned to $c is never read (P2R-35)
+input.php:62:5: the value assigned to $c is never read (P2R-35)
+input.php:62:10: the variable $c changes type from i64 to null (P2R-34)

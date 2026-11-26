@@ -42,7 +42,9 @@ function no_type(int $n, bool $c): int
 
 function narrowed_arm(?int $m, int $n): int
 {
+    // Two statements, so P2R-293 leaves $m an Option.
     if ($m === null) {
+        echo "default\n";
         $m = 0;
     }
     return match ($n) {

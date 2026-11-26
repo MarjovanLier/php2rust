@@ -6,6 +6,7 @@ use std::collections::{HashMap, HashSet};
 
 use mago_allocator::LocalArena;
 use mago_codex::metadata::CodebaseMetadata;
+use mago_codex::metadata::class_like::ClassLikeMetadata;
 use mago_codex::metadata::flags::MetadataFlags;
 use mago_codex::metadata::property::PropertyMetadata;
 use mago_codex::metadata::ttype::TypeMetadata;
@@ -1358,8 +1359,24 @@ fn int_key(class: &Class<'_>, names: &ResolvedNames<'_>) -> bool {
 /// The names, without `$`, of the public instance properties of Eloquent's model and its
 /// traits, which PHP reads before `__get` (P2R-401).
 fn public_properties(codebase: &CodebaseMetadata) -> HashSet<String> {
-    let mut found = HashSet::new();
-    let mut pending: Vec<Vec<u8>> = vec![MODEL.to_vec()];
+    with_traits(codebase, vec![MODEL.to_vec()])
+        .into_iter()
+        .flat_map(|class| class.properties.values())
+        .filter(|property| {
+            property.read_visibility == Visibility::Public && !property.flags.is_static()
+        })
+        .map(|property| {
+            let text = String::from_utf8_lossy(property.name.0.as_bytes());
+            text.trim_start_matches('$').to_owned()
+        })
+        .collect()
+}
+
+/// The class-likes that the lowercase names `pending` name and their traits at any depth,
+/// each once. `find` runs before Mago populates the codebase, which is when Mago adds the
+/// traits of traits to `used_traits`, so this walks them itself (P2R-401).
+fn with_traits(codebase: &CodebaseMetadata, mut pending: Vec<Vec<u8>>) -> Vec<&ClassLikeMetadata> {
+    let mut found = Vec::new();
     let mut seen: HashSet<Vec<u8>> = HashSet::new();
     while let Some(name) = pending.pop() {
         if !seen.insert(name.clone()) {
@@ -1368,18 +1385,13 @@ fn public_properties(codebase: &CodebaseMetadata) -> HashSet<String> {
         let Some(class) = codebase.get_class_like(&name) else {
             continue;
         };
-        for property in class.properties.values() {
-            if property.read_visibility == Visibility::Public && !property.flags.is_static() {
-                let text = String::from_utf8_lossy(property.name.0.as_bytes());
-                found.insert(text.trim_start_matches('$').to_owned());
-            }
-        }
         pending.extend(
             class
                 .used_traits
                 .iter()
                 .map(|used| used.as_bytes().to_ascii_lowercase()),
         );
+        found.push(class);
     }
     found
 }
@@ -2187,35 +2199,11 @@ fn model_methods(
             );
         }
     }
-    tree_methods(codebase, pending)
-}
-
-/// The lowercase names of the methods of the class-likes `pending` and of their traits at
-/// any depth.
-fn tree_methods(codebase: &CodebaseMetadata, mut pending: Vec<Vec<u8>>) -> HashSet<Vec<u8>> {
-    let mut found = HashSet::new();
-    let mut seen: HashSet<Vec<u8>> = HashSet::new();
-    while let Some(name) = pending.pop() {
-        if !seen.insert(name.clone()) {
-            continue;
-        }
-        let Some(class) = codebase.get_class_like(&name) else {
-            continue;
-        };
-        found.extend(
-            class
-                .methods
-                .iter()
-                .map(|method| method.as_bytes().to_ascii_lowercase()),
-        );
-        pending.extend(
-            class
-                .used_traits
-                .iter()
-                .map(|used| used.as_bytes().to_ascii_lowercase()),
-        );
-    }
-    found
+    with_traits(codebase, pending)
+        .into_iter()
+        .flat_map(|class| class.methods.iter())
+        .map(|method| method.as_bytes().to_ascii_lowercase())
+        .collect()
 }
 
 /// `protected function casts(): array { return [..]; }` with a literal map and no attribute.
@@ -3421,5 +3409,59 @@ fn string_literal(expression: &Expression<'_>) -> Option<String> {
             String::from_utf8(string.value?.to_vec()).ok()
         }
         _ => None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The codebase of `source` as `find` sees it: scanned, not yet populated.
+    fn scanned(source: &str) -> CodebaseMetadata {
+        let file = File::new(
+            Cow::Borrowed(b"test.php"),
+            FileType::Host,
+            None,
+            Cow::Owned(source.as_bytes().to_vec()),
+        );
+        let arena = LocalArena::new();
+        let program = parse_file(&arena, &file);
+        let names = NameResolver::new(&arena).resolve(program);
+        let mut codebase = CodebaseMetadata::new();
+        codebase.extend(scan_program(
+            &arena,
+            &file,
+            program,
+            &names,
+            PHPVersion::PHP85,
+        ));
+        codebase
+    }
+
+    fn names(classes: Vec<&ClassLikeMetadata>) -> Vec<String> {
+        let mut names: Vec<String> = classes
+            .iter()
+            .map(|class| class.name.as_bytes().to_ascii_lowercase())
+            .map(|name| String::from_utf8(name).unwrap())
+            .collect();
+        names.sort();
+        names
+    }
+
+    #[test]
+    fn with_traits_reads_traits_of_traits_once() {
+        let codebase = scanned(
+            "<?php\ntrait A { use B; }\ntrait B { use A; use C; }\ntrait C {}\nclass M { use A; }\ntrait Unused {}\n",
+        );
+        assert_eq!(
+            names(with_traits(&codebase, vec![b"m".to_vec()])),
+            ["a", "b", "c", "m"]
+        );
+    }
+
+    #[test]
+    fn with_traits_skips_a_name_nothing_declares() {
+        let codebase = scanned("<?php\nclass M { use Missing; }\n");
+        assert_eq!(names(with_traits(&codebase, vec![b"m".to_vec()])), ["m"]);
     }
 }

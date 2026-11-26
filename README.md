@@ -213,7 +213,8 @@ converts:
   `%` on ints, `===` and `!==` on two ints, floats, bools or strings, `==` and `!=` on
   two ints, floats or bools, `<`, `>`, `<=` and `>=` on two ints or two floats, and `&&`,
   `||` and `!` on bools. `<<`, `>>`, `<<=` and `>>=` on ints, by a literal count from 0
-  to 63.
+  to 63. `$a === []` and `$a !== []` on a list or a map become `a.is_empty()` and
+  `!a.is_empty()`.
 - the casts `(int)` of a string, which reads the number at its start as PHP does, and
   `(string)` of an int or a string.
 - strings built with `.`, `.=` and interpolation of simple variables (`"Hi $name"`,

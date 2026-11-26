@@ -553,12 +553,7 @@ impl Converter<'_> {
         }) && self
             .codebase
             .get_class_like(b"spatie\\laraveldata\\data")
-            .is_some_and(|data| {
-                !self
-                    .files
-                    .iter()
-                    .any(|analysed| analysed.file == data.span.file_id)
-            })
+            .is_some_and(|data| self.included(&data.span))
     }
 
     /// True when the attribute is one of laravel-data's, which only the methods of `Data`

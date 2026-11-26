@@ -203,12 +203,7 @@ impl Converter<'_> {
         let codebase = self.codebase;
         let included = codebase
             .get_class_like(CONDITIONABLE)
-            .is_some_and(|conditionable| {
-                !self
-                    .files
-                    .iter()
-                    .any(|analysed| analysed.file == conditionable.span.file_id)
-            });
+            .is_some_and(|conditionable| self.included(&conditionable.span));
         let laravel = codebase.get_method(CONDITIONABLE, b"when");
         let laravel_when = |class: &[u8]| {
             codebase

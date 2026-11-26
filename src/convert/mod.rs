@@ -293,6 +293,7 @@ fn analyse(
         })
         .collect();
     let mut converter = Converter::new(&codebase, analysed);
+    converter.included = included_ids;
     converter.models = models;
     converter.type_names.optional = converter.included_optional();
     converter.type_names.collections = converter.included_collections();
@@ -624,6 +625,8 @@ struct Converter<'c> {
     codebase: &'c CodebaseMetadata,
     /// The input files as Mago analysed them.
     files: Vec<Analysed<'c>>,
+    /// The files passed with `--include` (P2R-340).
+    included: HashSet<FileId>,
     problems: Vec<Problem>,
     /// Declared functions by lowercase PHP name, because PHP function names ignore case (P2R-32).
     functions: HashMap<Vec<u8>, Signature>,
@@ -715,6 +718,7 @@ impl<'c> Converter<'c> {
         Self {
             codebase,
             files,
+            included: HashSet::new(),
             problems: Vec::new(),
             functions: HashMap::new(),
             enums: Vec::new(),
@@ -762,6 +766,12 @@ impl<'c> Converter<'c> {
             .iter()
             .find(|analysed| analysed.file == file)
             .expect("every node comes from an input file")
+    }
+
+    /// True when a file passed with `--include` declares the symbol at `span`; neither an
+    /// input file nor Mago's stubs of PHP and its extensions count (P2R-340).
+    fn included(&self, span: &Span) -> bool {
+        self.included.contains(&span.file_id)
     }
 
     /// The type Mago found for the expression `node` (P2R-21).
@@ -828,19 +838,17 @@ impl<'c> Converter<'c> {
 
     /// True for an unqualified name that no import maps, which PHP looks up in the global
     /// namespace when the current namespace has no function of that name (P2R-151), also
-    /// none of an included file (P2R-340).
+    /// none of an included file (P2R-340). A namespaced function of an extension exists
+    /// when PHP loads the extension, so Mago's stub of one stops the fallback too.
     fn falls_back(&self, identifier: &Identifier<'_>) -> bool {
         let key = self.identifier_key(identifier);
         let namespaced = key.as_slice() != short_name(&key);
-        let included = namespaced
+        let declared = namespaced
             && self.codebase.get_function(&key).is_some_and(|function| {
-                !self
-                    .files
-                    .iter()
-                    .any(|analysed| analysed.file == function.span.file_id)
+                self.included(&function.span) || function.flags.is_built_in()
             });
         matches!(identifier, Identifier::Local(_))
-            && !included
+            && !declared
             && !self
                 .analysed(identifier)
                 .resolved

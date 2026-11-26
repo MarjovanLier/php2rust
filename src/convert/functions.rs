@@ -101,6 +101,8 @@ impl Converter<'_> {
         }
         let codebase = self.codebase;
         let Some(metadata) = codebase.get_function(&self.function_key(function)) else {
+            // No input reaches this today: Mago scans every function that gets this far.
+            // It guards a function that a later Mago version does not scan.
             self.refuse(
                 &function.name,
                 "Mago has no signature for this function (P2R-23)",
@@ -206,6 +208,8 @@ impl Converter<'_> {
             self.refuse(parameter, types::NULLABLE_OBJECT);
             return None;
         }
+        // No input reaches this today: declared_type refuses each type that built() rejects
+        // first. It guards a type that declared_type learns to give before the build does.
         if !types::built(&ty) {
             self.refuse(
                 parameter,
@@ -377,6 +381,7 @@ impl Converter<'_> {
             self.refuse(hint, types::NULLABLE_OBJECT);
             return None;
         }
+        // No input reaches this today, for the reason at the parameter check above.
         if !types::built(&ty) {
             self.refuse(
                 hint,
@@ -396,6 +401,8 @@ impl Converter<'_> {
         hint: Option<&Hint<'_>>,
     ) -> Option<RustType> {
         let Some(union) = declared else {
+            // No input reaches this today: each caller refuses a missing declared type
+            // first, and Mago types every declared type.
             self.refuse(node, "Mago found no type here (P2R-23)");
             return None;
         };

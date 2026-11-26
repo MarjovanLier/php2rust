@@ -235,6 +235,8 @@ impl Converter<'_> {
         let key = self.name_key(&declaration.name, declaration.name.value);
         let codebase = self.codebase;
         let Some(metadata) = codebase.get_method(&key, b"__construct") else {
+            // No input reaches this today: Mago scans every constructor that gets this far.
+            // It guards a constructor that a later Mago version does not scan.
             self.refuse(
                 &constructor.name,
                 "Mago has no signature for this constructor (P2R-23)",

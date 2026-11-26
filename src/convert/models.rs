@@ -376,6 +376,8 @@ impl Converter<'_> {
                 return None;
             };
             if !named.insert(field.php_name.clone()) {
+                // No input reaches this today: Mago reports duplicate-array-key at the same
+                // key, and its line takes the place of this one.
                 self.refuse(entry.key, "a key of create is written twice (P2R-411)");
                 return None;
             }

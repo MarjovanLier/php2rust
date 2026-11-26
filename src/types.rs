@@ -631,6 +631,7 @@ fn map_with(
     keyed: &TKeyedArray,
     value: impl Fn(&TUnion) -> Result<RustType, String>,
 ) -> Result<RustType, String> {
+    // No input reaches this today: every caller runs only after is_map has found both types.
     let Some((key, value_type)) = &keyed.parameters else {
         return Err("an array without key and value types has no Rust type (P2R-22)".into());
     };

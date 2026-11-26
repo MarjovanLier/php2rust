@@ -1,0 +1,1 @@
+input.php:8:12: a method call needs an object of a class of this file (P2R-135)

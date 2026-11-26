@@ -1,0 +1,3 @@
+input.php:23:6: a void function has no value (P2R-20)
+input.php:24:6: a void method has no value (P2R-20)
+input.php:26:6: a void method has no value (P2R-20)

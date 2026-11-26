@@ -1,0 +1,2 @@
+input.php:8:72: preg_replace_callback() converts on a string subject only (P2R-302)
+input.php:14:49: the parameter of a preg_replace_callback() callback must be declared array (P2R-302)

@@ -1,0 +1,3 @@
+input.php:7:5: a readonly class may hold only a constructor, methods and constants (P2R-130)
+input.php:14:33: a constructor parameter that is not promoted to a property is not supported (P2R-130)
+input.php:20:9: a property hook is not supported, and PHP rejects one on a readonly property (P2R-130)

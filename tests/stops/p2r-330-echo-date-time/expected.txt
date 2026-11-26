@@ -1,0 +1,1 @@
+input.php:12:10: echo of a DateTime is not supported (P2R-330)

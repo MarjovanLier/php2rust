@@ -1,0 +1,2 @@
+input.php:9:31: explode() is supported only on two strings (P2R-186)
+input.php:17:20: implode() needs a string glue (P2R-186)

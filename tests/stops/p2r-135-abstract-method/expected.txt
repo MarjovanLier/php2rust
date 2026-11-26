@@ -1,0 +1,2 @@
+input.php:7:1: only readonly and final may stand on a class (P2R-130)
+input.php:9:5: an abstract method is not supported (P2R-135)

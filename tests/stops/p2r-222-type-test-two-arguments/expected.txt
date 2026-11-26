@@ -1,0 +1,1 @@
+input.php:8:12: is_scalar() and gettype() take one argument (P2R-222)

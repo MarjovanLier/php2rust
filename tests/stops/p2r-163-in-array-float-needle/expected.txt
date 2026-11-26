@@ -1,0 +1,1 @@
+input.php:7:21: in_array() converts only an int, string or enum needle (P2R-163)

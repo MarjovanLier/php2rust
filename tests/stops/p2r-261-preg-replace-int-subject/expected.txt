@@ -1,0 +1,1 @@
+input.php:8:38: preg_replace() converts on a string subject only (P2R-261)

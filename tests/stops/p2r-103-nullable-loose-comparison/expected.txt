@@ -1,0 +1,2 @@
+input.php:15:12: only === and !== compare values that may be null (P2R-103)
+input.php:20:12: only === and !== compare values that may be null (P2R-103)

@@ -1,0 +1,2 @@
+input.php:19:41: each value of create needs a string key (P2R-411)
+input.php:25:26: a key of create must be a string literal (P2R-411)

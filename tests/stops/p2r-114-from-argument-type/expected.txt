@@ -1,0 +1,1 @@
+input.php:13:26: the argument of E::from() and E::tryFrom() must have the backing type of the enum (P2R-114)

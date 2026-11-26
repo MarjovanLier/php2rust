@@ -1,0 +1,1 @@
+input.php:17:24: this variable name has no Rust form (P2R-30)

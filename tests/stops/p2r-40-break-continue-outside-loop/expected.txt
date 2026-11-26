@@ -1,0 +1,2 @@
+input.php:10:9: break outside a loop is not supported (P2R-40)
+input.php:13:9: continue outside a loop is not supported (P2R-40)

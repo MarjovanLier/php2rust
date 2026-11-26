@@ -1,0 +1,1 @@
+input.php:9:12: this string escape is not supported (P2R-49)

@@ -1,0 +1,1 @@
+input.php:15:12: an int that may be null where a float is declared is not supported (P2R-25)

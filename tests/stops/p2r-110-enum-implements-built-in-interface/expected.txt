@@ -1,0 +1,1 @@
+input.php:5:16: an enum that implements an interface is not supported (P2R-110)

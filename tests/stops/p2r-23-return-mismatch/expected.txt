@@ -1,0 +1,2 @@
+input.php:10:9: this return does not match the declared return type (P2R-23)
+input.php:17:9: this return does not match the declared return type (P2R-23)

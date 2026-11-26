@@ -1,0 +1,1 @@
+input.php:8:12: unary minus needs an int or float operand (P2R-43)

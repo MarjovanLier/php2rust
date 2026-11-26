@@ -1,0 +1,2 @@
+input.php:24:12: ?-> converts only on an object of a class of this file, or ->name and ->value of an enum (P2R-234)
+input.php:29:13: ?-> on a void method is not supported (P2R-234)

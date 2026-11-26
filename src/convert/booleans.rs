@@ -74,6 +74,9 @@ impl Converter<'_> {
         if strict && let Some(converted) = self.preg_match_comparison(binary, op) {
             return converted;
         }
+        if strict && let Some(converted) = self.empty_comparison(binary, op == BinOp::Eq) {
+            return converted;
+        }
         let left = self.expression(binary.lhs);
         let right = self.expression(binary.rhs);
         let ((left, left_type), (right, right_type)) = (left?, right?);
@@ -99,6 +102,42 @@ impl Converter<'_> {
         }
         let expr = RExpr::Binary(Box::new(left), op, Box::new(right));
         Some((expr, RustType::Bool))
+    }
+
+    /// `$a === []` or `$a !== []`, either way round, where `$a` is a list or a map: PHP's
+    /// `===` with an empty array is true exactly when `$a` has no elements, so it becomes
+    /// `a.is_empty()` or `!a.is_empty()` (P2R-43). `None` when neither side or both sides
+    /// are `[]`; another type of `$a` stops the conversion.
+    fn empty_comparison(
+        &mut self,
+        binary: &Binary<'_>,
+        equal: bool,
+    ) -> Option<Option<(RExpr, RustType)>> {
+        let other = match (
+            super::lists::is_empty_literal(binary.lhs),
+            super::lists::is_empty_literal(binary.rhs),
+        ) {
+            (true, false) => binary.rhs,
+            (false, true) => binary.lhs,
+            _ => return None,
+        };
+        let Some((expr, ty)) = self.expression(other) else {
+            return Some(None);
+        };
+        if !matches!(ty, RustType::Vec(_) | RustType::Map(..)) {
+            self.refuse(
+                binary,
+                "only a list or a map that cannot be null compares with [] (P2R-43)",
+            );
+            return Some(None);
+        }
+        let test = RExpr::Method(Box::new(expr), "is_empty");
+        let test = if equal {
+            test
+        } else {
+            RExpr::Not(Box::new(test))
+        };
+        Some(Some((test, RustType::Bool)))
     }
 }
 

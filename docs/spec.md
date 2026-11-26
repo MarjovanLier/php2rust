@@ -405,6 +405,11 @@ requirement IDs.
     variable
   - `===` and `!==` with both operands the same type, `int`, `float`,
     `bool` or `string`
+  - `===` and `!==` between the empty literal `[]` and a list or a map
+    (P2R-240) that cannot be null, either way round, as `a.is_empty()` and
+    `!a.is_empty()`: PHP's `===` with an empty array is true exactly when
+    the other array has no elements. `[]` against any other type, `null`
+    included, stops the conversion, and so does `[] === []`
   - `==` and `!=` with both operands the same type, `int`, `float` or `bool`
   - `<`, `>`, `<=`, `>=` with both operands `int` or both `float`
   - `<<`, `>>`, `<<=` and `>>=` as P2R-167 allows them

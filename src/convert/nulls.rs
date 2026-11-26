@@ -171,8 +171,7 @@ impl Converter<'_> {
     ) -> Option<Option<(RExpr, RustType)>> {
         let value = beside_null(binary)?;
         if !strict || !matches!(op, BinOp::Eq | BinOp::Ne) {
-            self.record_refused(value);
-            self.refuse(
+            self.refuse_binary(
                 binary,
                 "only === and !== compare with null, because PHP's null == 0 is true (P2R-103)",
             );
@@ -414,8 +413,6 @@ impl Converter<'_> {
                     | Expression::Access(Access::NullSafeProperty(_))
             )
         {
-            self.record_refused(binary.lhs);
-            self.record_refused(binary.rhs);
             let message = if matches!(
                 left_node,
                 Expression::Access(Access::Property(_)) | Expression::Call(Call::Method(_))
@@ -428,7 +425,7 @@ impl Converter<'_> {
             } else {
                 "?? converts on a variable, parameter, call or array shape element only; PHP checks anything else with isset (P2R-105)"
             };
-            self.refuse(binary, message);
+            self.refuse_binary(binary, message);
             return None;
         }
         if let Expression::Throw(throw) = lists::unparenthesized(binary.rhs) {

@@ -474,8 +474,7 @@ impl Converter<'_> {
             _ => false,
         };
         let (Some(index), true) = (index, usable) else {
-            self.record_refused(node);
-            self.refuse(
+            self.refuse_expression(
                 node,
                 "only E::cases(), and E::from() and E::tryFrom() with one argument on a backed enum, are supported (P2R-114)",
             );

@@ -326,8 +326,7 @@ impl Converter<'_> {
             return None;
         }
         let Some(key) = literal_key(access.index) else {
-            self.record_refused(access.index);
-            self.refuse(
+            self.refuse_expression(
                 access.index,
                 "an array shape is read only with a string literal key (P2R-203)",
             );

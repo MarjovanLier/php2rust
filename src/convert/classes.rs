@@ -2209,18 +2209,16 @@ impl Converter<'_> {
             .class_key(instantiation.class)
             .and_then(|key| self.classes.iter().position(|c| c.key == key));
         let Some(index) = index.filter(|&index| !self.classes[index].is_enum) else {
-            self.record_refused(node);
             let message = if matches!(instantiation.class, Expression::Parent(_)) {
                 "parent is not supported (P2R-135)"
             } else {
                 "new converts only for a class of this file (P2R-133)"
             };
-            self.refuse(node, message);
+            self.refuse_expression(node, message);
             return None;
         };
         if self.classes[index].model {
-            self.record_refused(node);
-            self.refuse(
+            self.refuse_expression(
                 node,
                 "new of a model is not supported, because this section creates no model (P2R-404)",
             );
@@ -2319,7 +2317,7 @@ impl Converter<'_> {
             return converted.map(|(call, ty)| (call, Some(ty)));
         }
         let Some((object, ty)) = self.expression(call.object) else {
-            self.record_refused_arguments(&call.argument_list);
+            self.record_refused(node);
             return None;
         };
         if ty == RustType::DateTime {
@@ -2334,7 +2332,6 @@ impl Converter<'_> {
         }
         // An enum value has the methods of its enum (P2R-155).
         let (RustType::Class(class) | RustType::Enum(class)) = &ty else {
-            self.record_refused_arguments(&call.argument_list);
             let message = if matches!(ty.inner(), RustType::Union(_)) {
                 UNION_MEMBER
             } else if matches!(ty, RustType::Option(_)) {
@@ -2342,17 +2339,15 @@ impl Converter<'_> {
             } else {
                 "a method call needs an object of a class of this file (P2R-135)"
             };
-            self.refuse(node, message);
+            self.refuse_expression(node, message);
             return None;
         };
         let ClassLikeMemberSelector::Identifier(name) = &call.method else {
-            self.record_refused_arguments(&call.argument_list);
-            self.refuse(node, "a method name must be a plain identifier (P2R-135)");
+            self.refuse_expression(node, "a method name must be a plain identifier (P2R-135)");
             return None;
         };
         if name.value.starts_with(b"__") {
-            self.record_refused_arguments(&call.argument_list);
-            self.refuse(
+            self.refuse_expression(
                 node,
                 "a method whose name starts with __ cannot be called (P2R-133)",
             );
@@ -2362,13 +2357,11 @@ impl Converter<'_> {
             .class_named(class)
             .and_then(|index| Some((index, self.method_index(index, name.value)?)));
         let Some((index, at)) = found else {
-            self.record_refused_arguments(&call.argument_list);
-            self.refuse(node, "this class has no method of that name (P2R-135)");
+            self.refuse_expression(node, "this class has no method of that name (P2R-135)");
             return None;
         };
         if self.classes[index].methods[at].is_static {
-            self.record_refused_arguments(&call.argument_list);
-            self.refuse(
+            self.refuse_expression(
                 node,
                 "a static method is called with ::, not through an object (P2R-153)",
             );
@@ -2410,8 +2403,7 @@ impl Converter<'_> {
             _ => None,
         };
         if let Some(problem) = problem {
-            self.record_refused_arguments(&call.argument_list);
-            self.refuse(node, problem);
+            self.refuse_expression(node, problem);
             return None;
         }
         if let Some(converted) = self.store_call(node) {
@@ -2440,15 +2432,12 @@ impl Converter<'_> {
                     .map(|(call, ty)| (call, Some(ty)));
             }
             Some((_, None)) => {
-                self.record_refused_arguments(&call.argument_list);
-                self.refuse(node, "this class has no method of that name (P2R-153)");
+                self.refuse_expression(node, "this class has no method of that name (P2R-153)");
                 return None;
             }
+            // A class or method given by a variable (`$b::m()`, `C::$m()`) reads it.
             None => {
-                // A class given by a variable (`$b::m()`) reads it.
-                self.record_refused(call.class);
-                self.record_refused_arguments(&call.argument_list);
-                self.refuse(
+                self.refuse_expression(
                     node,
                     "a static call needs a static method of a class or enum of this file (P2R-153)",
                 );
@@ -2456,8 +2445,7 @@ impl Converter<'_> {
             }
         };
         if !self.classes[index].methods[at].is_static {
-            self.record_refused_arguments(&call.argument_list);
-            self.refuse(
+            self.refuse_expression(
                 node,
                 "a method that is not static cannot be called with :: (P2R-153)",
             );
@@ -2475,16 +2463,6 @@ impl Converter<'_> {
             self.raised(node, call, signature.throws)?,
             signature.returns,
         ))
-    }
-
-    pub(super) fn record_refused_arguments(&mut self, list: &ArgumentList<'_>) {
-        for argument in list.arguments.iter() {
-            let value = match argument {
-                Argument::Positional(positional) => positional.value,
-                Argument::Named(named) => named.value,
-            };
-            self.record_refused(value);
-        }
     }
 }
 

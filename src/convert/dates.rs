@@ -68,8 +68,7 @@ impl Converter<'_> {
         let creates = matches!(&call.method, ClassLikeMemberSelector::Identifier(name)
             if name.value.eq_ignore_ascii_case(b"createFromFormat"));
         if !creates {
-            self.record_refused_arguments(&call.argument_list);
-            self.refuse(
+            self.refuse_expression(
                 node,
                 "of DateTime only DateTime::createFromFormat() and format() convert (P2R-330)",
             );
@@ -107,8 +106,7 @@ impl Converter<'_> {
         let formats = matches!(&call.method, ClassLikeMemberSelector::Identifier(name)
             if name.value.eq_ignore_ascii_case(b"format"));
         if !formats {
-            self.record_refused_arguments(&call.argument_list);
-            self.refuse(
+            self.refuse_expression(
                 node,
                 "of DateTime only DateTime::createFromFormat() and format() convert (P2R-330)",
             );
@@ -273,8 +271,7 @@ impl Converter<'_> {
             _ => None,
         };
         let Some(date) = date else {
-            self.record_refused(node);
-            self.refuse(
+            self.refuse_expression(
                 node,
                 "date_parse() converts only of $d->format('Y-m-d H:i:s') (P2R-335)",
             );

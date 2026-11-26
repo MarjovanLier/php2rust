@@ -291,8 +291,7 @@ impl Converter<'_> {
                 // The condition's problem is the one reported for this arm.
                 self.record_refused(result);
             } else if self.expression_type(result).is_none() {
-                self.record_refused(result);
-                self.refuse(
+                self.refuse_expression(
                     result,
                     "Mago finds this arm unreachable and gives its value no type (P2R-120)",
                 );

@@ -1,0 +1,3 @@
+input.php:25:6: a method name must be a plain identifier (P2R-135)
+input.php:28:6: a static call needs a static method of a class or enum of this file (P2R-153)
+input.php:32:6: a member name must be a plain identifier (P2R-134)

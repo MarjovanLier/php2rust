@@ -171,8 +171,7 @@ impl Converter<'_> {
             return None;
         }
         let Some(pairs) = pairs else {
-            self.record_refused(arguments[1]);
-            self.refuse(
+            self.refuse_expression(
                 arguments[1],
                 "strtr() converts only with a string map constant as its second argument (P2R-282)",
             );
@@ -766,8 +765,7 @@ impl Converter<'_> {
         }
         let values = &arguments[1..];
         if values.len() != wanted.len() {
-            self.record_refused(node);
-            self.refuse(
+            self.refuse_expression(
                 node,
                 "sprintf() needs one argument for each %s and %d (P2R-187)",
             );
@@ -830,8 +828,7 @@ impl Converter<'_> {
         } else {
             message
         };
-        self.record_refused(node);
-        self.refuse(node, message.to_owned());
+        self.refuse_expression(node, message);
         None
     }
 
@@ -1003,7 +1000,6 @@ impl Converter<'_> {
             .map(|union| types::rust_type(union, &self.type_names))
             && !matches!(ty, RustType::I64 | RustType::String)
         {
-            self.record_refused(value);
             let message = if matches!(ty, RustType::Option(_)) {
                 nulls::NULL_JOINED
             } else if matches!(ty, RustType::Optional(_)) {
@@ -1011,7 +1007,7 @@ impl Converter<'_> {
             } else {
                 "only string and int values can be joined into a string (P2R-45)"
             };
-            self.refuse(value, message);
+            self.refuse_expression(value, message);
             return false;
         }
         let Some((expr, ty)) = self.expression(value) else {

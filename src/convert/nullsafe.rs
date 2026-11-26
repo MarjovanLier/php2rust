@@ -25,16 +25,11 @@ impl Converter<'_> {
             _ => return None,
         };
         let refused = |converter: &mut Self, message: &str| {
-            if let Some(list) = arguments {
-                converter.record_refused_arguments(list);
-            }
-            converter.refuse(node, message.to_owned());
+            converter.refuse_expression(node, message);
             None
         };
         let Some((receiver, ty)) = self.expression(object) else {
-            if let Some(list) = arguments {
-                self.record_refused_arguments(list);
-            }
+            self.record_refused(node);
             return None;
         };
         let RustType::Option(inner) = &ty else {

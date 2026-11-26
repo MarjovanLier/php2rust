@@ -278,10 +278,7 @@ impl Converter<'_> {
             _ => None,
         };
         let Some(access) = access else {
-            for value in isset.values.iter() {
-                self.record_refused(value);
-            }
-            self.refuse(node, "isset converts only on one map element (P2R-242)");
+            self.refuse_expression(node, "isset converts only on one map element (P2R-242)");
             return None;
         };
         let (map, key, value) = self.map_lookup(access, KEY_CHECK)?;

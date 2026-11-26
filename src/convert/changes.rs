@@ -41,11 +41,7 @@ impl Converter<'_> {
         if let Expression::Access(Access::Property(access)) = unparenthesized(chain)
             && self.model_object(access.object)
         {
-            if let Some(value) = value {
-                self.record_refused(value);
-            }
-            self.record_refused(chain);
-            self.refuse(
+            self.refuse_expression(
                 expression,
                 "a write to an attribute of a model is not supported (P2R-404)",
             );
@@ -62,13 +58,7 @@ impl Converter<'_> {
             _ => None,
         };
         if let Some(message) = problem {
-            // The value's reads and the target's reads still count, so no false P2R-34 or
-            // P2R-35 line follows (P2R-03).
-            if let Some(value) = value {
-                self.record_refused(value);
-            }
-            self.record_refused(chain);
-            self.refuse(expression, message);
+            self.refuse_expression(expression, message);
             return Some(None);
         }
         Some(self.converted_change(expression, chain, append, operator?, value))

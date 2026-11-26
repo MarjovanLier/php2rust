@@ -133,8 +133,7 @@ impl Converter<'_> {
             Expression::Call(Call::Function(call))
                 if self.calls_built_in(call, b"preg_replace_callback") =>
             {
-                self.record_refused(expression);
-                self.refuse(
+                self.refuse_expression(
                     expression,
                     "preg_replace_callback() converts only as preg_replace_callback(P, fn, S) ?? 'default' (P2R-302)",
                 );
@@ -146,16 +145,14 @@ impl Converter<'_> {
             Expression::Call(Call::Function(call))
                 if self.calls_built_in(call, b"preg_replace") =>
             {
-                self.record_refused(expression);
-                self.refuse(
+                self.refuse_expression(
                     expression,
                     "preg_replace() converts only as preg_replace(P, R, S) ?? 'default' (P2R-261)",
                 );
                 None
             }
             Expression::Call(Call::Function(call)) if self.calls_built_in(call, b"preg_match") => {
-                self.record_refused(expression);
-                self.refuse(
+                self.refuse_expression(
                     expression,
                     "preg_match() converts only as a condition, or compared with === or !== to 0 or 1 (P2R-262)",
                 );
@@ -215,22 +212,19 @@ impl Converter<'_> {
             Expression::Access(Access::NullSafeProperty(_))
             | Expression::Call(Call::NullSafeMethod(_)) => self.nullsafe(expression),
             Expression::Clone(_) => {
-                self.record_refused(expression);
-                self.refuse(expression, "clone is not supported (P2R-136)");
+                self.refuse_expression(expression, "clone is not supported (P2R-136)");
                 None
             }
             Expression::Conditional(node) => self.conditional(node, None),
             Expression::Match(_) => {
-                self.record_refused(expression);
-                self.refuse(
+                self.refuse_expression(
                     expression,
                     "a match converts only as the whole value of a return or an assignment (P2R-120)",
                 );
                 None
             }
             other => {
-                self.record_refused(other);
-                self.refuse(
+                self.refuse_expression(
                     other,
                     "this expression is not supported in version 1 (P2R-07)",
                 );
@@ -249,9 +243,7 @@ impl Converter<'_> {
             BinaryOperator::LeftShift(_) => BinOp::Shl,
             BinaryOperator::RightShift(_) => BinOp::Shr,
             BinaryOperator::Division(_) => {
-                self.record_refused(binary.lhs);
-                self.record_refused(binary.rhs);
-                self.refuse(
+                self.refuse_binary(
                     binary,
                     "/ gives an int or a float depending on the values; use intdiv() (P2R-44)",
                 );
@@ -270,23 +262,17 @@ impl Converter<'_> {
             BinaryOperator::And(_) => return self.logic(binary, BinOp::And),
             BinaryOperator::Or(_) => return self.logic(binary, BinOp::Or),
             BinaryOperator::Spaceship(_) => {
-                self.record_refused(binary.lhs);
-                self.record_refused(binary.rhs);
-                self.refuse(binary, "<=> is not supported in version 1 (P2R-44)");
+                self.refuse_binary(binary, "<=> is not supported in version 1 (P2R-44)");
                 return None;
             }
             BinaryOperator::NullCoalesce(_) => return self.coalesce(binary),
             BinaryOperator::Instanceof(_) => return self.instance_of(binary, false),
             BinaryOperator::Exponentiation(_) => {
-                self.record_refused(binary.lhs);
-                self.record_refused(binary.rhs);
-                self.refuse(binary, "** is not supported in version 1 (P2R-44)");
+                self.refuse_binary(binary, "** is not supported in version 1 (P2R-44)");
                 return None;
             }
             _ => {
-                self.record_refused(binary.lhs);
-                self.record_refused(binary.rhs);
-                self.refuse(
+                self.refuse_binary(
                     binary,
                     "this operator is not supported in version 1 (P2R-07)",
                 );
@@ -363,8 +349,7 @@ impl Converter<'_> {
             _ => None,
         };
         let Some(ty) = ty else {
-            self.record_refused(arguments[0]);
-            self.refuse(
+            self.refuse_expression(
                 arguments[0],
                 "is_scalar() and gettype() convert only on a variable or parameter whose type is known (P2R-222)",
             );
@@ -416,8 +401,7 @@ impl Converter<'_> {
         node: &Expression<'_>,
     ) -> Option<(RExpr, Option<RustType>)> {
         let Expression::Identifier(name) = call.function else {
-            self.record_refused(node);
-            self.refuse(
+            self.refuse_expression(
                 node,
                 "only calls by plain function name are supported (P2R-07)",
             );
@@ -426,8 +410,7 @@ impl Converter<'_> {
         let key = self.call_key(name);
         let Some(signature) = self.functions.get(&key).cloned() else {
             let text = String::from_utf8_lossy(name.value()).into_owned();
-            self.record_refused(node);
-            self.refuse(node, format!("calls to {text} are not supported (P2R-48)"));
+            self.refuse_expression(node, format!("calls to {text} are not supported (P2R-48)"));
             return None;
         };
         let arguments = self.arguments(&call.argument_list, &signature.parameters, node)?;

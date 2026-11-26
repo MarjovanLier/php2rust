@@ -279,8 +279,7 @@ impl Converter<'_> {
             _ => false,
         };
         if !form {
-            self.record_refused(value);
-            self.refuse(
+            self.refuse_expression(
                 value,
                 "a parameter default must be a literal, null, [] or an enum case (P2R-168)",
             );

@@ -52,8 +52,7 @@ impl Converter<'_> {
             _ => Vec::new(),
         };
         if !call.argument_list.arguments.is_empty() {
-            self.record_refused_arguments(&call.argument_list);
-            self.refuse(node, COLLECTION_USE);
+            self.refuse_expression(node, COLLECTION_USE);
             return None;
         }
         let read = |method: &str| {

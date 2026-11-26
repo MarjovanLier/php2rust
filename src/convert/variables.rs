@@ -253,6 +253,9 @@ pub(super) struct Variables {
     /// While the body of an arrow function converts: its first parameter. A variable
     /// before it belongs to the enclosing body (P2R-300).
     pub(super) closure_start: Option<Var>,
+    /// The spans of the reads (`false`) and writes (`true`) recorded so far, so a refusal
+    /// can record a whole expression, parts that already converted included (P2R-03).
+    recorded: HashSet<(Span, bool)>,
 }
 
 impl Default for Variables {
@@ -279,6 +282,7 @@ impl Default for Variables {
             step_guards: Vec::new(),
             owned_checks: HashSet::new(),
             closure_start: None,
+            recorded: HashSet::new(),
         }
     }
 }
@@ -325,11 +329,15 @@ impl Variables {
     }
 
     pub(super) fn read(&mut self, var: Var, span: Span) {
+        self.recorded.insert((span, false));
         self.flow.read(var, span);
         self.touch(var);
     }
 
     fn write(&mut self, var: Var, span: Option<Span>) {
+        if let Some(span) = span {
+            self.recorded.insert((span, true));
+        }
         self.flow.write(var, span);
         self.touch(var);
     }
@@ -1175,6 +1183,8 @@ impl Converter<'_> {
             (value, problem, holder)
         else {
             // The reads and writes still count, so no false P2R-34 or P2R-35 line follows.
+            // `expression` may be `$m[k]++`, whose write the walk of a whole expression
+            // does not see.
             if let Some(value) = value {
                 self.record_refused(value);
             }
@@ -1268,8 +1278,7 @@ impl Converter<'_> {
             },
             _ => UNSET,
         };
-        self.record_refused(value);
-        self.refuse(value, problem);
+        self.refuse_expression(value, problem);
         None
     }
 
@@ -1604,9 +1613,28 @@ impl Converter<'_> {
         (var, declared)
     }
 
-    /// Records the reads and writes inside an expression that is refused before it
-    /// converts, so no false P2R-34 or P2R-35 line follows the refusal (P2R-03). Call it
-    /// only on a part that was not converted: a write recorded twice makes the first one
+    /// Refuses `expression` and records every read and write inside it, so no false
+    /// P2R-34 or P2R-35 line follows the refusal (P2R-03). Parts that already converted
+    /// are not recorded again.
+    pub(super) fn refuse_expression(
+        &mut self,
+        expression: &Expression<'_>,
+        message: impl Into<String>,
+    ) {
+        self.record_refused(expression);
+        self.refuse(expression, message);
+    }
+
+    /// The same for an operation on two operands.
+    pub(super) fn refuse_binary(&mut self, binary: &Binary<'_>, message: impl Into<String>) {
+        self.record_refused(binary.lhs);
+        self.record_refused(binary.rhs);
+        self.refuse(binary, message);
+    }
+
+    /// Records the reads and writes inside an expression that is refused, so no false
+    /// P2R-34 or P2R-35 line follows the refusal (P2R-03). A read or write already
+    /// recorded at the same place is skipped: a write recorded twice makes the first one
     /// look unread.
     pub(super) fn record_refused(&mut self, expression: &Expression<'_>) {
         let mut accesses = Vec::new();
@@ -1624,6 +1652,10 @@ impl Converter<'_> {
     fn record_accesses(&mut self, accesses: Vec<Access<'_, '_>>) {
         for access in accesses {
             match access {
+                Access::Read(variable)
+                    if self.variables.recorded.contains(&(variable.span, false)) => {}
+                Access::Write(variable)
+                    if self.variables.recorded.contains(&(variable.span, true)) => {}
                 // A read of a variable with no write yet is not reported: the refusal is.
                 Access::Read(variable) => {
                     if let Some(var) = self.lookup(variable) {

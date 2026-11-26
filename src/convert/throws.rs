@@ -551,8 +551,7 @@ impl Converter<'_> {
                     _ => None,
                 };
                 let Some((class, function, constructor)) = class else {
-                    self.record_refused(throw.exception);
-                    self.refuse(
+                    self.refuse_expression(
                         throw.exception,
                         "a throw converts only for new of one of PHP's built-in exception classes or an exception class of the input (P2R-212, P2R-392)",
                     );
@@ -592,8 +591,7 @@ impl Converter<'_> {
                 match self.caught_name(variable.name) {
                     Some(name) => Some(RExpr::Var(name)),
                     None => {
-                        self.record_refused(throw.exception);
-                        self.refuse(
+                        self.refuse_expression(
                             throw.exception,
                             "a throw of a variable converts only for the variable of its catch (P2R-212)",
                         );
@@ -602,8 +600,7 @@ impl Converter<'_> {
                 }
             }
             _ => {
-                self.record_refused(throw.exception);
-                self.refuse(
+                self.refuse_expression(
                     throw.exception,
                     "a throw converts only for new of one of PHP's built-in exception classes and for the variable of its catch (P2R-212)",
                 );

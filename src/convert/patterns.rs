@@ -27,8 +27,7 @@ impl Converter<'_> {
     /// P2R-320.
     fn pattern_argument(&mut self, node: &Expression<'_>, as_bool: bool) -> Option<Pattern> {
         let Some(text) = self.literal_text(node) else {
-            self.record_refused(node);
-            self.refuse(
+            self.refuse_expression(
                 node,
                 "a pattern converts only as a string literal or a constant of the file whose value is one (P2R-260)",
             );
@@ -62,13 +61,12 @@ impl Converter<'_> {
         let replacement = match self.literal_text(arguments[1]) {
             Some(text) if !text.contains(['$', '\\']) => Some(text),
             found => {
-                self.record_refused(arguments[1]);
                 let message = if found.is_some() {
                     "a replacement with $ or \\ is not supported, because PHP reads them as group references (P2R-261)"
                 } else {
                     "a replacement converts only as a string literal or a constant of the file whose value is one (P2R-261)"
                 };
-                self.refuse(arguments[1], message);
+                self.refuse_expression(arguments[1], message);
                 None
             }
         };
@@ -106,8 +104,7 @@ impl Converter<'_> {
         ) {
             return true;
         }
-        self.record_refused(default);
-        self.refuse(
+        self.refuse_expression(
             default,
             format!(
                 "the default of ?? after {name}() must be a string literal, which the conversion drops ({id})"
@@ -143,8 +140,7 @@ impl Converter<'_> {
                 self.arrow_closure(arrow, &matches, true)
             }
             other => {
-                self.record_refused(other);
-                self.refuse(
+                self.refuse_expression(
                     other,
                     "the callback of preg_replace_callback() converts only as an arrow function that declares the return type string (P2R-302)",
                 );

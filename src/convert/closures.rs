@@ -208,8 +208,7 @@ impl Converter<'_> {
                 self.callable_closure(partial, &element)
             }
             other => {
-                self.record_refused(other);
-                self.refuse(
+                self.refuse_expression(
                     other,
                     "array_map() converts only with an arrow function or a first-class callable such as trim(...) (P2R-301)",
                 );

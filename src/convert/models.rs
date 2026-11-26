@@ -3464,4 +3464,172 @@ mod tests {
         let codebase = scanned("<?php\nclass M { use Missing; }\n");
         assert_eq!(names(with_traits(&codebase, vec![b"m".to_vec()])), ["m"]);
     }
+
+    /// A migration file whose `up()` holds `up`, which starts on line 12.
+    fn migration(shown: &str, up: &str) -> Migration {
+        let source = format!(
+            "<?php\n\nuse Illuminate\\Database\\Migrations\\Migration;\nuse Illuminate\\Database\\Schema\\Blueprint;\nuse Illuminate\\Support\\Facades\\DB;\nuse Illuminate\\Support\\Facades\\Schema;\n\nreturn new class extends Migration\n{{\n    public function up(): void\n    {{\n{up}\n    }}\n}};\n"
+        );
+        Migration {
+            shown: shown.to_owned(),
+            source: Some(source.into_bytes()),
+        }
+    }
+
+    fn folded(migrations: &[Migration]) -> (Tables, Seeds) {
+        fold(migrations, &HashMap::new())
+    }
+
+    /// Each column as `name kind`, with `?` when nullable, `=` when the database stores a
+    /// default and `++` when it increments.
+    fn columns(tables: &Tables, table: &str) -> Vec<String> {
+        let Some(Table::Known(columns)) = tables.get(table) else {
+            panic!("{table} is not known: {:?}", tables.get(table));
+        };
+        columns
+            .iter()
+            .map(|c| {
+                format!(
+                    "{} {:?}{}{}{}",
+                    c.name,
+                    c.kind,
+                    if c.nullable { "?" } else { "" },
+                    if c.default { "=" } else { "" },
+                    if c.increments { "++" } else { "" }
+                )
+            })
+            .collect()
+    }
+
+    fn unknown(tables: &Tables, table: &str) -> String {
+        match tables.get(table) {
+            Some(Table::Unknown(reason)) => reason.clone(),
+            other => panic!("{table} is not unknown: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn fold_reads_the_columns_a_create_declares() {
+        let (tables, _) = folded(&[migration(
+            "create_users.php",
+            "Schema::create('users', function (Blueprint $table) {\n    $table->id();\n    $table->string('name');\n    $table->string('nickname')->nullable();\n    $table->integer('age')->default(0);\n    $table->boolean('active');\n    $table->timestamps();\n});",
+        )]);
+        assert_eq!(
+            columns(&tables, "users"),
+            [
+                "id Int=++",
+                "name Text",
+                "nickname Text?",
+                "age Int=",
+                "active Untyped",
+                "created_at Untyped?",
+                "updated_at Untyped?",
+            ]
+        );
+    }
+
+    #[test]
+    fn fold_applies_later_migrations_in_order() {
+        let (tables, _) = folded(&[
+            migration(
+                "a.php",
+                "Schema::create('posts', function (Blueprint $table) {\n    $table->id();\n    $table->string('title');\n    $table->text('body');\n});",
+            ),
+            migration(
+                "b.php",
+                "Schema::table('posts', function (Blueprint $table) {\n    $table->string('title')->nullable()->change();\n    $table->dropColumn('body');\n    $table->foreignId('user_id')->constrained()->nullable();\n});",
+            ),
+        ]);
+        assert_eq!(
+            columns(&tables, "posts"),
+            ["id Int=++", "title Text?", "user_id Int"]
+        );
+    }
+
+    #[test]
+    fn fold_names_the_form_it_does_not_read() {
+        let (tables, _) = folded(&[migration(
+            "m.php",
+            "Schema::create('items', function (Blueprint $table) {\n    $table->id();\n    $table->json('data');\n});",
+        )]);
+        assert_eq!(
+            unknown(&tables, "items"),
+            "m.php:14: a Blueprint method the tool does not read"
+        );
+    }
+
+    #[test]
+    fn fold_refuses_a_change_of_a_table_no_migration_creates() {
+        let (tables, _) = folded(&[migration(
+            "m.php",
+            "Schema::table('ghosts', function (Blueprint $table) {\n    $table->string('name');\n});",
+        )]);
+        assert_eq!(
+            unknown(&tables, "ghosts"),
+            "m.php:12: Schema::table of a table that no migration creates"
+        );
+    }
+
+    #[test]
+    fn fold_makes_every_table_unknown_after_a_statement_it_does_not_read() {
+        let (tables, _) = folded(&[
+            migration(
+                "a.php",
+                "Schema::create('tags', function (Blueprint $table) {\n    $table->id();\n});",
+            ),
+            migration("b.php", "Schema::dropIfExists('tags');"),
+        ]);
+        assert_eq!(
+            unknown(&tables, "tags"),
+            "b.php:12: a statement other than Schema::create, Schema::table and a DB::table chain"
+        );
+    }
+
+    #[test]
+    fn fold_makes_every_table_unknown_after_a_file_it_cannot_read() {
+        let unreadable = Migration {
+            shown: "b.php".to_owned(),
+            source: None,
+        };
+        let (tables, _) = folded(&[
+            migration(
+                "a.php",
+                "Schema::create('tags', function (Blueprint $table) {\n    $table->id();\n});",
+            ),
+            unreadable,
+        ]);
+        assert_eq!(
+            unknown(&tables, "tags"),
+            "b.php: the file cannot be read as UTF-8"
+        );
+    }
+
+    #[test]
+    fn fold_creates_a_guarded_table_only_while_it_is_sure() {
+        let guarded = "if (! Schema::hasTable('logs')) {\n    Schema::create('logs', function (Blueprint $table) {\n        $table->id();\n    });\n}";
+        let (sure, _) = folded(&[migration("a.php", guarded)]);
+        assert_eq!(columns(&sure, "logs"), ["id Int=++"]);
+        let (unsure, _) = folded(&[
+            migration("a.php", "Schema::dropIfExists('old');"),
+            migration("b.php", guarded),
+        ]);
+        assert_eq!(
+            unknown(&unsure, "logs"),
+            "b.php:12: a hasTable guard after a form the tool does not read"
+        );
+    }
+
+    #[test]
+    fn fold_keeps_the_tables_of_a_migration_that_only_writes_rows() {
+        let (tables, seeds) = folded(&[
+            migration(
+                "a.php",
+                "Schema::create('roles', function (Blueprint $table) {\n    $table->id();\n    $table->string('name');\n});",
+            ),
+            migration("b.php", "DB::table('Roles')->insert(['name' => 'admin']);"),
+        ]);
+        assert_eq!(columns(&tables, "roles"), ["id Int=++", "name Text"]);
+        assert!(seeds.tables.contains("roles"));
+        assert!(!seeds.any);
+    }
 }

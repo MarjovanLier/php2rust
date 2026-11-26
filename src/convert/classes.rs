@@ -1205,6 +1205,8 @@ impl Converter<'_> {
                 self.refuse(parameter, types::NULLABLE_OBJECT);
                 continue;
             }
+            // No input reaches this today: declared_type refuses each type that built()
+            // rejects first.
             if !types::built(&ty) {
                 self.refuse(
                     parameter,
@@ -1333,6 +1335,8 @@ impl Converter<'_> {
             self.refuse(&item.variable, types::NULLABLE_OBJECT);
             return;
         }
+        // No input reaches this today: declared_type refuses each type that built() rejects
+        // first.
         if !types::built(&ty) {
             self.refuse(
                 &item.variable,
@@ -1500,6 +1504,8 @@ impl Converter<'_> {
                 continue;
             }
             let Some(metadata) = codebase.get_method(class, method.name.value) else {
+                // No input reaches this today: Mago scans every method that gets this far.
+                // It guards a method that a later Mago version does not scan.
                 self.refuse(
                     &method.name,
                     "Mago has no signature for this method (P2R-23)",

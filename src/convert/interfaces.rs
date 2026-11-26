@@ -164,6 +164,8 @@ impl Converter<'_> {
                 continue;
             }
             match &method.return_type_hint {
+                // No input reaches this today: method_infos refuses the missing type at the
+                // same span as P2R-23 first, and only one line prints per span.
                 None => self.refuse(
                     &method.name,
                     "an interface method needs a return type (P2R-370)",

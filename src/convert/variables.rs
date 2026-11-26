@@ -809,6 +809,7 @@ impl Converter<'_> {
         }
         match (entry.parameter.is_some() || entry.borrowed, entry.mode) {
             (true, Mode::Mut) => true,
+            // A self-check on decide_modes: no input is known to reach it.
             (true, Mode::Shared) => {
                 self.refuse(
                     node,
@@ -1869,6 +1870,8 @@ impl Converter<'_> {
 
     /// The Rust type of the value Mago found at `node` (P2R-21, P2R-22).
     pub(super) fn site_type(&self, node: &impl HasSpan) -> Result<RustType, String> {
+        // No input is known to reach the error: Mago types each expression it analyses, and
+        // code it skips, after return, throw or exit, is refused first (P2R-40, P2R-43).
         let union = self
             .expression_type(node)
             .ok_or_else(|| "Mago found no type here (P2R-34)".to_owned())?;

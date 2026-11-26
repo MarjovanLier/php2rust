@@ -627,6 +627,8 @@ impl Converter<'_> {
                 Some(format!("break 'throw {text}"))
             }
             Some(Raise::Abort) => Some(format!("{text}.uncaught()")),
+            // No input reaches this today: in an arrow body, the default of ?? and the
+            // message of ?? throw, P2R-215 or P2R-120 refuses the throw first.
             None => {
                 self.refuse(
                     throw,

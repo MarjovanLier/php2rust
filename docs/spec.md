@@ -812,7 +812,8 @@ Sections 3 to 9 apply to nullable values unless this section says otherwise.
   the step of a `for` whose body holds such a `let ... else` at any depth
   stops the conversion: the step also runs at each `continue`, where the
   binding can shadow the variable or not exist yet. P2R-290 lets a write
-  after a top-level `let ... else` convert.
+  after a top-level `let ... else` convert, and P2R-293 gives `$v` its
+  inner type after a top-level `if ($v === null) { $v = x; }`.
 - **P2R-105** `$a ?? $b` MUST convert when `$a` is a variable, parameter,
   function call, static method call (P2R-153), `E::tryFrom()` call
   (P2R-114), `?->` (P2R-234) or array shape element (P2R-203) of Rust type `Option<T>` and
@@ -2965,6 +2966,23 @@ run of both packages at the start of this slice.
   argument (P2R-169), stop the conversion. P2R-188
   places `php_charmask`, `php_trim_chars`, `php_ltrim_chars`,
   `php_rtrim_chars` and `php_checkdate` after `php_strtr`, in this order.
+- **P2R-293** `if ($v === null) { $v = x; }` (or `null === $v`) MUST give
+  `$v` its inner type from there on when all of these hold: the `if` is a
+  top-level statement of the body of a function or method, with no
+  `elseif` or `else`; its body is that one assignment; `$v` is a variable
+  or parameter of Rust type `Option<T>`, where `T` is `int`, `float`,
+  `bool` or an enum; and Mago types `x` as `T`. The `if` becomes the first
+  write of a new variable of type `T` with the Rust name of `$v`:
+  `let v = v.unwrap_or(x);` when `x` is an `int`, `float` or `bool`
+  literal, otherwise `let v = match v { Some(v) => v, None => x };`, so
+  `x` runs only when `$v` is null, as in PHP. Later reads and writes of
+  `$v` are of the new variable (P2R-34, P2R-35), so a later write of
+  `null` stops the conversion. The rule holds at the top level of the
+  body only: after a nested block the Rust `Option` would still be `None`
+  where PHP's variable holds `x`. Any other form converts by P2R-104 and
+  P2R-106: a nested `if`, an `||` chain, a body of more statements, a
+  string, list, map, object or shape, and an `x` of another type, such as
+  an `int` literal for a `?float` (P2R-25 does not apply here).
 
 ## 31. Closures as callbacks of array_map and preg_replace_callback, and ucwords (milestone 2, slice 21)
 

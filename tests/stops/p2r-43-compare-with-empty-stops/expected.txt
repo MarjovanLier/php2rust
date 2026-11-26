@@ -1,0 +1,4 @@
+input.php:8:12: only a list or a map that cannot be null compares with [] (P2R-43)
+input.php:13:12: only a list or a map that cannot be null compares with [] (P2R-43)
+input.php:18:12: the element type of this empty list is not known (P2R-21)
+input.php:18:19: the element type of this empty list is not known (P2R-21)

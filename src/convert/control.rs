@@ -108,6 +108,9 @@ impl Converter<'_> {
         context: Context<'_>,
         body: &mut Vec<String>,
     ) {
+        if self.null_default(statement, depth, body) {
+            return;
+        }
         let branches = branches(statement);
         // rustfmt keeps an empty block on the opening line only without an else.
         let alone = branches.len() == 1 && empty(&branches[0].1);
@@ -243,6 +246,71 @@ impl Converter<'_> {
                 body.push(format!("{}}}", indent(depth)));
             }
         }
+    }
+
+    /// `if ($v === null) { $v = x; }` (or `null === $v`) with no `elseif` or `else`, as a
+    /// top-level statement of a function or method body, where `$v` may be null with an
+    /// `int`, `float`, `bool` or enum inner type and Mago types `x` as that type. From
+    /// here on `$v` is a new variable of the inner type: `let v = v.unwrap_or(x);` for a
+    /// literal `x`, otherwise a `match` that evaluates `x` only when `$v` is null, as PHP
+    /// does (P2R-293). The rule holds at the top level only, because after a nested block
+    /// the Rust `Option` would still be `None` where PHP's variable holds `x`. False when
+    /// the statement has another form; it then converts as any other `if`.
+    fn null_default(&mut self, statement: &If<'_>, depth: usize, body: &mut Vec<String>) -> bool {
+        if !self.variables.top_level.contains(&statement.span()) {
+            return false;
+        }
+        let branches = branches(statement);
+        let [(Some(condition), statements)] = branches.as_slice() else {
+            return false;
+        };
+        let [Statement::Expression(only)] = statements.as_slice() else {
+            return false;
+        };
+        let Expression::Assignment(assignment) = only.expression else {
+            return false;
+        };
+        let Expression::Variable(Variable::Direct(target)) = assignment.lhs else {
+            return false;
+        };
+        // An `||` chain is P2R-334's.
+        let plain = matches!(super::lists::unparenthesized(condition),
+            Expression::Binary(binary) if matches!(binary.operator, BinaryOperator::Identical(_)));
+        if !plain || !matches!(assignment.operator, AssignmentOperator::Assign(_)) {
+            return false;
+        }
+        let Some((variable, outer, inner)) = self.null_checked(condition, false) else {
+            return false;
+        };
+        let copy = matches!(
+            inner,
+            RustType::I64 | RustType::F64 | RustType::Bool | RustType::Enum(_)
+        );
+        if variable.name != target.name
+            || !copy
+            || self.site_type(assignment.rhs).ok().as_ref() != Some(&inner)
+        {
+            return false;
+        }
+        self.variables.read(outer, variable.span);
+        let name = self.variables.name_of(outer).to_owned();
+        let value = self.expression(assignment.rhs);
+        let var = self.redeclare(target, inner);
+        let Some((expr, _)) = value else {
+            // The problem is recorded (P2R-03).
+            return true;
+        };
+        let literal = matches!(expr, RExpr::Float(_) | RExpr::Bool(_))
+            || printer::literal_value(&expr).is_some();
+        let value = printer::expr(&expr, false);
+        let text = if literal {
+            format!("{name}.unwrap_or({value})")
+        } else {
+            format!("match {name} {{ Some({name}) => {name}, None => {value} }}")
+        };
+        let line = self.first_write(var, false, text, false);
+        body.push(emit(depth, line));
+        true
     }
 
     /// The first operand of the top-level `||` chain of `condition` and the rest, when the

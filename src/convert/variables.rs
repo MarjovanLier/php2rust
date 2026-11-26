@@ -250,6 +250,8 @@ pub(super) struct Variables {
     /// The spans of the top-level `if ($v === null)` statements whose binding is owned
     /// where the type allows it (P2R-290); see `functions::owned_checks`.
     pub(super) owned_checks: HashSet<Span>,
+    /// The spans of the top-level statements of a function or method body (P2R-293).
+    pub(super) top_level: HashSet<Span>,
     /// While the body of an arrow function converts: its first parameter. A variable
     /// before it belongs to the enclosing body (P2R-300).
     pub(super) closure_start: Option<Var>,
@@ -281,6 +283,7 @@ impl Default for Variables {
             guards: Vec::new(),
             step_guards: Vec::new(),
             owned_checks: HashSet::new(),
+            top_level: HashSet::new(),
             closure_start: None,
             recorded: HashSet::new(),
         }
@@ -1782,6 +1785,17 @@ impl Converter<'_> {
             null_check: true,
             owned: false,
         });
+        self.variables.write(var, Some(variable.span));
+        var
+    }
+
+    /// Declares `variable` again as a new variable of type `ty`, written here, which
+    /// `lookup` finds from now on instead of the earlier one (P2R-293).
+    pub(super) fn redeclare(&mut self, variable: &DirectVariable<'_>, ty: RustType) -> Var {
+        let (var, named) = self.declare(variable);
+        let entry = &mut self.variables.entries[var];
+        entry.ty = named.then_some(ty);
+        entry.assigned = Some(variable.span);
         self.variables.write(var, Some(variable.span));
         var
     }

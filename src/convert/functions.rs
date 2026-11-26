@@ -460,6 +460,7 @@ impl Converter<'_> {
             Variables::with_parameters(&signature.parameters, &copied),
         );
         self.variables.owned_checks = checks.iter().map(|check| check.span).collect();
+        self.variables.top_level = statements.iter().map(|s| s.span()).collect();
         let outer_function = std::mem::replace(&mut self.current_function, key);
         let outer_calls = std::mem::take(&mut self.self_calls);
         let sites = self.site_types(statements.iter().copied(), signature.returns.as_ref());

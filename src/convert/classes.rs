@@ -2126,6 +2126,7 @@ impl Converter<'_> {
             Variables::with_parameters(&parameters, &copied),
         );
         self.variables.owned_checks = checks.iter().map(|check| check.span).collect();
+        self.variables.top_level = statements.iter().map(|s| s.span()).collect();
         // `self` is the first variable of a method that is not static.
         let first = parameters.len() - signature.parameters.len();
         let templated: Vec<usize> = self.classes[class].methods[at]

@@ -1,0 +1,3 @@
+input.php:10:20: a value that may be null cannot go into a map of values that cannot be null (P2R-106)
+input.php:19:26: a value that may be null cannot go into a field that cannot be null (P2R-106)
+input.php:28:25: a value that may be null cannot stand where the type is not nullable (P2R-106)

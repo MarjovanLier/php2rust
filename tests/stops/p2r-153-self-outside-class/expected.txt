@@ -1,0 +1,2 @@
+input.php:6:6: self:: and static:: work only inside a class or enum (P2R-153)
+input.php:7:6: self:: and static:: work only inside a class or enum (P2R-153)

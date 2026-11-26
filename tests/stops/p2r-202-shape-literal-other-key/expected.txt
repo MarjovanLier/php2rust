@@ -1,0 +1,1 @@
+input.php:10:12: the keys of this array literal are not the keys of the array shape it goes to (P2R-202)

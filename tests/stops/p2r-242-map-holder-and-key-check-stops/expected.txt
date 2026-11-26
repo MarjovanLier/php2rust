@@ -1,0 +1,2 @@
+input.php:10:5: a map element can change only on a map in a variable or parameter (P2R-242)
+input.php:20:12: array_key_exists() converts with two arguments only (P2R-242)

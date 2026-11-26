@@ -1,0 +1,1 @@
+input.php:8:12: sprintf() takes a format and positional arguments (P2R-187)

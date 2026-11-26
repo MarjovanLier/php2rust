@@ -1,0 +1,1 @@
+input.php:11:10: echo of an array shape is not supported (P2R-201)

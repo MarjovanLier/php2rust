@@ -1,0 +1,1 @@
+input.php:8:23: substr() is supported only on a string and int offsets (P2R-164)

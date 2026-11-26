@@ -1,0 +1,3 @@
+input.php:13:14: a catch needs a class name (P2R-214)
+input.php:26:16: a caught exception converts only in getMessage(), getCode() and throw (P2R-214)
+input.php:38:17: a caught exception converts only in getMessage(), getCode() and throw (P2R-214)

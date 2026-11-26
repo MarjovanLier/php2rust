@@ -1,0 +1,1 @@
+input.php:9:5: a class may hold only a constructor, methods, properties and constants (P2R-140)

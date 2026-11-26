@@ -1,0 +1,2 @@
+input.php:12:11: a throw of a variable converts only for the variable of its catch (P2R-212)
+input.php:17:11: a throw converts only for new of one of PHP's built-in exception classes and for the variable of its catch (P2R-212)

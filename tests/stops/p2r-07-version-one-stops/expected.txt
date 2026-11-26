@@ -1,0 +1,4 @@
+input.php:16:12: a comparison of lists is not supported in version 1 (P2R-07)
+input.php:21:12: this operator is not supported in version 1 (P2R-07)
+input.php:25:6: a call must pass one argument per parameter (P2R-07)
+input.php:29:1: return outside a function is not supported (P2R-07)

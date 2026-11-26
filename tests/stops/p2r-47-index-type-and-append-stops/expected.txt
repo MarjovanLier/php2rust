@@ -1,0 +1,2 @@
+input.php:10:20: a list index must be an int (P2R-47)
+input.php:24:9: only = can append to a list (P2R-47)

@@ -36,10 +36,7 @@ impl Converter<'_> {
         else {
             return false;
         };
-        !self
-            .files
-            .iter()
-            .any(|analysed| analysed.file == optional.span.file_id)
+        self.included(&optional.span)
             && optional.kind.is_class()
             && !optional.flags.is_abstract()
             // `Optional::create()` becomes `Absent`, so it must be callable without anything.

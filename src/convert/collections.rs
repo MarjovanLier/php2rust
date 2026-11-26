@@ -15,12 +15,9 @@ impl Converter<'_> {
     /// methods from, which the input may otherwise declare itself (P2R-340, P2R-440).
     pub(super) fn included_collections(&self) -> Vec<&'static [u8]> {
         let included = |name: &[u8]| {
-            self.codebase.get_class_like(name).is_some_and(|class| {
-                !self
-                    .files
-                    .iter()
-                    .any(|analysed| analysed.file == class.span.file_id)
-            })
+            self.codebase
+                .get_class_like(name)
+                .is_some_and(|class| self.included(&class.span))
         };
         match (included(COLLECTIONS[0]), included(COLLECTIONS[1])) {
             (true, true) => COLLECTIONS.to_vec(),

@@ -1,0 +1,36 @@
+name: Conventional
+
+# Rebase and merge keeps each commit on main, so every commit header and the PR title
+# must be a Conventional Commit header: `type(scope): Subject`. It runs apart from CI,
+# so a title edit (`edited`) checks the title again without running the tests.
+on:
+  pull_request:
+    types: [opened, edited, synchronize, reopened]
+
+jobs:
+  conventional:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - name: Check the PR title and commit headers
+        env:
+          TITLE: ${{ github.event.pull_request.title }}
+          BASE: ${{ github.event.pull_request.base.sha }}
+          HEAD: ${{ github.event.pull_request.head.sha }}
+        run: |
+          types='feat|fix|docs|style|refactor|perf|test|build|ci|chore|revert|security|deps|config|release'
+          header="^($types)(\([a-z0-9-]{2,20}\))?!?: [A-Z].{9,49}$"
+          failed=0
+          check() {
+            if ! printf '%s\n' "$2" | grep -Eq "$header"; then
+              echo "::error::$1 is not type(scope): Subject (10 to 50 characters): $2"
+              failed=1
+            fi
+          }
+          check "The PR title" "$TITLE"
+          while IFS= read -r subject; do
+            check "A commit header" "$subject"
+          done < <(git log --no-merges --format=%s "$BASE..$HEAD")
+          exit "$failed"

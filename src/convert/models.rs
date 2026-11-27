@@ -3445,6 +3445,65 @@ fn string_literal(expression: &Expression<'_>) -> Option<String> {
 mod tests {
     use super::*;
 
+    /// The first line of each function in the store of a model `M` that uses `ops`.
+    fn declared(ops: &[StoreOp]) -> Vec<String> {
+        store_lines("M", "App\\Models\\M", &ops.iter().copied().collect())
+            .into_iter()
+            .filter(|line| line.starts_with("    pub fn "))
+            .collect()
+    }
+
+    #[test]
+    fn store_lines_declares_the_function_each_call_names() {
+        for op in StoreOp::ALL {
+            let (RExpr::Call(path, _), ty) = op.call("M", Vec::new()) else {
+                panic!("{op:?} gives no call");
+            };
+            let function = path.strip_prefix("M::").unwrap();
+            // A call that throws gives the value inside the `Result` (P2R-421).
+            let ty = if op.entry().throws {
+                format!("Result<{}, PhpException>", ty.owned())
+            } else {
+                ty.owned()
+            };
+            let declared = declared(&[op]);
+            assert_eq!(declared.len(), 1, "{op:?}");
+            assert!(
+                declared[0].starts_with(&format!("    pub fn {function}(")),
+                "{op:?}: {}",
+                declared[0]
+            );
+            assert!(
+                declared[0].ends_with(&format!(" -> {ty} {{")),
+                "{op:?}: {}",
+                declared[0]
+            );
+        }
+    }
+
+    #[test]
+    fn store_lines_declares_the_functions_in_one_order() {
+        let mut ops = StoreOp::ALL;
+        ops.reverse();
+        let functions: Vec<String> = declared(&ops)
+            .iter()
+            .map(|line| line["    pub fn ".len()..line.find('(').unwrap()].to_owned())
+            .collect();
+        assert_eq!(
+            functions,
+            [
+                "store_create",
+                "store_find",
+                "store_first",
+                "store_get",
+                "store_all",
+                "store_sole",
+                "store_first_or_fail",
+                "store_find_or_fail",
+            ]
+        );
+    }
+
     /// The codebase of `source` as `find` sees it: scanned, not yet populated.
     fn scanned(source: &str) -> CodebaseMetadata {
         let file = File::new(

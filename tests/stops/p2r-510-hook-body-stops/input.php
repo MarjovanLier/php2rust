@@ -315,3 +315,20 @@ final class Names extends Data
         return ('a' === 'b') ? [] : [];
     }
 }
+
+// A closure parameter is not named $this or like a superglobal.
+final class Parameters extends Data
+{
+    public function __construct(public string $number) {}
+
+    public static function rules(): array
+    {
+        return ['a' => [function (string $this): void {}]];
+    }
+
+    public static function authorize(): bool
+    {
+        array_map(function (string $_GET): void {}, []);
+        return true;
+    }
+}

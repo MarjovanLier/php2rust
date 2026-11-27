@@ -910,9 +910,8 @@ impl<'c> Converter<'c> {
         for (span, message) in std::mem::take(&mut self.loops.problems) {
             self.refuse(&span, message);
         }
-        let sites = self.site_types(program.statements.iter(), None);
-        self.variables.list_types = sites.lists;
-        self.variables.null_types = sites.nulls;
+        let top: Vec<&Statement<'_>> = program.statements.iter().collect();
+        self.open_body_facts(&top, None, None);
         let mut items: Vec<Vec<Vec<String>>> = vec![Vec::new(); self.module_paths.len()];
         // The module of each enum, class and function, by Rust name (P2R-174).
         let mut owners: BTreeMap<String, (usize, crates::ItemKind)> = BTreeMap::new();

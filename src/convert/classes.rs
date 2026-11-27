@@ -10,13 +10,10 @@ use mago_syntax::cst::*;
 use mago_syntax::walker::Walker;
 
 use super::control::emit;
+use super::functions::BodyOf;
 use super::members::{self, MemberForm, ModifierKind};
-use super::recursion::{self, Target};
 use super::variables::THIS;
-use super::{
-    Context, Converter, Mode, ParameterSignature, Signature, Variables, functions, helpers, lists,
-    nulls,
-};
+use super::{Converter, Mode, ParameterSignature, Signature, helpers, lists, nulls};
 use crate::names;
 use crate::printer::{self, RExpr};
 use crate::types::{self, RustType};
@@ -2117,16 +2114,6 @@ impl Converter<'_> {
             });
         }
         parameters.extend(signature.parameters.iter().cloned());
-        // A method has its own variables, as a function does.
-        let statements: Vec<&Statement<'_>> = block.statements.iter().collect();
-        let checks = functions::owned_checks(&statements);
-        let copied = self.copied_parameters(&statements, &signature.parameters, &checks);
-        let outer = std::mem::replace(
-            &mut self.variables,
-            Variables::with_parameters(&parameters, &copied),
-        );
-        self.variables.owned_checks = checks.iter().map(|check| check.span).collect();
-        self.variables.top_level = statements.iter().map(|s| s.span()).collect();
         // `self` is the first variable of a method that is not static.
         let first = parameters.len() - signature.parameters.len();
         let templated: Vec<usize> = self.classes[class].methods[at]
@@ -2134,50 +2121,21 @@ impl Converter<'_> {
             .iter()
             .map(|at| at + first)
             .collect();
-        self.variables.template(&templated);
         let outer_method = self.current_method.replace((class, at));
         let outer_class = self.current_class.replace(class);
-        let outer_calls = std::mem::take(&mut self.self_calls);
-        let sites = self.site_types(block.statements.iter(), signature.returns.as_ref());
-        self.variables.list_types = sites.lists;
-        self.variables.null_types = sites.nulls;
-        let mut body = Vec::new();
-        let outer_body = self.begin_body(signature.throws);
-        for statement in block.statements.iter() {
-            self.statement(
-                statement,
-                2,
-                Context::Function(signature.returns.as_ref()),
-                &mut body,
-            );
-        }
-        self.end_body(signature.returns.is_none(), 2, &mut body, outer_body);
-        if signature.returns.is_some() && self.variables.left.is_none() {
-            self.refuse(
-                &method.name,
-                "a function with a return type must return on every path (P2R-50)",
-            );
-        }
+        // A method has its own variables, as a function does.
         let statements: Vec<&Statement<'_>> = block.statements.iter().collect();
-        let target = Target {
-            self_calls: &self.self_calls,
-            dropped: &self.dropped_defaults,
+        let of = BodyOf {
+            name: &method.name,
+            kind: "method",
+            signature: &signature,
+            parameters: &parameters,
+            templated: &templated,
+            depth: 2,
         };
-        if recursion::always_recurses(&statements, &target) {
-            self.refuse(
-                &method.name,
-                "this method calls itself on every path, and rustc rejects it (P2R-50)",
-            );
-        }
-        let parameters = self.finish_variables(&mut body);
-        body.splice(
-            0..0,
-            functions::copy_lines(&signature.parameters, &copied, 2),
-        );
-        self.variables = outer;
+        let (body, parameters) = self.convert_body(&of, &statements, |_, _| {});
         self.current_method = outer_method;
         self.current_class = outer_class;
-        self.self_calls = outer_calls;
         // A method of a trait impl takes the trait's visibility (P2R-371).
         let public = if self.trait_of(class, at).is_some() {
             ""

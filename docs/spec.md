@@ -3027,7 +3027,9 @@ This section converts a closure only as such a callback.
   These stop the conversion: an arrow function anywhere else (stored,
   returned, or passed to a function of the input or to another built-in);
   a parameter without a declared type, by reference, variadic or with a
-  default; `fn&`, which returns by reference; a read of a variable of the
+  default; a parameter named `$this` (P2R-135) or like a superglobal
+  (P2R-31), which PHP rejects and Mago does not report; `fn&`, which
+  returns by reference; a read of a variable of the
   enclosing body of any other type, a union enum of P2R-230 included (a
   later slice); a write in the body (an assignment, `++` or `--`), which
   in PHP changes only the closure's copy; a call that throws (P2R-211) or

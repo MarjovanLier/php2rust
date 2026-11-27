@@ -8,7 +8,7 @@ use mago_syntax::walker::Walker;
 use super::control::emit;
 use super::exceptions::Thrown;
 use super::lists::unparenthesized;
-use super::{Context, Converter, Mode, ParameterSignature, classes};
+use super::{Context, Converter, Mode, ParameterSignature, parameters};
 use crate::names;
 use crate::printer::{self, RExpr, Raise};
 use crate::types::{self, RustType};
@@ -967,7 +967,7 @@ impl Converter<'_> {
             // In a function a read of it gives PHP's superglobal, not the exception, and at the
             // top level the catch overwrites the superglobal for every function.
             if let Some(variable) = &clause.variable
-                && classes::SUPERGLOBALS.contains(&variable.name)
+                && parameters::SUPERGLOBALS.contains(&variable.name)
             {
                 self.refuse(
                     variable,

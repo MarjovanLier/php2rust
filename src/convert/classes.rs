@@ -12,6 +12,7 @@ use mago_syntax::walker::Walker;
 use super::control::emit;
 use super::functions::BodyOf;
 use super::members::{self, MemberForm, ModifierKind};
+use super::parameters::{DefaultValue, Name, ParameterForm, ParameterList};
 use super::variables::THIS;
 use super::{Converter, Mode, ParameterSignature, Signature, helpers, lists, nulls};
 use crate::names;
@@ -1003,25 +1004,20 @@ impl Converter<'_> {
         }
         // PHP rejects a `static` parameter type; Mago's parser accepts it, alone as a
         // modifier and inside a union as a type.
-        for parameter in method.parameter_list.parameters.iter() {
-            if static_modifier(parameter)
-                || parameter
-                    .hint
-                    .as_ref()
-                    .is_some_and(|hint| names(hint, is_static))
-            {
+        for form in ParameterList::of(&method.parameter_list).parameters {
+            if form.static_type {
                 self.refuse(
-                    parameter,
+                    &form,
                     "static can only be a return type, which PHP requires (P2R-154)",
                 );
             } else if !is_constructor(method)
-                && parameter
+                && form
                     .modifiers
                     .iter()
-                    .any(|m| matches!(m, Modifier::Abstract(_) | Modifier::Final(_)))
+                    .any(|m| matches!(m.kind, ModifierKind::Abstract | ModifierKind::Final))
             {
                 self.refuse(
-                    parameter,
+                    &form,
                     "PHP rejects a modifier on the parameter of a method (P2R-135)",
                 );
             }
@@ -1042,28 +1038,28 @@ impl Converter<'_> {
             );
             refused = true;
         }
-        let mut seen: Vec<&[u8]> = Vec::new();
-        for parameter in method.parameter_list.parameters.iter() {
-            let name = parameter.variable.name;
+        let list = ParameterList::of(&method.parameter_list);
+        for (at, (parameter, written)) in method
+            .parameter_list
+            .parameters
+            .iter()
+            .zip(&list.parameters)
+            .enumerate()
+        {
             let nullable = matches!(parameter.hint, None | Some(Hint::Nullable(_)));
-            let problem = if static_modifier(parameter)
-                || parameter
-                    .hint
-                    .as_ref()
-                    .is_some_and(|hint| names(hint, is_static))
-            {
+            let problem = if written.static_type {
                 Some("static can only be a return type, which PHP requires (P2R-154)")
-            } else if parameter.is_promoted_property() {
+            } else if written.promoted {
                 Some("only a constructor parameter can be promoted to a property (P2R-130)")
-            } else if name == b"$this" {
+            } else if written.name == Name::This {
                 Some("a parameter cannot be named $this, which PHP rejects (P2R-135)")
-            } else if SUPERGLOBALS.contains(&name) {
+            } else if written.name == Name::Superglobal {
                 Some("PHP rejects a parameter named like a superglobal (P2R-380)")
-            } else if seen.contains(&name) {
+            } else if list.repeats(at) {
                 Some("PHP rejects a second parameter of this name (P2R-380)")
-            } else if parameter.ampersand.is_some()
-                || parameter.ellipsis.is_some()
-                || !parameter.attribute_lists.is_empty()
+            } else if written.ampersand.is_some()
+                || written.ellipsis.is_some()
+                || !written.attribute_groups.is_empty()
                 || !parameter
                     .hint
                     .as_ref()
@@ -1081,7 +1077,6 @@ impl Converter<'_> {
                 self.refuse(parameter, problem);
                 refused = true;
             }
-            seen.push(name);
         }
         if let Some(hint) = &method.return_type_hint
             && !hook_hint(&hint.hint, true)
@@ -1118,24 +1113,30 @@ impl Converter<'_> {
             ),
         }
         self.defaults_last(&method.parameter_list);
-        for parameter in method.parameter_list.parameters.iter() {
-            let problem = if !parameter.is_promoted_property() {
+        let list = ParameterList::of(&method.parameter_list);
+        for (parameter, written) in method
+            .parameter_list
+            .parameters
+            .iter()
+            .zip(&list.parameters)
+        {
+            let problem = if !written.promoted {
                 Some(
                     "a constructor parameter that is not promoted to a property is not supported (P2R-130)",
                 )
-            } else if parameter.hint.is_none() {
+            } else if !written.typed {
                 Some("a promoted property needs a declared type, as PHP requires (P2R-130)")
-            } else if parameter.hooks.is_some() {
+            } else if written.hooks {
                 Some(
                     "a property hook is not supported, and PHP rejects one on a readonly property (P2R-130)",
                 )
-            } else if parameter.ampersand.is_some() || parameter.ellipsis.is_some() {
+            } else if written.ampersand.is_some() || written.ellipsis.is_some() {
                 Some("a promoted property cannot be by reference or variadic (P2R-130)")
             } else if let Some((_, problem)) = parameter_modifier(&parameter.modifiers) {
                 Some(problem)
-            } else if parameter.variable.name == b"$this" {
+            } else if written.name == Name::This {
                 Some("a parameter cannot be named $this, which PHP rejects (P2R-135)")
-            } else if SUPERGLOBALS.contains(&parameter.variable.name) {
+            } else if written.name == Name::Superglobal {
                 Some("PHP rejects a parameter named like a superglobal (P2R-31)")
             } else if !parameter
                 .attribute_lists
@@ -1521,12 +1522,13 @@ impl Converter<'_> {
                 .iter()
                 .zip(metadata.parameters.iter())
             {
-                if parameter.is_promoted_property() {
+                let form = ParameterForm::of(parameter);
+                if form.promoted {
                     // Mago's parser reads a bare `static` type as a modifier, which
                     // method_shape refuses (P2R-154).
-                    if !static_modifier(parameter) {
+                    if !form.static_modifier() {
                         self.refuse(
-                            parameter,
+                            &form,
                             "only a constructor parameter can be promoted to a property (P2R-130)",
                         );
                     }
@@ -2530,19 +2532,6 @@ pub(super) fn wider_set<'m, 'a>(
     members::wider_set_at(&kinds).and_then(|at| modifiers.iter().nth(at))
 }
 
-/// The variables PHP declares in every scope, which a parameter may not take as its name.
-pub(super) const SUPERGLOBALS: [&[u8]; 9] = [
-    b"$GLOBALS",
-    b"$_SERVER",
-    b"$_GET",
-    b"$_POST",
-    b"$_FILES",
-    b"$_COOKIE",
-    b"$_SESSION",
-    b"$_REQUEST",
-    b"$_ENV",
-];
-
 /// The problem of a hook signature outside the forms that P2R-380 leaves out.
 const HOOK_SIGNATURE: &str = "a hook's parameter or return type must be a class name, int, float, string, bool, array, iterable or object, with or without ?, or mixed (a return type also void, never, static or self), and a default must be a literal, true, false or null, with no variadic or by-reference parameter and no attribute on a parameter; the tool checks nothing else of a hook (P2R-380)";
 
@@ -2619,13 +2608,7 @@ impl<'ast, 'arena> Walker<'ast, 'arena, bool> for Unchecked {
         list: &'ast FunctionLikeParameterList<'arena>,
         found: &mut bool,
     ) {
-        let parameters: Vec<&FunctionLikeParameter<'_>> = list.parameters.iter().collect();
-        *found |= parameters.iter().enumerate().any(|(at, parameter)| {
-            parameter.default_value.is_some()
-                && parameters[at + 1..]
-                    .iter()
-                    .any(|later| later.default_value.is_none() && later.ellipsis.is_none())
-        });
+        *found |= ParameterList::of(list).early_default.is_some();
     }
 
     // PHP deprecates a `null` default on a type without null, such as `int $x = null`, and
@@ -2635,14 +2618,13 @@ impl<'ast, 'arena> Walker<'ast, 'arena, bool> for Unchecked {
         parameter: &'ast FunctionLikeParameter<'arena>,
         found: &mut bool,
     ) {
-        *found |= SUPERGLOBALS.contains(&parameter.variable.name);
+        let form = ParameterForm::of(parameter);
+        *found |= form.name == Name::Superglobal;
         *found |= parameter
             .hint
             .as_ref()
             .is_some_and(|hint| !holds_null(hint))
-            && parameter.default_value.as_ref().is_some_and(|default| {
-                matches!(default.value, Expression::Literal(Literal::Null(_)))
-            });
+            && form.default == DefaultValue::Null;
     }
 
     // PHP 8.0 removed `(real)` and `(unset)`; PHP 8.5 deprecates the other four.
@@ -2820,22 +2802,9 @@ fn is_parent(hint: &Hint<'_>) -> bool {
     matches!(hint, Hint::Parent(_))
 }
 
-fn is_static(hint: &Hint<'_>) -> bool {
-    matches!(hint, Hint::Static(_))
-}
-
 /// `self` or `static`, which name the class whose body holds them (P2R-154).
 pub(super) fn is_own_class(hint: &Hint<'_>) -> bool {
     matches!(hint, Hint::Self_(_) | Hint::Static(_))
-}
-
-/// True for a parameter whose only modifier is `static` (P2R-154).
-fn static_modifier(parameter: &FunctionLikeParameter<'_>) -> bool {
-    !parameter.modifiers.is_empty()
-        && parameter
-            .modifiers
-            .iter()
-            .all(|m| matches!(m, Modifier::Static(_)))
 }
 
 /// True for `final` and `private` together (P2R-130, P2R-156).

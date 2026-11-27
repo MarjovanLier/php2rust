@@ -58,6 +58,7 @@ mod nulls;
 mod nullsafe;
 mod numbers;
 mod optionals;
+mod parameters;
 mod patterns;
 mod recursion;
 mod shapes;

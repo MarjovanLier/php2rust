@@ -225,7 +225,7 @@ pub(super) fn final_private(kinds: impl Iterator<Item = ModifierKind> + Clone) -
         && kinds.into_iter().any(|kind| kind == ModifierKind::Private)
 }
 
-fn written(modifiers: &Sequence<'_, Modifier<'_>>) -> Vec<WrittenModifier> {
+pub(super) fn written(modifiers: &Sequence<'_, Modifier<'_>>) -> Vec<WrittenModifier> {
     modifiers
         .iter()
         .map(|modifier| WrittenModifier {

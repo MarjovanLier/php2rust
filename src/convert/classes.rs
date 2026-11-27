@@ -14,7 +14,7 @@ use super::functions::BodyOf;
 use super::members::{self, MemberForm, ModifierKind};
 use super::parameters::{DefaultValue, Name, ParameterForm, ParameterList};
 use super::variables::THIS;
-use super::{Converter, Mode, ParameterSignature, Signature, helpers, lists, nulls};
+use super::{Converter, Mode, ParameterSignature, Signature, helpers, laravel_data, lists, nulls};
 use crate::names;
 use crate::printer::{self, RExpr};
 use crate::types::{self, RustType};
@@ -547,11 +547,8 @@ impl Converter<'_> {
                 && extends
                     .types
                     .iter()
-                    .all(|parent| self.identifier_key(parent) == b"spatie\\laraveldata\\data")
-        }) && self
-            .codebase
-            .get_class_like(b"spatie\\laraveldata\\data")
-            .is_some_and(|data| self.included(&data.span))
+                    .all(|parent| self.identifier_key(parent) == laravel_data::DATA)
+        }) && self.laravel_data.included()
     }
 
     /// True when the attribute is one of laravel-data's, which only the methods of `Data`
@@ -629,50 +626,18 @@ impl Converter<'_> {
         true
     }
 
-    /// True for a method of a `Data` class named like a hook, in any letter case, that no
-    /// interface of the class declares, which is P2R-371's, and that neither `Data` nor a
-    /// trait or interface of it has a real method of, only an `@method` tag or nothing,
-    /// which P2R-350 checks (P2R-380). It reads Mago's codebase, because the interfaces'
-    /// own methods are read after the classes.
-    fn hook_name(&self, class: usize, method: &Method<'_>) -> bool {
-        let real = |owner: &[u8]| {
-            self.codebase
-                .get_method(owner, method.name.value)
-                .is_some_and(|found| !found.flags.is_magic_method())
-        };
-        let renamed = |owner: &[u8]| {
-            self.codebase.get_class_like(owner).is_some_and(|found| {
-                found.trait_alias_map.iter().any(|(original, alias)| {
-                    [original, alias]
-                        .iter()
-                        .any(|name| name.as_bytes().eq_ignore_ascii_case(method.name.value))
-                })
-            })
-        };
-        self.classes[class].data
-            && named_like_hook(method)
-            && !self.classes[class].interfaces.iter().any(|&interface| {
+    /// True for a method named like a hook, in any letter case, of a class that is a `Data`
+    /// class when `data`, that none of its `interfaces` declares, which is P2R-371's, and
+    /// that neither `Data` nor a trait or interface of it has a real method of, which
+    /// P2R-350 checks (P2R-380). It reads Mago's codebase, because the interfaces' own
+    /// methods are read after the classes.
+    fn hook_name(&self, data: bool, interfaces: &[usize], method: &Method<'_>) -> bool {
+        data && named_like_hook(method)
+            && !interfaces.iter().any(|&interface| {
                 self.codebase
                     .method_exists(&self.interfaces[interface].key, method.name.value)
             })
-            && self
-                .codebase
-                .get_declaring_method(b"Spatie\\LaravelData\\Data", method.name.value)
-                .is_none_or(|parent| parent.flags.is_magic_method())
-            // Mago takes Data's own @method tag over a real method of its trait or interface,
-            // also over a trait method that Data or one of its traits renames to the name.
-            && !renamed(b"Spatie\\LaravelData\\Data")
-            && self
-                .codebase
-                .get_class_like(b"spatie\\laraveldata\\data")
-                .is_none_or(|data| {
-                    !data.used_traits.iter().any(|name| renamed(name.as_bytes()))
-                        && !data
-                            .used_traits
-                            .iter()
-                            .chain(data.all_parent_interfaces.iter())
-                            .any(|name| real(name.as_bytes()))
-                })
+            && !self.laravel_data.real_method(method.name.value)
     }
 
     /// Refuses everything a class of these slices may not hold (P2R-130, P2R-140).
@@ -712,50 +677,11 @@ impl Converter<'_> {
                 "a class that extends another is not supported (P2R-130)",
             );
         }
-        // The override check below needs every method of Data, also those of its traits.
-        if data
-            && let Some(extends) = &declaration.extends
-            && self
-                .codebase
-                .get_class_like(b"spatie\\laraveldata\\data")
-                .is_some_and(|parent| {
-                    parent
-                        .used_traits
-                        .iter()
-                        .chain(parent.all_parent_interfaces.iter())
-                        .any(|name| !self.codebase.class_like_exists(name.as_bytes()))
-                })
-        {
-            self.refuse(
-                extends,
-                "Spatie\\LaravelData\\Data names a trait or interface that no included file declares, so its methods are not all known; include the whole package (P2R-350)",
-            );
-        }
-        // Data 4.18 has no parent, whose methods the override check would also need.
-        if data
-            && let Some(extends) = &declaration.extends
-            && self
-                .codebase
-                .get_class_like(b"spatie\\laraveldata\\data")
-                .is_some_and(|parent| parent.direct_parent_class.is_some())
-        {
-            self.refuse(
-                extends,
-                "Spatie\\LaravelData\\Data extends another class, which version 4.18.0 does not (P2R-350)",
-            );
-        }
-        // PHP calls these by itself, so a Data that has one is not the 4.18 shape.
-        if data
-            && let Some(extends) = &declaration.extends
-            && let Some(magic) = IMPLICIT_METHODS.iter().find(|name| {
-                self.codebase
-                    .method_exists(b"Spatie\\LaravelData\\Data", name.as_bytes())
-            })
-        {
-            self.refuse(
-                extends,
-                format!("Spatie\\LaravelData\\Data has the method {magic}, which PHP calls by itself (P2R-350)"),
-            );
+        // Each Data class stops at its own extends while the package is not 4.18's.
+        if data && let Some(extends) = &declaration.extends {
+            for problem in self.laravel_data.problems.clone() {
+                self.refuse(extends, problem);
+            }
         }
         if let Some(implements) = &declaration.implements {
             self.implements(declaration, implements);
@@ -786,7 +712,9 @@ impl Converter<'_> {
                     continue;
                 }
             };
-            if index.is_some_and(|index| self.hook_name(index, method)) {
+            if index
+                .is_some_and(|index| self.hook_name(data, &self.classes[index].interfaces, method))
+            {
                 let form = MemberForm::of_method(method, self.analysed(method).resolved);
                 if !hook_form(method, &form) {
                     self.refuse(&method.name, DATA_HOOK);
@@ -808,11 +736,7 @@ impl Converter<'_> {
                 array_access && ARRAY_ACCESS_METHODS.contains(&lowercase(method).as_slice());
             self.method_shape(method, overrides);
             // PHP checks an override against the parent, which Mago does not always do.
-            if data
-                && self
-                    .codebase
-                    .method_exists(b"Spatie\\LaravelData\\Data", method.name.value)
-            {
+            if data && self.laravel_data.has_method(method.name.value) {
                 self.refuse(&method.name, DATA_METHOD);
             }
             // PHP rejects a parameter that narrows the interface's mixed, and Mago does
@@ -1289,7 +1213,7 @@ impl Converter<'_> {
             }
             for item in plain.items.iter() {
                 match item {
-                    _ if self.extends_data(declaration)
+                    _ if self.classes[index].data
                         && DATA_PROPERTIES.contains(&&item.variable().name[1..]) =>
                     {
                         self.refuse(item, DATA_PROPERTY);
@@ -1461,7 +1385,10 @@ impl Converter<'_> {
             // A hook is left out, or class_shape refuses its form (P2R-380).
             if is_constructor(method)
                 || method.name.value.starts_with(b"__")
-                || owner.is_some_and(|class| self.hook_name(class, method))
+                || owner.is_some_and(|class| {
+                    let class = &self.classes[class];
+                    self.hook_name(class.data, &class.interfaces, method)
+                })
             {
                 continue;
             }

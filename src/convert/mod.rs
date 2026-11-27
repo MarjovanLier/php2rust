@@ -48,6 +48,7 @@ mod foreach;
 mod functions;
 mod helpers;
 mod interfaces;
+mod laravel_data;
 mod lists;
 mod maps;
 mod matching;
@@ -293,8 +294,7 @@ fn analyse(
             ..(*program).clone()
         })
         .collect();
-    let mut converter = Converter::new(&codebase, analysed);
-    converter.included = included_ids;
+    let mut converter = Converter::new(&codebase, analysed, included_ids);
     converter.models = models;
     converter.type_names.optional = converter.included_optional();
     converter.type_names.collections = converter.included_collections();
@@ -628,6 +628,8 @@ struct Converter<'c> {
     files: Vec<Analysed<'c>>,
     /// The files passed with `--include` (P2R-340).
     included: HashSet<FileId>,
+    /// The laravel-data package of those files (P2R-350).
+    laravel_data: laravel_data::DataPackage<'c>,
     problems: Vec<Problem>,
     /// Declared functions by lowercase PHP name, because PHP function names ignore case (P2R-32).
     functions: HashMap<Vec<u8>, Signature>,
@@ -715,11 +717,17 @@ struct Converter<'c> {
 }
 
 impl<'c> Converter<'c> {
-    fn new(codebase: &'c CodebaseMetadata, files: Vec<Analysed<'c>>) -> Self {
+    /// A converter of `files`, built once Mago has populated `codebase`.
+    fn new(
+        codebase: &'c CodebaseMetadata,
+        files: Vec<Analysed<'c>>,
+        included: HashSet<FileId>,
+    ) -> Self {
         Self {
             codebase,
             files,
-            included: HashSet::new(),
+            laravel_data: laravel_data::DataPackage::read(codebase, &included),
+            included,
             problems: Vec::new(),
             functions: HashMap::new(),
             enums: Vec::new(),

@@ -911,7 +911,7 @@ impl<'c> Converter<'c> {
             self.refuse(&span, message);
         }
         let top: Vec<&Statement<'_>> = program.statements.iter().collect();
-        self.open_body_facts(&top, None, None);
+        self.open_body_facts(&top, None, &functions::owned_checks(&top));
         let mut items: Vec<Vec<Vec<String>>> = vec![Vec::new(); self.module_paths.len()];
         // The module of each enum, class and function, by Rust name (P2R-174).
         let mut owners: BTreeMap<String, (usize, crates::ItemKind)> = BTreeMap::new();

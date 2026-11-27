@@ -503,7 +503,9 @@ impl Converter<'_> {
             &mut self.variables,
             Variables::with_parameters(of.parameters, &copied),
         );
-        self.open_body_facts(statements, signature.returns.as_ref(), Some(&checks));
+        self.open_body_facts(statements, signature.returns.as_ref(), &checks);
+        // P2R-293 holds in a function or method body, not in `fn main()`.
+        self.variables.top_level = statements.iter().map(|s| s.span()).collect();
         self.variables.template(of.templated);
         let outer_calls = std::mem::take(&mut self.self_calls);
         let mut body = Vec::new();
@@ -546,19 +548,15 @@ impl Converter<'_> {
     }
 
     /// Sets what the conversion of a body reads from a scan of its `statements` before it
-    /// starts: the list and null types of its variables (P2R-21, P2R-102), and for a
-    /// function or method body its owned `checks` (P2R-290) and top-level statements
-    /// (P2R-293). `fn main()` passes no `checks` and takes neither of those yet.
+    /// starts: the list and null types of its variables (P2R-21, P2R-102) and its owned
+    /// `checks` (P2R-290).
     pub(super) fn open_body_facts(
         &mut self,
         statements: &[&Statement<'_>],
         returns: Option<&RustType>,
-        checks: Option<&[OwnedCheck]>,
+        checks: &[OwnedCheck],
     ) {
-        if let Some(checks) = checks {
-            self.variables.owned_checks = checks.iter().map(|check| check.span).collect();
-            self.variables.top_level = statements.iter().map(|s| s.span()).collect();
-        }
+        self.variables.owned_checks = checks.iter().map(|check| check.span).collect();
         let sites = self.site_types(statements.iter().copied(), returns);
         self.variables.list_types = sites.lists;
         self.variables.null_types = sites.nulls;

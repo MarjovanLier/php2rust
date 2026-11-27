@@ -2905,7 +2905,8 @@ run of both packages at the start of this slice.
 - **P2R-290** A check `if ($v === null)` (or `null === $v`) that P2R-104
   makes a `let ... else` MUST give an owned binding when all of these
   hold: the `if` is a top-level statement of the body of a function or
-  method; the last statement of its body is a `return` or a `throw`; the
+  method, or of the file's own statements that `fn main()` holds; the
+  last statement of its body is a `return` or a `throw`; the
   inner type of `$v` is `string`, `list<T>` of a type that does not
   change its objects (P2R-143), a map (P2R-240), `int`, `float`, `bool`
   or an enum; and a

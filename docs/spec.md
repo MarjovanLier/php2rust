@@ -4893,7 +4893,7 @@ input: a comparison chained to another of its level, and a float such as
   `1.5e_3` and `1._0e1`, while its parser refuses the other misplaced
   forms tried (`1_.0`, `1_e1`, `1.0_`, `1__0`, `0x_1F`).
 
-## 52. Data hook bodies kept to a closed list (milestone 2, slice 43, draft)
+## 52. Data hook bodies kept to a closed list (milestone 2, slice 43)
 
 The review of slice 41 found 18 forms in the body of a Data hook
 (P2R-380) that PHP rejects when it compiles the file, that Mago does

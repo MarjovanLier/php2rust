@@ -1150,11 +1150,12 @@ pub(super) fn find(
             };
             let refused = observers.as_ref().err().copied();
             let overridden = model_methods(codebase, class, names);
-            let (fields, store) =
-                match model_fields(class, names, tables, &public, &overridden, refused) {
-                    Ok((fields, store)) => (Ok(fields), store),
-                    Err(reason) => (Err(reason), Err(String::new())),
-                };
+            let members = model_members(class, names, &overridden);
+            let lookup = tables.map(|tables| tables.get(&members.table));
+            let (fields, store) = match model_fields(class, &members, lookup, &public, refused) {
+                Ok((fields, store)) => (Ok(fields), store),
+                Err(reason) => (Err(reason), Err(String::new())),
+            };
             let full = names
                 .resolve(&class.name.span().start)
                 .unwrap_or(class.name.value);
@@ -1165,8 +1166,8 @@ pub(super) fn find(
                 fields,
                 store,
                 observers: observers.unwrap_or_default(),
-                relations: relation_methods(class, names, codebase, included, &overridden, tables),
-                configuration: configuration(class, names, &overridden),
+                relations: relation_methods(&members, names, codebase, included, lookup),
+                configuration: members.configuration,
             }
         })
         .collect();
@@ -1398,13 +1399,13 @@ fn with_traits(codebase: &CodebaseMetadata, mut pending: Vec<Vec<u8>>) -> Vec<&C
     found
 }
 
-/// The fields of a model, or where and why it has no struct (P2R-401, P2R-402).
+/// The fields of a model, or where and why it has no struct (P2R-401, P2R-402). `lookup`
+/// is `None` without migrations, or what they say of the model's table.
 fn model_fields(
     class: &Class<'_>,
-    names: &ResolvedNames<'_>,
-    tables: Option<&Tables>,
+    members: &ModelMembers<'_, '_>,
+    lookup: Option<Option<&Table>>,
     public: &HashSet<String>,
-    overridden: &HashSet<Vec<u8>>,
     refused: Option<Span>,
 ) -> Result<FieldsAndStore, (Span, String)> {
     // The attribute group that takes the struct away (P2R-401, P2R-460).
@@ -1430,46 +1431,22 @@ fn model_fields(
             "a model that implements an interface is not supported (P2R-401)".to_owned(),
         ));
     }
-    let mut table: Option<String> = None;
-    let mut casts: HashMap<String, Option<Kind>> = HashMap::new();
-    let mut later_casts: HashMap<String, Option<Kind>> = HashMap::new();
-    for member in class.members.iter() {
-        match model_member(member, names, overridden) {
-            Member::Table(name) => table = Some(name),
-            Member::Casts(map) => casts.extend(map),
-            Member::CastsMethod(map) => later_casts.extend(map),
-            Member::LeftOut | Member::KeepsReads => {}
-            Member::Other => {
-                return Err((
-                    member.span(),
-                    "PHP may read an attribute of a model through this member (an accessor, an override of a method of Model or of a trait the model uses, another property, constant or trait), so the model takes no struct (P2R-401)".to_owned(),
-                ));
-            }
-        }
+    if let Some(span) = members.other {
+        return Err((
+            span,
+            "PHP may read an attribute of a model through this member (an accessor, an override of a method of Model or of a trait the model uses, another property, constant or trait), so the model takes no struct (P2R-401)".to_owned(),
+        ));
     }
-    // Laravel merges casts() over $casts.
-    casts.extend(later_casts);
-    let timestamps = !class.members.iter().any(|member| {
-        matches!(member, ClassLikeMember::Property(Property::Plain(plain))
-            if matches!(plain.items.as_slice(), [PropertyItem::Concrete(item)]
-                if item.variable.name == b"$timestamps"
-                    && matches!(item.value, Expression::Literal(Literal::False(_)))))
-    });
-    let soft_deletes = class.members.iter().any(|member| {
-        matches!(member, ClassLikeMember::TraitUse(trait_use)
-        if trait_use.trait_names.iter().any(|name| {
-            resolved(names, name, name.value()) == b"illuminate\\database\\eloquent\\softdeletes"
-        }))
-    });
-    let Some(tables) = tables else {
+    let (table, casts) = (&members.table, &members.casts);
+    let (timestamps, soft_deletes) = (members.timestamps, members.soft_deletes);
+    let Some(lookup) = lookup else {
         return Err((
             class.name.span(),
             "a model needs --migrations, which declare the columns of its table (P2R-401)"
                 .to_owned(),
         ));
     };
-    let table = table.unwrap_or_else(|| table_name(&String::from_utf8_lossy(class.name.value)));
-    let columns = match tables.get(&table) {
+    let columns = match lookup {
         Some(Table::Known(columns)) => columns,
         Some(Table::Unknown(reason)) => {
             return Err((
@@ -1542,10 +1519,10 @@ fn model_fields(
     }
     let store = store_rules(
         class,
-        &table,
+        table,
         columns,
         &fields,
-        &casts,
+        casts,
         (timestamps, soft_deletes),
     );
     Ok((fields, store))
@@ -1830,31 +1807,99 @@ fn names_attribute(hint: &Hint<'_>, names: &ResolvedNames<'_>) -> bool {
     }
 }
 
-/// The gap before each configuration property of a model that P2R-401 reads as a literal
-/// and leaves out, from the end of the member before it to its start, which holds its
-/// docblock (P2R-490).
-fn configuration(
-    class: &Class<'_>,
+/// What the members of a model class decide, from one walk over them (P2R-401).
+struct ModelMembers<'c, 'a> {
+    /// The last `$table` literal, or the name Laravel derives from the class name.
+    table: String,
+    /// `$casts` with `casts()` merged over it, each column with the kind of its cast.
+    casts: HashMap<String, Option<Kind>>,
+    /// False when the model declares `$timestamps = false`.
+    timestamps: bool,
+    /// True when the model uses Laravel's `SoftDeletes`.
+    soft_deletes: bool,
+    /// The first member that takes the struct away.
+    other: Option<Span>,
+    /// The gap before each configuration property that P2R-401 reads as a literal and
+    /// leaves out, from the end of the member before it to its start, which holds its
+    /// docblock (P2R-490).
+    configuration: Vec<Span>,
+    /// The methods that keep the struct, in source order, each with true for
+    /// `getRouteKeyName` (P2R-470, P2R-480).
+    kept: Vec<(&'c Method<'a>, bool)>,
+}
+
+/// Classifies each member of the model `class` once, by `model_member`, and gathers what
+/// the struct, the configuration spans and the relation methods read (P2R-401, P2R-490).
+fn model_members<'c, 'a>(
+    class: &'c Class<'a>,
     names: &ResolvedNames<'_>,
     overridden: &HashSet<Vec<u8>>,
-) -> Vec<Span> {
-    let mut spans = Vec::new();
+) -> ModelMembers<'c, 'a> {
+    let mut table = None;
+    let mut casts: HashMap<String, Option<Kind>> = HashMap::new();
+    let mut later_casts: HashMap<String, Option<Kind>> = HashMap::new();
+    let mut timestamps = true;
+    let mut soft_deletes = false;
+    let mut other = None;
+    let mut configuration = Vec::new();
+    let mut kept = Vec::new();
     let mut before = class.left_brace;
     for member in class.members.iter() {
         let span = member.span();
+        match member {
+            ClassLikeMember::Property(Property::Plain(plain))
+                if matches!(plain.items.as_slice(), [PropertyItem::Concrete(item)]
+                    if item.variable.name == b"$timestamps"
+                        && matches!(item.value, Expression::Literal(Literal::False(_)))) =>
+            {
+                timestamps = false;
+            }
+            ClassLikeMember::TraitUse(trait_use)
+                if trait_use.trait_names.iter().any(|name| {
+                    resolved(names, name, name.value())
+                        == b"illuminate\\database\\eloquent\\softdeletes"
+                }) =>
+            {
+                soft_deletes = true;
+            }
+            _ => {}
+        }
+        let kind = model_member(member, names, overridden);
         if matches!(member, ClassLikeMember::Property(_))
-            && matches!(
-                model_member(member, names, overridden),
-                Member::Table(_) | Member::Casts(_) | Member::LeftOut
-            )
+            && matches!(kind, Member::Table(_) | Member::Casts(_) | Member::LeftOut)
         {
             // Only the gap before the declaration: Mago puts the docblock finding there, and
             // the native-type variants, which PHP refuses, inside the declaration.
-            spans.push(Span::new(span.file_id, before.end, span.start));
+            configuration.push(Span::new(span.file_id, before.end, span.start));
+        }
+        match kind {
+            Member::Table(name) => table = Some(name),
+            Member::Casts(map) => casts.extend(map),
+            Member::CastsMethod(map) => later_casts.extend(map),
+            Member::LeftOut => {}
+            Member::KeepsReads => {
+                if let ClassLikeMember::Method(method) = member {
+                    let route_key = method.name.value.eq_ignore_ascii_case(b"getRouteKeyName");
+                    kept.push((method, route_key));
+                }
+            }
+            Member::Other => {
+                other.get_or_insert(span);
+            }
         }
         before = span;
     }
-    spans
+    // Laravel merges casts() over $casts.
+    casts.extend(later_casts);
+    ModelMembers {
+        table: table.unwrap_or_else(|| table_name(&String::from_utf8_lossy(class.name.value))),
+        casts,
+        timestamps,
+        soft_deletes,
+        other,
+        configuration,
+        kept,
+    }
 }
 
 /// Laravel's namespace of relation classes, lowercase.
@@ -1878,43 +1923,27 @@ const RELATION_HELPERS: [(&[u8], &[u8]); 9] = [
 /// P2R-470 or P2R-480 admits it, or why it stops. A method that P2R-401 treats otherwise, or
 /// that is no relation method, is not in the map (P2R-470, P2R-472, P2R-480, P2R-482).
 fn relation_methods(
-    class: &Class<'_>,
+    members: &ModelMembers<'_, '_>,
     names: &ResolvedNames<'_>,
     codebase: &CodebaseMetadata,
     included: &HashSet<FileId>,
-    overridden: &HashSet<Vec<u8>>,
-    tables: Option<&Tables>,
+    lookup: Option<Option<&Table>>,
 ) -> HashMap<Vec<u8>, Result<(), String>> {
-    let table = class
-        .members
-        .iter()
-        .filter_map(|member| match model_member(member, names, overridden) {
-            Member::Table(table) => Some(table),
-            _ => None,
-        })
-        .next_back()
-        .unwrap_or_else(|| table_name(&String::from_utf8_lossy(class.name.value)));
     // A model whose table is unknown takes no struct and stops (P2R-401).
-    let columns: &[Column] = match tables.and_then(|tables| tables.get(&table)) {
-        Some(Table::Known(columns)) => columns,
+    let columns: &[Column] = match lookup {
+        Some(Some(Table::Known(columns))) => columns,
         _ => &[],
     };
     let mut relations = HashMap::new();
-    for member in class.members.iter() {
-        let ClassLikeMember::Method(method) = member else {
-            continue;
-        };
+    // P2R-401 takes the struct away for another kind of method, and its rule wins.
+    for &(method, route_key) in &members.kept {
         let lower = method.name.value.to_ascii_lowercase();
-        // P2R-401 takes the struct away for another kind of method, and its rule wins.
-        if !matches!(model_member(member, names, overridden), Member::KeepsReads) {
-            continue;
-        }
         let relation = method
             .return_type_hint
             .as_ref()
             .is_some_and(|hint| names_relation(&hint.hint, names))
             || this_call(method).is_some();
-        if lower == b"getroutekeyname" {
+        if route_key {
             relations
                 .entry(lower)
                 .or_insert_with(|| route_key_verdict(method, names, model_route_key(codebase)));

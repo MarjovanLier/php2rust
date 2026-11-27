@@ -1,0 +1,4 @@
+input.php:13:29: PHP rejects a parameter named like a superglobal (P2R-31)
+input.php:22:36: PHP rejects a parameter named like a superglobal (P2R-31)
+input.php:31:29: a parameter cannot be named $this, which PHP rejects (P2R-135)
+input.php:36:50: PHP rejects a parameter named like a superglobal (P2R-31)

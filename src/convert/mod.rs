@@ -710,7 +710,7 @@ struct Converter<'c> {
     /// The Eloquent models of the input, with their fields or why they have none (P2R-401).
     models: Vec<models::Model>,
     /// The store functions each model's code calls, by class index (P2R-410).
-    store_uses: HashMap<usize, models::StoreUse>,
+    store_uses: HashMap<usize, BTreeSet<models::StoreOp>>,
 }
 
 impl<'c> Converter<'c> {

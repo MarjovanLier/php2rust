@@ -2,6 +2,7 @@ name: CI
 
 on:
   push:
+    branches: [main]
   pull_request:
 
 jobs:
@@ -15,6 +16,7 @@ jobs:
           coverage: none
       - name: Install the toolchain pinned in rust-toolchain.toml
         run: rustup toolchain install
+      - uses: Swatinem/rust-cache@v2
       - run: cargo fmt --check
       - run: cargo clippy --all-targets --locked -- -D warnings
       - run: cargo test --locked

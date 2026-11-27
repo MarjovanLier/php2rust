@@ -7,6 +7,7 @@ use mago_span::HasSpan;
 use mago_syntax::cst::*;
 
 use super::Converter;
+use super::classes;
 use super::helpers::Helper;
 use super::lists::unparenthesized;
 use super::variables::mentions;
@@ -126,6 +127,21 @@ impl Converter<'_> {
             self.refuse(
                 modifier,
                 "PHP rejects a modifier on the parameter of a function (P2R-31)",
+            );
+            return None;
+        }
+        // Mago does not report these, but PHP rejects the file (P2R-300).
+        if parameter.variable.name == b"$this" {
+            self.refuse(
+                &parameter.variable,
+                "a parameter cannot be named $this, which PHP rejects (P2R-135)",
+            );
+            return None;
+        }
+        if classes::SUPERGLOBALS.contains(&parameter.variable.name) {
+            self.refuse(
+                &parameter.variable,
+                "PHP rejects a parameter named like a superglobal (P2R-31)",
             );
             return None;
         }

@@ -147,9 +147,9 @@ converts:
   `if ($v !== null)`, after an `if ($v === null)` whose body always leaves, and in the
   matching arm of `$v !== null ? .. : ..`, `$v` is a plain value (`if let` and
   `let ... else`). After such an `if ($v === null)` at the top level of a function or
-  method body, whose body ends with `return` or `throw`, later statements may assign `$v`
-  again when it holds a string, list, map, int, float, bool or enum: a copy line
-  (`let mut v = v.to_string();`) makes the plain value the body's own.
+  method body, or of the file, whose body ends with `return` or `throw`, later statements
+  may assign `$v` again when it holds a string, list, map, int, float, bool or enum: a
+  copy line (`let mut v = v.to_string();`) makes the plain value the body's own.
   A nullable object or shape (`?Point`) becomes `Option<Point>`, and
   `Option<&Point>` as a parameter.
 - one `namespace Acme\Shop;` right after the `declare`, and `use` imports of classes,

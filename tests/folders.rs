@@ -203,36 +203,49 @@ fn php_flags() -> Vec<&'static str> {
         .clone()
 }
 
+// One test per folder kind, so `cargo test --test folders stops` runs the stop folders
+// without the case folders, which compile and run each case.
 #[test]
-fn folders_behave_as_the_spec_says() {
-    check_toolchain();
+fn cases() {
     let scratch = std::env::temp_dir().join(format!("php2rust-tests-{}", std::process::id()));
     fs::create_dir_all(&scratch).expect("scratch directory");
     // The empty configuration the tool lays out with, so a `rustfmt.toml` near a folder
     // does not change the check (P2R-190).
     fs::write(scratch.join("rustfmt.toml"), "").expect("empty rustfmt configuration");
-    let mut failures: Vec<String> = Vec::new();
-    for dir in folders("cases") {
-        let result = if dir.join("input").is_dir() {
-            crate_case(&dir, &scratch)
+    check_kind("cases", |dir| {
+        if dir.join("input").is_dir() {
+            crate_case(dir, &scratch)
         } else {
-            case(&dir, &scratch)
-        };
-        if let Err(why) = result {
-            failures.push(format!("cases/{}: {why}", name(&dir)));
+            case(dir, &scratch)
         }
-    }
-    for dir in folders("stops") {
-        if let Err(why) = stop(&dir) {
-            failures.push(format!("stops/{}: {why}", name(&dir)));
-        }
-    }
-    for dir in folders("errors") {
-        if let Err(why) = error(&dir) {
-            failures.push(format!("errors/{}: {why}", name(&dir)));
-        }
-    }
+    });
     let _ = fs::remove_dir_all(&scratch);
+}
+
+#[test]
+fn stops() {
+    check_kind("stops", stop);
+}
+
+#[test]
+fn errors() {
+    check_kind("errors", error);
+}
+
+/// Checks every folder of `kind` with `check`. `PHP2RUST_FOLDER=<text>` keeps only the
+/// folders whose name holds that text.
+fn check_kind(kind: &str, check: impl Fn(&Path) -> Result<(), String>) {
+    check_toolchain();
+    let only = std::env::var("PHP2RUST_FOLDER").unwrap_or_default();
+    let mut failures: Vec<String> = Vec::new();
+    for dir in folders(kind) {
+        if !name(&dir).contains(&only) {
+            continue;
+        }
+        if let Err(why) = check(&dir) {
+            failures.push(format!("{kind}/{}: {why}", name(&dir)));
+        }
+    }
     assert!(
         failures.is_empty(),
         "{} folder(s) failed:\n\n{}",

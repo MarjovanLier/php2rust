@@ -3496,6 +3496,146 @@ mod tests {
         assert_eq!(names(with_traits(&codebase, vec![b"m".to_vec()])), ["m"]);
     }
 
+    /// Classifies the members of a model `Post` whose body is `body`, beside a stand-in
+    /// `Model` that declares `save()`, and hands them with the source to `check`.
+    fn classified(body: &str, check: impl FnOnce(&ModelMembers<'_, '_>, &str)) {
+        let source = format!(
+            "<?php\nnamespace Illuminate\\Database\\Eloquent {{\n    class Model {{ public function save() {{}} }}\n}}\nnamespace App {{\n    use Illuminate\\Database\\Eloquent\\Model;\n    use Illuminate\\Database\\Eloquent\\SoftDeletes;\n    class Post extends Model\n    {{\n{body}\n    }}\n}}\n"
+        );
+        let file = File::ephemeral(
+            Cow::Borrowed(b"test.php"),
+            Cow::Owned(source.as_bytes().to_vec()),
+        );
+        let arena = LocalArena::new();
+        let program = parse_file(&arena, &file);
+        let names = NameResolver::new(&arena).resolve(program);
+        let class = program
+            .statements
+            .iter()
+            .filter_map(|statement| match statement {
+                Statement::Namespace(namespace) => Some(namespace.statements()),
+                _ => None,
+            })
+            .flat_map(|statements| statements.iter())
+            .find_map(|statement| match statement {
+                Statement::Class(class) if class.name.value == b"Post" => Some(class),
+                _ => None,
+            })
+            .expect("the class Post");
+        let overridden = model_methods(&scanned(&source), class, &names);
+        check(&model_members(class, &names, &overridden), &source);
+    }
+
+    fn text(source: &str, span: Span) -> &str {
+        &source[span.start.offset as usize..span.end.offset as usize]
+    }
+
+    #[test]
+    fn model_members_derive_the_table_from_the_class_name() {
+        classified("", |members, _| {
+            assert_eq!(members.table, "posts");
+            assert!(members.casts.is_empty());
+            assert!(members.timestamps);
+            assert!(!members.soft_deletes);
+            assert!(members.other.is_none());
+        });
+    }
+
+    #[test]
+    fn model_members_read_the_last_table() {
+        classified(
+            "protected $table = 'articles';\nprotected $table = 'entries';",
+            |members, _| assert_eq!(members.table, "entries"),
+        );
+    }
+
+    #[test]
+    fn model_members_merge_the_casts_method_over_the_casts_property() {
+        let property = "protected $casts = ['a' => 'int', 'b' => 'string'];";
+        let method = "protected function casts(): array { return ['b' => 'bool']; }";
+        classified(property, |members, _| {
+            let expected = HashMap::from([
+                ("a".to_owned(), Some(Kind::Int)),
+                ("b".to_owned(), Some(Kind::Text)),
+            ]);
+            assert_eq!(members.casts, expected);
+        });
+        classified(method, |members, _| {
+            let expected = HashMap::from([("b".to_owned(), Some(Kind::Bool))]);
+            assert_eq!(members.casts, expected);
+            assert!(members.kept.is_empty());
+        });
+        // casts() wins, also when it comes first.
+        classified(&format!("{method}\n{property}"), |members, _| {
+            let expected = HashMap::from([
+                ("a".to_owned(), Some(Kind::Int)),
+                ("b".to_owned(), Some(Kind::Bool)),
+            ]);
+            assert_eq!(members.casts, expected);
+        });
+    }
+
+    #[test]
+    fn model_members_read_timestamps_and_soft_deletes() {
+        classified(
+            "use SoftDeletes;\npublic $timestamps = false;",
+            |members, _| {
+                assert!(!members.timestamps);
+                assert!(members.soft_deletes);
+                assert!(members.other.is_none());
+            },
+        );
+    }
+
+    #[test]
+    fn model_members_point_at_the_first_member_that_takes_the_struct_away() {
+        for member in [
+            "public function getNameAttribute() { return 'x'; }",
+            "protected static function booted() {}",
+            "public function save() {}",
+        ] {
+            classified(
+                &format!("{member}\npublic function getTitleAttribute() {{ return 'y'; }}"),
+                |members, source| {
+                    assert_eq!(members.other.map(|span| text(source, span)), Some(member));
+                },
+            );
+        }
+    }
+
+    #[test]
+    fn model_members_keep_relation_methods_and_the_route_key() {
+        classified(
+            "public function save() {}\npublic function author() { return $this->belongsTo(Model::class); }\npublic function getRouteKeyName(): string { return 'slug'; }",
+            |members, _| {
+                let kept: Vec<(&[u8], bool)> = members
+                    .kept
+                    .iter()
+                    .map(|(method, route_key)| (method.name.value, *route_key))
+                    .collect();
+                assert_eq!(
+                    kept,
+                    [(&b"author"[..], false), (&b"getRouteKeyName"[..], true)]
+                );
+            },
+        );
+    }
+
+    #[test]
+    fn model_members_span_the_gap_before_each_configuration_property() {
+        classified(
+            "/** The table. */\nprotected $table = 'posts';\npublic function author() { return $this->belongsTo(Model::class); }\n/** Dates. */\npublic $timestamps = false;\npublic $other = 1;",
+            |members, source| {
+                let gaps: Vec<&str> = members
+                    .configuration
+                    .iter()
+                    .map(|span| text(source, *span).trim())
+                    .collect();
+                assert_eq!(gaps, ["/** The table. */", "/** Dates. */"]);
+            },
+        );
+    }
+
     /// A migration file whose `up()` holds `up`, which starts on line 12.
     fn migration(shown: &str, up: &str) -> Migration {
         let source = format!(

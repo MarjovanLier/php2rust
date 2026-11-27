@@ -659,6 +659,7 @@ The tests need PHP 8.5 on `PATH` and the Rust toolchain pinned in
 `tests/cases`, `tests/stops` and `tests/errors` is one test, and `cargo test` also checks
 that each requirement from P2R-07 to P2R-49 and from P2R-100 to P2R-501 starts the name of
 a case or stop folder.
+The crate has no library target, so `cargo test --bins` runs only the unit tests.
 To run one kind of folder, or only the folders whose name holds some text:
 
 ```sh

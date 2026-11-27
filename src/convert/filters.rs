@@ -3,9 +3,9 @@
 use mago_span::{HasSpan, Span};
 use mago_syntax::cst::*;
 
-use super::classes::SUPERGLOBALS;
 use super::lists::unparenthesized;
 use super::models::{CONDITIONABLE, StoreRules, StoreTest, TestValue, steady, variables_read};
+use super::parameters::{DefaultValue, Name, ParameterList};
 use super::{Converter, ParameterSignature};
 use crate::names;
 use crate::printer::{BinOp, RExpr};
@@ -297,31 +297,30 @@ impl Converter<'_> {
             );
             return None;
         }
-        for parameter in &list {
-            if parameter.ampersand.is_some()
-                || parameter.ellipsis.is_some()
-                || parameter.default_value.is_some()
-                || !parameter.modifiers.is_empty()
-                || !parameter.attribute_lists.is_empty()
+        let forms = ParameterList::of(parameters);
+        for (at, form) in forms.parameters.iter().enumerate() {
+            if form.ampersand.is_some()
+                || form.ellipsis.is_some()
+                || form.default != DefaultValue::None
+                || !form.modifiers.is_empty()
+                || !form.attribute_groups.is_empty()
             {
                 self.refuse(
-                    *parameter,
+                    form,
                     "a parameter of the callback of when cannot be by reference, variadic, with a default, a modifier or an attribute (P2R-451)",
                 );
                 return None;
             }
             // Mago does not report these, but PHP rejects the file.
-            let name = parameter.variable.name;
-            let message = if name == b"$this" {
-                "a parameter cannot be named $this, which PHP rejects (P2R-135)"
-            } else if SUPERGLOBALS.contains(&name) {
-                "PHP rejects a parameter named like a superglobal (P2R-31)"
-            } else if list[0].variable.name == name && !std::ptr::eq(list[0], *parameter) {
-                "PHP rejects two parameters of one name (P2R-451)"
-            } else {
-                continue;
+            let message = match form.name {
+                Name::This => "a parameter cannot be named $this, which PHP rejects (P2R-135)",
+                Name::Superglobal => "PHP rejects a parameter named like a superglobal (P2R-31)",
+                Name::Plain if forms.repeats(at) => {
+                    "PHP rejects two parameters of one name (P2R-451)"
+                }
+                Name::Plain => continue,
             };
-            self.refuse(&parameter.variable, message);
+            self.refuse(&form.variable, message);
             return None;
         }
         let query = list[0];

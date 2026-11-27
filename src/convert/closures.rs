@@ -7,9 +7,9 @@ use mago_span::HasSpan;
 use mago_syntax::cst::*;
 
 use super::Converter;
-use super::classes;
 use super::helpers::Helper;
 use super::lists::unparenthesized;
+use super::parameters::{DefaultValue, Name, ParameterForm};
 use super::variables::mentions;
 use crate::printer::RExpr;
 use crate::types::RustType;
@@ -49,17 +49,19 @@ impl Converter<'_> {
             );
             return None;
         }
+        let form = ParameterForm::of(parameter);
         let sensitive = self.only_sensitive(parameter);
-        if let Some(attributes) = arrow
-            .attribute_lists
+        if let Some(attributes) = arrow.attribute_lists.first().map(HasSpan::span).or(form
+            .attribute_groups
             .first()
-            .or(parameter.attribute_lists.first().filter(|_| !sensitive))
+            .copied()
+            .filter(|_| !sensitive))
         {
             self.record_refused(arrow.expression);
-            self.refuse(attributes, "attributes are not supported (P2R-07)");
+            self.refuse(&attributes, "attributes are not supported (P2R-07)");
             return None;
         }
-        let ty = self.closure_parameter(arrow, parameter, wanted, matches);
+        let ty = self.closure_parameter(arrow, parameter, &form, wanted, matches);
         let returns = match &arrow.return_type_hint {
             Some(hint) => {
                 let codebase = self.codebase;
@@ -108,22 +110,23 @@ impl Converter<'_> {
         &mut self,
         arrow: &ArrowFunction<'_>,
         parameter: &FunctionLikeParameter<'_>,
+        form: &ParameterForm,
         wanted: &RustType,
         matches: bool,
     ) -> Option<RustType> {
-        if parameter.hint.is_none()
-            || parameter.ampersand.is_some()
-            || parameter.ellipsis.is_some()
-            || parameter.default_value.is_some()
+        if !form.typed
+            || form.ampersand.is_some()
+            || form.ellipsis.is_some()
+            || form.default != DefaultValue::None
         {
             self.refuse(
-                parameter,
+                form,
                 "an arrow function parameter needs a declared type, and cannot be by reference, variadic or have a default (P2R-300)",
             );
             return None;
         }
         // Mago's parser accepts a modifier on any parameter; PHP only on a constructor's.
-        if let Some(modifier) = parameter.modifiers.first() {
+        if let Some(modifier) = form.modifiers.first() {
             self.refuse(
                 modifier,
                 "PHP rejects a modifier on the parameter of a function (P2R-31)",
@@ -131,18 +134,13 @@ impl Converter<'_> {
             return None;
         }
         // Mago does not report these, but PHP rejects the file (P2R-300).
-        if parameter.variable.name == b"$this" {
-            self.refuse(
-                &parameter.variable,
-                "a parameter cannot be named $this, which PHP rejects (P2R-135)",
-            );
-            return None;
-        }
-        if classes::SUPERGLOBALS.contains(&parameter.variable.name) {
-            self.refuse(
-                &parameter.variable,
-                "PHP rejects a parameter named like a superglobal (P2R-31)",
-            );
+        let named = match form.name {
+            Name::This => Some("a parameter cannot be named $this, which PHP rejects (P2R-135)"),
+            Name::Superglobal => Some("PHP rejects a parameter named like a superglobal (P2R-31)"),
+            Name::Plain => None,
+        };
+        if let Some(problem) = named {
+            self.refuse(&form.variable, problem);
             return None;
         }
         if matches {

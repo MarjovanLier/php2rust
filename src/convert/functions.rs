@@ -9,6 +9,7 @@ use mago_syntax::cst::*;
 use mago_syntax::walker::Walker;
 
 use super::control::{self, emit};
+use super::parameters::{Name, ParameterForm, ParameterList};
 use super::{
     Context, Converter, Mode, ParameterSignature, Signature, Variables, classes, helpers, lists,
     nulls, recursion, unions,
@@ -118,7 +119,7 @@ impl Converter<'_> {
             .zip(metadata.parameters.iter())
         {
             // Mago's parser accepts a modifier on any parameter; PHP only on a constructor's.
-            if let Some(modifier) = parameter.modifiers.first() {
+            if let Some(modifier) = ParameterForm::of(parameter).modifiers.first() {
                 self.refuse(
                     modifier,
                     "PHP rejects a modifier on the parameter of a function (P2R-31)",
@@ -158,36 +159,32 @@ impl Converter<'_> {
         taken: &HashSet<String>,
         earlier: &[ParameterSignature],
     ) -> Option<ParameterSignature> {
-        if parameter.ampersand.is_some() || parameter.ellipsis.is_some() {
+        let form = ParameterForm::of(parameter);
+        if form.ampersand.is_some() || form.ellipsis.is_some() {
             self.refuse(
-                parameter,
+                &form,
                 "by-reference and variadic parameters are not supported (P2R-07)",
             );
             return None;
         }
-        if let Some(attributes) = parameter.attribute_lists.first()
+        if let Some(attributes) = form.attribute_groups.first()
             && !self.only_sensitive(parameter)
         {
             self.refuse(attributes, "attributes are not supported (P2R-07)");
             return None;
         }
-        if parameter.hint.is_none() {
-            self.refuse(parameter, "a parameter needs a declared type (P2R-23)");
+        if !form.typed {
+            self.refuse(&form, "a parameter needs a declared type (P2R-23)");
             return None;
         }
-        // Mago does not report it, but PHP rejects the file.
-        if parameter.variable.name == b"$this" {
-            self.refuse(
-                &parameter.variable,
-                "a parameter cannot be named $this, which PHP rejects (P2R-135)",
-            );
-            return None;
-        }
-        if classes::SUPERGLOBALS.contains(&parameter.variable.name) {
-            self.refuse(
-                &parameter.variable,
-                "PHP rejects a parameter named like a superglobal (P2R-31)",
-            );
+        // Mago does not report these, but PHP rejects the file.
+        let named = match form.name {
+            Name::This => Some("a parameter cannot be named $this, which PHP rejects (P2R-135)"),
+            Name::Superglobal => Some("PHP rejects a parameter named like a superglobal (P2R-31)"),
+            Name::Plain => None,
+        };
+        if let Some(problem) = named {
+            self.refuse(&form.variable, problem);
             return None;
         }
         let php_name = &parameter.variable.name[1..];
@@ -344,16 +341,10 @@ impl Converter<'_> {
     /// Refuses a parameter with a default before one without, which PHP deprecates with a
     /// message when it compiles the file (P2R-168). False when it refuses one.
     pub(super) fn defaults_last(&mut self, list: &FunctionLikeParameterList<'_>) -> bool {
-        let parameters: Vec<&FunctionLikeParameter<'_>> = list.parameters.iter().collect();
-        let early = parameters.iter().enumerate().find(|(at, parameter)| {
-            parameter.default_value.is_some()
-                && parameters[at + 1..]
-                    .iter()
-                    .any(|later| later.default_value.is_none() && later.ellipsis.is_none())
-        });
-        if let Some((_, parameter)) = early {
+        let list = ParameterList::of(list);
+        if let Some(at) = list.early_default {
             self.refuse(
-                *parameter,
+                &list.parameters[at],
                 "a parameter with a default before one without is deprecated in PHP (P2R-168)",
             );
             return false;

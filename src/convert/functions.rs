@@ -452,54 +452,17 @@ impl Converter<'_> {
         signature: &Signature,
         tail: impl FnOnce(&mut Self, &mut Vec<String>),
     ) -> Vec<String> {
-        // A function has its own variables; those of `fn main()` wait until it ends.
-        let checks = owned_checks(statements);
-        let copied = self.copied_parameters(statements, &signature.parameters, &checks);
-        let outer = std::mem::replace(
-            &mut self.variables,
-            Variables::with_parameters(&signature.parameters, &copied),
-        );
-        self.variables.owned_checks = checks.iter().map(|check| check.span).collect();
-        self.variables.top_level = statements.iter().map(|s| s.span()).collect();
         let outer_function = std::mem::replace(&mut self.current_function, key);
-        let outer_calls = std::mem::take(&mut self.self_calls);
-        let sites = self.site_types(statements.iter().copied(), signature.returns.as_ref());
-        self.variables.list_types = sites.lists;
-        self.variables.null_types = sites.nulls;
-        let mut body = Vec::new();
-        let outer_body = self.begin_body(signature.throws);
-        for statement in statements {
-            self.statement(
-                statement,
-                1,
-                Context::Function(signature.returns.as_ref()),
-                &mut body,
-            );
-        }
-        tail(self, &mut body);
-        self.end_body(signature.returns.is_none(), 1, &mut body, outer_body);
-        // rustc rejects a function with a return type whose end a path reaches.
-        if signature.returns.is_some() && self.variables.left.is_none() {
-            self.refuse(
-                name,
-                "a function with a return type must return on every path (P2R-50)",
-            );
-        }
-        let target = recursion::Target {
-            self_calls: &self.self_calls,
-            dropped: &self.dropped_defaults,
+        let of = BodyOf {
+            name,
+            kind: "function",
+            signature,
+            parameters: &signature.parameters,
+            templated: &[],
+            depth: 1,
         };
-        if recursion::always_recurses(statements, &target) {
-            self.refuse(
-                name,
-                "this function calls itself on every path, and rustc rejects it (P2R-50)",
-            );
-        }
-        let parameters = self.finish_variables(&mut body);
-        body.splice(0..0, copy_lines(&signature.parameters, &copied, 1));
-        self.variables = outer;
+        let (body, parameters) = self.convert_body(&of, statements, tail);
         self.current_function = outer_function;
-        self.self_calls = outer_calls;
         let open = format!(
             "pub fn {}({}){} {{",
             signature.rust_name,
@@ -515,6 +478,100 @@ impl Converter<'_> {
         lines.push("}".to_owned());
         lines
     }
+
+    /// The body lines and the Rust parameters of a function or method body `statements`,
+    /// which has its own variables; those of `fn main()` wait until it ends. `tail` adds
+    /// its own lines in the same scope (P2R-391). The caller sets `current_function`, or
+    /// `current_method` and `current_class`, first.
+    pub(super) fn convert_body(
+        &mut self,
+        of: &BodyOf<'_, '_>,
+        statements: &[&Statement<'_>],
+        tail: impl FnOnce(&mut Self, &mut Vec<String>),
+    ) -> (Vec<String>, Vec<String>) {
+        let signature = of.signature;
+        let checks = owned_checks(statements);
+        let copied = self.copied_parameters(statements, &signature.parameters, &checks);
+        let outer = std::mem::replace(
+            &mut self.variables,
+            Variables::with_parameters(of.parameters, &copied),
+        );
+        self.open_body_facts(statements, signature.returns.as_ref(), Some(&checks));
+        self.variables.template(of.templated);
+        let outer_calls = std::mem::take(&mut self.self_calls);
+        let mut body = Vec::new();
+        let outer_body = self.begin_body(signature.throws);
+        for statement in statements {
+            self.statement(
+                statement,
+                of.depth,
+                Context::Function(signature.returns.as_ref()),
+                &mut body,
+            );
+        }
+        tail(self, &mut body);
+        self.end_body(signature.returns.is_none(), of.depth, &mut body, outer_body);
+        // rustc rejects a function with a return type whose end a path reaches.
+        if signature.returns.is_some() && self.variables.left.is_none() {
+            self.refuse(
+                of.name,
+                "a function with a return type must return on every path (P2R-50)",
+            );
+        }
+        let target = recursion::Target {
+            self_calls: &self.self_calls,
+            dropped: &self.dropped_defaults,
+        };
+        if recursion::always_recurses(statements, &target) {
+            self.refuse(
+                of.name,
+                format!(
+                    "this {} calls itself on every path, and rustc rejects it (P2R-50)",
+                    of.kind
+                ),
+            );
+        }
+        let parameters = self.finish_variables(&mut body);
+        body.splice(0..0, copy_lines(&signature.parameters, &copied, of.depth));
+        self.variables = outer;
+        self.self_calls = outer_calls;
+        (body, parameters)
+    }
+
+    /// Sets what the conversion of a body reads from a scan of its `statements` before it
+    /// starts: the list and null types of its variables (P2R-21, P2R-102), and for a
+    /// function or method body its owned `checks` (P2R-290) and top-level statements
+    /// (P2R-293). `fn main()` passes no `checks` and takes neither of those yet.
+    pub(super) fn open_body_facts(
+        &mut self,
+        statements: &[&Statement<'_>],
+        returns: Option<&RustType>,
+        checks: Option<&[OwnedCheck]>,
+    ) {
+        if let Some(checks) = checks {
+            self.variables.owned_checks = checks.iter().map(|check| check.span).collect();
+            self.variables.top_level = statements.iter().map(|s| s.span()).collect();
+        }
+        let sites = self.site_types(statements.iter().copied(), returns);
+        self.variables.list_types = sites.lists;
+        self.variables.null_types = sites.nulls;
+    }
+}
+
+/// What [`Converter::convert_body`] needs to know of a function or method body.
+pub(super) struct BodyOf<'b, 'x> {
+    /// The node that a P2R-50 problem of the whole body points at.
+    pub(super) name: &'b LocalIdentifier<'x>,
+    /// `function` or `method`, for the P2R-50 message.
+    pub(super) kind: &'static str,
+    pub(super) signature: &'b Signature,
+    /// The variables the body starts with: the signature's parameters, after `self` for
+    /// a method that is not static.
+    pub(super) parameters: &'b [ParameterSignature],
+    /// The positions in `parameters` that the `ArrayAccess` template types (P2R-220).
+    pub(super) templated: &'b [usize],
+    /// The indent of the body's statements.
+    pub(super) depth: usize,
 }
 
 impl Converter<'_> {

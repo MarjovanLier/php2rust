@@ -695,6 +695,34 @@ PHP2RUST_BLESS=1 cargo test --test folders
 
 Review the diff before you commit it.
 
+### Differential harness
+
+`tests/differential` runs a fixture once on PHP and once on the Rust that php2rust
+writes, and PHP is the oracle (ADR 0010, P2R-600 to P2R-609). A fixture is one JSON file
+in `unit/`, `feature/`, `golden/` or `e2e/`, named after the requirement it exercises,
+and its subject is a hand-written PHP file or directory in `subjects/`. The harness
+writes a PHP driver with typed print helpers, runs it on PHP, converts the subject and
+the driver as one crate, and runs that crate through a one-line `main`.
+
+A fixture with `"laravel": true` runs its PHP side on the real Laravel and laravel-data
+that `tests/differential/laravel/composer.lock` pins. Install them once; without them the
+harness skips those fixtures and says so:
+
+```sh
+composer install --working-dir tests/differential/laravel
+cargo test --test differential                          # every tier
+PHP2RUST_FIXTURE=p2r-410 cargo test --test differential  # the fixtures whose name holds p2r-410
+```
+
+A golden fixture lists inputs only. Record what PHP gives, read every recorded file in
+the diff, then commit it; the command refuses to run in CI, and `PHP2RUST_BLESS` never
+writes these files. With Xdebug installed, recording also prints each subject line that
+no input reached:
+
+```sh
+PHP2RUST_RECORD=1 cargo test --test differential golden
+```
+
 ### Proofs
 
 Kani and Verus prove two checks that decide what converts. CI runs neither tool, so run

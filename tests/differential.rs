@@ -66,7 +66,10 @@ fn php_version() -> &'static str {
     })
 }
 
-/// The flags of every PHP run, those of the folders' P2R-72 run.
+/// The flags of every PHP run, those of the folders' P2R-72 run. `-n` skips php.ini, and
+/// with it each extension that a build loads as a shared module, as Ubuntu's packages and
+/// setup-php do; such a build gets back the ones that php2rust's built-ins and Laravel
+/// need with `-d extension=`, `pdo` before `pdo_sqlite`, which needs it.
 fn php_flags() -> Vec<String> {
     static FLAGS: OnceLock<Vec<String>> = OnceLock::new();
     FLAGS
@@ -80,13 +83,13 @@ fn php_flags() -> Vec<String> {
             ]
             .map(str::to_owned)
             .to_vec();
-            let probe = [
-                "-n",
-                "-r",
-                "echo function_exists('ctype_digit') ? 'yes' : 'no';",
-            ];
-            if run(&php(), &probe, &root()).stdout != b"yes" {
-                flags.extend(["-d".to_owned(), "extension=ctype".to_owned()]);
+            let probe = ["-n", "-r", "echo implode(',', get_loaded_extensions());"];
+            let loaded = text(&run(&php(), &probe, &root()).stdout).to_lowercase();
+            let loaded: Vec<&str> = loaded.split(',').collect();
+            for extension in ["ctype", "mbstring", "tokenizer", "pdo", "pdo_sqlite"] {
+                if !loaded.contains(&extension) {
+                    flags.extend(["-d".to_owned(), format!("extension={extension}")]);
+                }
             }
             flags
         })

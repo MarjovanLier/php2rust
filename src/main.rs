@@ -30,10 +30,19 @@ struct Cli {
     /// they are not converted.
     #[arg(long = "migrations", value_name = "DIR")]
     migrations: Option<PathBuf>,
+    /// A PHP version to convert for, so the Rust behaves as PHP does on it. May be given
+    /// more than once; without it, the versions are 8.3, 8.4, 8.5 and 8.6.
+    #[arg(long = "php", value_name = "VERSION", value_parser = ["8.3", "8.4", "8.5", "8.6"])]
+    php: Vec<String>,
 }
 
 fn main() -> ExitCode {
     let cli = Cli::parse();
+    // Ascending, each once, all four by default (P2R-01, P2R-10).
+    let targets: Vec<_> = convert::TARGETS
+        .into_iter()
+        .filter(|version| cli.php.is_empty() || cli.php.contains(&convert::label(*version)))
+        .collect();
     let included = match included_files(&cli.include) {
         Ok(included) => included,
         Err(reason) => return invalid(reason),
@@ -43,7 +52,12 @@ fn main() -> ExitCode {
         Err(reason) => return invalid(reason),
     };
     if cli.input.is_dir() {
-        return convert_directory(&cli.input, cli.output.as_deref(), included, migrations);
+        return convert_directory(
+            &cli.input,
+            cli.output.as_deref(),
+            (included, migrations),
+            &targets,
+        );
     }
     let path = cli.input.display().to_string();
     let source = match fs::read(&cli.input) {
@@ -58,7 +72,7 @@ fn main() -> ExitCode {
     {
         return invalid(reason);
     }
-    let rust = match convert::convert(&path, source, included, migrations) {
+    let rust = match convert::convert(&path, source, included, migrations, &targets) {
         Ok(rust) => laid_out(&path, vec![("out.rs".to_owned(), rust)], "out.rs"),
         Err(failure) => Err(failure),
     };
@@ -94,8 +108,8 @@ fn main() -> ExitCode {
 fn convert_directory(
     input: &Path,
     output: Option<&Path>,
-    included: Vec<convert::Included>,
-    migrations: Option<Vec<convert::Migration>>,
+    (included, migrations): (Vec<convert::Included>, Option<Vec<convert::Migration>>),
+    targets: &[mago_php_version::PHPVersion],
 ) -> ExitCode {
     let Some(output) = output else {
         return invalid(format!(
@@ -150,7 +164,7 @@ fn convert_directory(
             source,
         });
     }
-    match convert::convert_crate(inputs, included, migrations)
+    match convert::convert_crate(inputs, included, migrations, targets)
         .and_then(|files| laid_out(&shown, files, "lib.rs"))
     {
         Ok(files) => match write_crate(output, &files) {

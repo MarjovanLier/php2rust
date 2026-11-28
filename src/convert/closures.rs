@@ -3,6 +3,7 @@
 //! a closure that copies the Copy values it reads sees what PHP's copy holds (P2R-300 to
 //! P2R-302).
 
+use mago_php_version::PHPVersion;
 use mago_span::HasSpan;
 use mago_syntax::cst::*;
 
@@ -303,10 +304,20 @@ impl Converter<'_> {
             (b"ltrim", Helper::PhpLtrim),
             (b"rtrim", Helper::PhpRtrim),
         ];
-        if let Some(&(_, helper)) = helpers
+        if let Some(&(name, helper)) = helpers
             .iter()
             .find(|(name, _)| self.names_built_in(identifier, name))
         {
+            // The helpers keep the form feed that PHP 8.6 trims by default (P2R-182).
+            if name.ends_with(b"trim") && self.php >= PHPVersion::PHP86 {
+                self.refuse(
+                    identifier,
+                    format!(
+                        "{}(...) also removes a form feed (\\x0C) under PHP 8.6, which 8.3 to 8.5 keep, so use a closure that gives the characters to remove (P2R-182)",
+                        String::from_utf8_lossy(name)
+                    ),
+                );
+            }
             return Some(self.helper_call(helper, vec![x()]));
         }
         let method = if self.names_built_in(identifier, b"strtolower") {

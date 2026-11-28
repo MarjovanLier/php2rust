@@ -51,9 +51,35 @@ fn run(program: &str, args: &[&str], dir: &Path) -> Output {
         .unwrap_or_else(|err| panic!("cannot run {program}: {err}"))
 }
 
+/// The PHP binary of the P2R-72 run: `PHP2RUST_PHP`, or `php` on PATH.
+fn php() -> String {
+    std::env::var("PHP2RUST_PHP").unwrap_or_else(|_| "php".to_owned())
+}
+
+/// The version of that binary as `--php` names it, `8.5` for PHP 8.5.13.
+fn php_version() -> &'static str {
+    static VERSION: OnceLock<String> = OnceLock::new();
+    VERSION.get_or_init(|| {
+        let full = text(&run(&php(), &["-n", "-r", "echo PHP_VERSION;"], &root()).stdout);
+        full.splitn(3, '.').take(2).collect::<Vec<_>>().join(".")
+    })
+}
+
+/// The target versions a folder's `php.txt` names, one per line (P2R-73); empty without it.
+fn targets(dir: &Path) -> Vec<String> {
+    fs::read_to_string(dir.join("php.txt"))
+        .map(|list| list.lines().map(str::to_owned).collect())
+        .unwrap_or_default()
+}
+
 fn tool(args: &[&str], dir: &Path) -> Output {
     // A folder with a directory `include/` reads it for its symbols only (P2R-73, P2R-340).
     let mut args = args.to_vec();
+    // A folder with `php.txt` converts for the versions it names (P2R-10, P2R-73).
+    let versions = targets(dir);
+    for version in &versions {
+        args.extend(["--php", version]);
+    }
     if dir.join("include").is_dir() {
         args.extend(["--include", "include"]);
     }
@@ -157,14 +183,15 @@ fn check_toolchain() {
         !commit.is_empty() && rustfmt.contains(commit),
         "the tests need the rustfmt of the pinned rustc ({commit}), found: {rustfmt}"
     );
-    let php = text(&run("php", &["-n", "-r", "echo PHP_VERSION;"], &root()).stdout);
+    let php = php_version();
     assert!(
-        php.starts_with("8.5."),
-        "the tests need PHP 8.5, found: {php}"
+        ["8.3", "8.4", "8.5", "8.6"].contains(&php),
+        "the tests need PHP 8.3, 8.4, 8.5 or 8.6 as {} (PHP2RUST_PHP, P2R-72), found: {php}",
+        self::php()
     );
     let mut probe = php_flags();
     probe.extend(["-r", "echo function_exists('ctype_digit') ? 'yes' : 'no';"]);
-    let ctype = run("php", &probe, &root());
+    let ctype = run(&self::php(), &probe, &root());
     assert!(
         ctype.stdout == b"yes" && ctype.stderr.is_empty(),
         "the tests need PHP's ctype functions: {}",
@@ -187,7 +214,7 @@ fn php_flags() -> Vec<&'static str> {
                 "error_reporting=E_ALL",
             ];
             let builtin = run(
-                "php",
+                &php(),
                 &[
                     "-n",
                     "-r",
@@ -322,7 +349,9 @@ fn case(dir: &Path, scratch: &Path) -> Result<(), String> {
     if !build.status.success() {
         return Err(format!("rustc failed (P2R-50):\n{}", text(&build.stderr)));
     }
-    if !program {
+    // A folder whose `php.txt` leaves out this binary's version is not run on it (P2R-73).
+    let versions = targets(dir);
+    if !program || !(versions.is_empty() || versions.iter().any(|v| v == php_version())) {
         return Ok(());
     }
     let mut flags = php_flags();
@@ -331,7 +360,7 @@ fn case(dir: &Path, scratch: &Path) -> Result<(), String> {
         flags.extend(["-d", "auto_prepend_file=prepend.php"]);
     }
     flags.push("input.php");
-    let php = run("php", &flags, dir);
+    let php = run(&php(), &flags, dir);
     // An uncaught exception exits 255 with only its fatal message on stderr, which names
     // the input path, so stderr is not compared (P2R-216).
     let uncaught = php.status.code() == Some(255) && {

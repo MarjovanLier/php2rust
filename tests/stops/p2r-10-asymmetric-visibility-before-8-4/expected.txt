@@ -1,0 +1,2 @@
+input.php:9:40: PHP 8.3: PHP before 8.4 fails to parse a set visibility such as private(set), which Mago accepts (P2R-10)
+input.php:14:6: PHP 8.3: PHP before 8.4 fails to parse an access or call on new C(..) without parentheses around the new, which Mago accepts (P2R-10)

@@ -11,7 +11,7 @@ use mago_span::Span;
 use mago_syntax::cst::*;
 
 use super::helpers::Helper;
-use super::{Converter, lists, nulls, unions};
+use super::{Converter, expressions, lists, nulls, unions};
 use crate::printer::{self, RExpr};
 use crate::types::{self, RustType};
 
@@ -1037,24 +1037,11 @@ impl Converter<'_> {
     /// The decoded text of a literal part of an interpolated string, checked as a string
     /// literal is (P2R-49).
     fn part_text(&mut self, literal: &LiteralStringPart<'_>) -> Option<String> {
-        if crate::printer::octal_overflow(literal.raw) {
-            self.refuse(
-                literal,
-                "an octal escape above \\377 is not supported (P2R-49)",
-            );
-            return None;
-        }
-        let Some(bytes) = literal.value else {
-            self.refuse(literal, "this string escape is not supported (P2R-49)");
-            return None;
-        };
-        match std::str::from_utf8(bytes) {
+        // A part of an interpolated string decodes its escapes as a double-quoted one does.
+        match expressions::literal_text(true, literal.raw, literal.value) {
             Ok(text) => Some(text.to_owned()),
-            Err(_) => {
-                self.refuse(
-                    literal,
-                    "a string that is not valid UTF-8 is not supported (P2R-49)",
-                );
+            Err(fault) => {
+                self.refuse(literal, fault.message());
                 None
             }
         }

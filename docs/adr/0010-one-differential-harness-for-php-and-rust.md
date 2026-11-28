@@ -52,7 +52,13 @@ Open decision for the owner: whether CI may run `composer install` and so fetch 
 - Run Laravel subjects on the folder tests' stand-ins: rejected, because a stand-in has only what one test names, and a fixture that passes on it says nothing about Laravel.
 - Commit `vendor/`, or Laravel's application skeleton with `orchestra/testbench`: rejected. `vendor/` is 43 MB of code that the lock file already pins, and an application or Testbench boots routes, config and service providers that Eloquent on SQLite and laravel-data's constructors do not need. A subject that needs more of Laravel adds it to the bootstrap.
 
-This ADR is not implemented yet; no harness, fixture or directory `tests/differential/` exists until the implementing change lands.
+Implemented on 28 Nov 2026 by section 53 of the spec (P2R-600 to P2R-609), except the open decision on Composer in CI (P2R-608). Found while implementing it:
+
+- With the real `vendor/` given as `--include` in place of the stand-ins, php2rust converted `p2r-350-data-struct`, `p2r-360-optional`, `p2r-410-model-store`, `p2r-412-find-forms` and `p2r-441-collection-store` to the same bytes as their `expected.rs`.
+- A Laravel subject and its driver, converted as one crate and built with a one-line `main`, printed what PHP printed on real Eloquent, under Homebrew's PHP 8.3, 8.4, 8.5 and 8.6. The committed lock holds 84 packages; the probe above, with caret constraints, held 83.
+- The first subjects stopped on four forms that php2rust does not convert yet, so they were rewritten in forms it does: a function and a local variable with one Rust name (P2R-31), a `?:` whose arms are a value and an `Optional` (P2R-180), a `?int` used in the `else` of a null check (P2R-106), and the value of an `Optional` after an `instanceof` check (P2R-34). Each is a slice for later, not a difference between PHP and Rust.
+- Xdebug names a file by its real path, so on macOS, where `/var` links to `/private/var`, the coverage of record mode compares real paths.
+- php2rust converts no read of stdin, no `$argv` and no file write yet, so the e2e seeds compare stdout and the exit code; the fields for stdin, arguments and files are there for when those convert.
 
 ## Consequences
 

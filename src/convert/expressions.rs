@@ -621,28 +621,94 @@ impl Converter<'_> {
 
     /// The text of a PHP string literal, decoded by PHP's rules (P2R-49).
     pub(super) fn string_literal(&mut self, string: &LiteralString<'_>) -> Option<String> {
-        if matches!(string.kind, LiteralStringKind::DoubleQuoted)
-            && printer::octal_overflow(string.raw)
-        {
-            self.refuse(
-                string,
-                "an octal escape above \\377 is not supported (P2R-49)",
-            );
-            return None;
-        }
-        let Some(bytes) = string.value else {
-            self.refuse(string, "this string escape is not supported (P2R-49)");
-            return None;
-        };
-        match std::str::from_utf8(bytes) {
+        let double_quoted = matches!(string.kind, LiteralStringKind::DoubleQuoted);
+        match literal_text(double_quoted, string.raw, string.value) {
             Ok(text) => Some(text.to_owned()),
-            Err(_) => {
-                self.refuse(
-                    string,
-                    "a string that is not valid UTF-8 is not supported (P2R-49)",
-                );
+            Err(fault) => {
+                self.refuse(string, fault.message());
                 None
             }
         }
+    }
+}
+
+/// Why P2R-49 stops a PHP string.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum StringFault {
+    /// An octal escape above `\377`, which PHP truncates to one byte with a warning.
+    OctalOverflow,
+    /// An escape Mago gives no value for, such as `\u{110000}`, which PHP rejects.
+    Escape,
+    NotUtf8,
+}
+
+impl StringFault {
+    pub(super) fn message(self) -> &'static str {
+        match self {
+            StringFault::OctalOverflow => "an octal escape above \\377 is not supported (P2R-49)",
+            StringFault::Escape => "this string escape is not supported (P2R-49)",
+            StringFault::NotUtf8 => "a string that is not valid UTF-8 is not supported (P2R-49)",
+        }
+    }
+}
+
+/// The decoded text of a PHP string or of a literal part of an interpolated string, from
+/// its source text `raw` and the bytes Mago decoded, or the first fault P2R-49 stops it
+/// for. Only double-quoted text decodes octal escapes, so only there is one above `\377` a
+/// fault.
+pub(super) fn literal_text<'a>(
+    double_quoted: bool,
+    raw: &[u8],
+    value: Option<&'a [u8]>,
+) -> Result<&'a str, StringFault> {
+    if double_quoted && printer::octal_overflow(raw) {
+        return Err(StringFault::OctalOverflow);
+    }
+    let bytes = value.ok_or(StringFault::Escape)?;
+    std::str::from_utf8(bytes).map_err(|_| StringFault::NotUtf8)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_plain_string_gives_its_decoded_text() {
+        assert_eq!(literal_text(true, br#""a\tb""#, Some(b"a\tb")), Ok("a\tb"));
+        assert_eq!(literal_text(false, b"'ab'", Some(b"ab")), Ok("ab"));
+    }
+
+    #[test]
+    fn an_octal_escape_above_377_stops_only_a_double_quoted_string() {
+        assert_eq!(
+            literal_text(true, br#""\400""#, Some(b"\x00")),
+            Err(StringFault::OctalOverflow)
+        );
+        // In single quotes PHP keeps the backslash and the digits as they are.
+        assert_eq!(literal_text(false, br"'\400'", Some(br"\400")), Ok(r"\400"));
+        assert_eq!(
+            literal_text(true, br#""\377""#, Some(b"\xff")),
+            Err(StringFault::NotUtf8)
+        );
+    }
+
+    #[test]
+    fn an_escape_without_a_value_or_bytes_that_are_not_utf8_stop() {
+        assert_eq!(
+            literal_text(true, br#""\u{110000}""#, None),
+            Err(StringFault::Escape)
+        );
+        assert_eq!(
+            literal_text(true, br#""\xff""#, Some(b"\xff")),
+            Err(StringFault::NotUtf8)
+        );
+    }
+
+    #[test]
+    fn the_octal_fault_comes_first() {
+        assert_eq!(
+            literal_text(true, br#""\400\u{110000}""#, None),
+            Err(StringFault::OctalOverflow)
+        );
     }
 }

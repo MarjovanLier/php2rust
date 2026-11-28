@@ -26,7 +26,7 @@ use mago_syntax::walker::Walker;
 use super::lists::unparenthesized;
 use super::members::{MemberForm, ModifierKind};
 use super::parameters::{DefaultValue, ParameterForm};
-use super::{Converter, Mode, ParameterSignature, classes, filters, nulls, throws};
+use super::{Converter, Mode, ParameterSignature, classes, expressions, filters, nulls, throws};
 use crate::names;
 use crate::printer::{self, BinOp, RExpr};
 use crate::types::{self, COLLECTIONS, RustType};
@@ -2153,11 +2153,8 @@ fn admitted_link(link: &MethodCall<'_>, helper: &[u8]) -> bool {
 /// True for a string literal whose escapes P2R-49 accepts. PHP refuses to parse an escape
 /// such as "\u{zz}", which Mago accepts, and a left-out method never reaches P2R-49.
 fn plain_string(string: &LiteralString<'_>) -> bool {
-    string
-        .value
-        .is_some_and(|bytes| std::str::from_utf8(bytes).is_ok())
-        && !(matches!(string.kind, LiteralStringKind::DoubleQuoted)
-            && printer::octal_overflow(string.raw))
+    let double_quoted = matches!(string.kind, LiteralStringKind::DoubleQuoted);
+    expressions::literal_text(double_quoted, string.raw, string.value).is_ok()
 }
 
 /// True when `Model` itself declares a `getRouteKeyName` that is not private, as Laravel's

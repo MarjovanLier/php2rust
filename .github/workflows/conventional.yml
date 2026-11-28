@@ -8,8 +8,10 @@ on:
     types: [opened, edited, synchronize, reopened]
 
 jobs:
+  # On server-140 for the owner's branches; a fork's pull request runs on a hosted runner,
+  # as in ci.yml.
   conventional:
-    runs-on: ubuntu-latest
+    runs-on: ${{ github.event.pull_request.head.repo.fork && 'ubuntu-latest' || fromJSON('["self-hosted","linux","x64","php2rust"]') }}
     steps:
       - uses: actions/checkout@v5
         with:

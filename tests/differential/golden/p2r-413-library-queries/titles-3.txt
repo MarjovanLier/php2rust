@@ -1,0 +1,3 @@
+list<string> 2
+string 5 Café
+string 0 

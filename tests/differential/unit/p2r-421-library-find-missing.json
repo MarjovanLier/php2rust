@@ -1,0 +1,10 @@
+{
+    "subject": "library",
+    "laravel": true,
+    "cases": [
+        {"name": "one", "function": "Library\\findOrSay", "arguments": [1], "type": "string", "returns": "No query results for model [Library\\Book] 1"},
+        {"name": "zero", "function": "Library\\findOrSay", "arguments": [0], "type": "string", "returns": "No query results for model [Library\\Book] 0"},
+        {"name": "negative", "function": "Library\\findOrSay", "arguments": [-7], "type": "string", "returns": "No query results for model [Library\\Book] -7"},
+        {"name": "large", "function": "Library\\findOrSay", "arguments": [9223372036854775807], "type": "string", "returns": "No query results for model [Library\\Book] 9223372036854775807"}
+    ]
+}

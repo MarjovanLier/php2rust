@@ -1,0 +1,12 @@
+{
+    "subject": "pricing",
+    "laravel": true,
+    "cases": [
+        {"name": "eur", "function": "Pricing\\symbol", "arguments": ["eur"], "type": "string", "returns": "EUR"},
+        {"name": "usd", "function": "Pricing\\symbol", "arguments": ["usd"], "type": "string", "returns": "USD"},
+        {"name": "zar", "function": "Pricing\\symbol", "arguments": ["zar"], "type": "string", "returns": "R"},
+        {"name": "upper-case", "function": "Pricing\\symbol", "arguments": ["EUR"], "type": "string", "returns": "?"},
+        {"name": "empty", "function": "Pricing\\symbol", "arguments": [""], "type": "string", "returns": "?"},
+        {"name": "space", "function": "Pricing\\symbol", "arguments": [" eur"], "type": "string", "returns": "?"}
+    ]
+}

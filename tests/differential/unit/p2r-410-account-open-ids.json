@@ -1,0 +1,9 @@
+{
+    "subject": "accounts",
+    "laravel": true,
+    "cases": [
+        {"name": "ann", "function": "Accounts\\open", "arguments": ["Ann", "ann@example.org", 120], "type": "int", "returns": 1},
+        {"name": "no-email", "function": "Accounts\\open", "arguments": ["Bob", null, 0], "type": "int", "returns": 2},
+        {"name": "overdrawn", "function": "Accounts\\open", "arguments": ["Cy", null, -40], "type": "int", "returns": 3}
+    ]
+}

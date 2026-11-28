@@ -1,0 +1,22 @@
+{
+    "subject": "pricing",
+    "laravel": true,
+    "cases": [
+        {"name": "full", "function": "Pricing\\tag", "arguments": [1250, "eur", "Sale", 10], "type": "string", "returns": "1250 eur, labelled, discounted"},
+        {"name": "bare", "function": "Pricing\\tag", "arguments": [99, "usd", null, 0], "type": "string", "returns": "99 usd, unlabelled, full price"},
+        {"name": "empty-label", "function": "Pricing\\tag", "arguments": [5, "zar", "", -3], "type": "string", "returns": "5 zar, labelled, full price"},
+        {"name": "discounted", "function": "Pricing\\isDiscounted", "arguments": [1], "type": "bool", "returns": true},
+        {"name": "not-discounted", "function": "Pricing\\isDiscounted", "arguments": [0], "type": "bool", "returns": false},
+        {"name": "labelled", "function": "Pricing\\isLabelled", "arguments": ["x"], "type": "bool", "returns": true},
+        {"name": "unlabelled", "function": "Pricing\\isLabelled", "arguments": [null], "type": "bool", "returns": false},
+        {"name": "symbol-eur", "function": "Pricing\\symbol", "arguments": ["eur"], "type": "string", "returns": "EUR"},
+        {"name": "symbol-zar", "function": "Pricing\\symbol", "arguments": ["zar"], "type": "string", "returns": "R"},
+        {"name": "symbol-unknown", "function": "Pricing\\symbol", "arguments": ["EUR"], "type": "string", "returns": "?"},
+        {"name": "case-name", "function": "Pricing\\caseName", "arguments": ["usd"], "type": "string", "returns": "Dollar"},
+        {"name": "case-unknown", "function": "Pricing\\caseName", "arguments": [""], "type": "string", "returns": "unknown"},
+        {"name": "band-free", "function": "Pricing\\band", "arguments": [0], "type": "string", "returns": "free"},
+        {"name": "band-cheap", "function": "Pricing\\band", "arguments": [999], "type": "string", "returns": "cheap"},
+        {"name": "band-mid", "function": "Pricing\\band", "arguments": [1000], "type": "string", "returns": "mid"},
+        {"name": "band-dear", "function": "Pricing\\band", "arguments": [10000], "type": "string", "returns": "dear"}
+    ]
+}

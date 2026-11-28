@@ -1,0 +1,30 @@
+{
+    "subject": "pricing",
+    "laravel": true,
+    "cases": [
+        {"name": "tag-1", "function": "Pricing\\tag", "arguments": [1, "eur", "a", 1], "type": "string"},
+        {"name": "tag-2", "function": "Pricing\\tag", "arguments": [1000000, "usd", null, 0], "type": "string"},
+        {"name": "tag-3", "function": "Pricing\\tag", "arguments": [-1, "zar", "", 2], "type": "string"},
+        {"name": "tag-4", "function": "Pricing\\tag", "arguments": [42, "eur", "Café", -1], "type": "string"},
+        {"name": "tag-5", "function": "Pricing\\tag", "arguments": [0, "usd", "0", 0], "type": "string"},
+        {"name": "symbol-eur", "function": "Pricing\\symbol", "arguments": ["eur"], "type": "string"},
+        {"name": "symbol-usd", "function": "Pricing\\symbol", "arguments": ["usd"], "type": "string"},
+        {"name": "symbol-zar", "function": "Pricing\\symbol", "arguments": ["zar"], "type": "string"},
+        {"name": "symbol-gbp", "function": "Pricing\\symbol", "arguments": ["gbp"], "type": "string"},
+        {"name": "symbol-upper", "function": "Pricing\\symbol", "arguments": ["USD"], "type": "string"},
+        {"name": "name-eur", "function": "Pricing\\caseName", "arguments": ["eur"], "type": "string"},
+        {"name": "name-none", "function": "Pricing\\caseName", "arguments": ["eu"], "type": "string"},
+        {"name": "band-minus", "function": "Pricing\\band", "arguments": [-100], "type": "string"},
+        {"name": "band-zero", "function": "Pricing\\band", "arguments": [0], "type": "string"},
+        {"name": "band-1", "function": "Pricing\\band", "arguments": [1], "type": "string"},
+        {"name": "band-999", "function": "Pricing\\band", "arguments": [999], "type": "string"},
+        {"name": "band-1000", "function": "Pricing\\band", "arguments": [1000], "type": "string"},
+        {"name": "band-9999", "function": "Pricing\\band", "arguments": [9999], "type": "string"},
+        {"name": "band-10000", "function": "Pricing\\band", "arguments": [10000], "type": "string"},
+        {"name": "band-max", "function": "Pricing\\band", "arguments": [9223372036854775807], "type": "string"},
+        {"name": "labelled-null", "function": "Pricing\\isLabelled", "arguments": [null], "type": "bool"},
+        {"name": "labelled-zero", "function": "Pricing\\isLabelled", "arguments": ["0"], "type": "bool"},
+        {"name": "discounted-1", "function": "Pricing\\isDiscounted", "arguments": [1], "type": "bool"},
+        {"name": "discounted-0", "function": "Pricing\\isDiscounted", "arguments": [0], "type": "bool"}
+    ]
+}

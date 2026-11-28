@@ -1,0 +1,14 @@
+{
+    "subject": "pricing",
+    "laravel": true,
+    "cases": [
+        {"name": "symbol-usd", "function": "Pricing\\symbol", "arguments": ["usd"], "type": "string", "returns": "USD"},
+        {"name": "name-usd", "function": "Pricing\\caseName", "arguments": ["usd"], "type": "string", "returns": "Dollar"},
+        {"name": "tag-usd", "function": "Pricing\\tag", "arguments": [100, "usd", null, 0], "type": "string", "returns": "100 usd, unlabelled, full price"},
+        {"name": "symbol-zar", "function": "Pricing\\symbol", "arguments": ["zar"], "type": "string", "returns": "R"},
+        {"name": "name-zar", "function": "Pricing\\caseName", "arguments": ["zar"], "type": "string", "returns": "Rand"},
+        {"name": "tag-zar", "function": "Pricing\\tag", "arguments": [100, "zar", "Braai", 5], "type": "string", "returns": "100 zar, labelled, discounted"},
+        {"name": "symbol-none", "function": "Pricing\\symbol", "arguments": ["xyz"], "type": "string", "returns": "?"},
+        {"name": "name-none", "function": "Pricing\\caseName", "arguments": ["xyz"], "type": "string", "returns": "unknown"}
+    ]
+}

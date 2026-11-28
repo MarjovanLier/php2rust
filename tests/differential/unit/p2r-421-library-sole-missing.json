@@ -1,0 +1,8 @@
+{
+    "subject": "library",
+    "laravel": true,
+    "cases": [
+        {"name": "word", "function": "Library\\soleTitled", "arguments": ["Dune"], "type": "string", "returns": "missing: No query results for model [Library\\Book]."},
+        {"name": "empty", "function": "Library\\soleTitled", "arguments": [""], "type": "string", "returns": "missing: No query results for model [Library\\Book]."}
+    ]
+}

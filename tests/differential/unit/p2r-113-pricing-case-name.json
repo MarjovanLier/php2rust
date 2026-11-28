@@ -1,0 +1,10 @@
+{
+    "subject": "pricing",
+    "laravel": true,
+    "cases": [
+        {"name": "euro", "function": "Pricing\\caseName", "arguments": ["eur"], "type": "string", "returns": "Euro"},
+        {"name": "dollar", "function": "Pricing\\caseName", "arguments": ["usd"], "type": "string", "returns": "Dollar"},
+        {"name": "rand", "function": "Pricing\\caseName", "arguments": ["zar"], "type": "string", "returns": "Rand"},
+        {"name": "unknown", "function": "Pricing\\caseName", "arguments": ["gbp"], "type": "string", "returns": "unknown"}
+    ]
+}

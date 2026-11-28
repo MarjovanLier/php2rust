@@ -1,0 +1,8 @@
+{
+    "subject": "accounts",
+    "laravel": true,
+    "cases": [
+        {"name": "named", "function": "Accounts\\byRuntime", "arguments": ["Ann"], "type": "string", "returns": "No query results for model [Accounts\\Account]."},
+        {"name": "empty", "function": "Accounts\\byRuntime", "arguments": [""], "type": "string", "returns": "No query results for model [Accounts\\Account]."}
+    ]
+}

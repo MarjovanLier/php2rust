@@ -1,0 +1,11 @@
+{
+    "subject": "blog",
+    "laravel": true,
+    "cases": [
+        {"name": "first", "function": "Blog\\write", "arguments": ["Hope", "One.", null], "type": "string", "returns": "hope"},
+        {"name": "second", "function": "Blog\\write", "arguments": ["Hope", "Two.", null], "type": "string", "returns": "hope-1"},
+        {"name": "third", "function": "Blog\\write", "arguments": ["HOPE", "Three.", "2026-01-01"], "type": "string", "returns": "hope-2"},
+        {"name": "fourth", "function": "Blog\\write", "arguments": [" hope ", "Four.", null], "type": "string", "returns": "hope-3"},
+        {"name": "other", "function": "Blog\\write", "arguments": ["Hope 1", "A title that is a slug.", null], "type": "string", "returns": "hope-1-1"}
+    ]
+}

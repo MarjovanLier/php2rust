@@ -1,0 +1,10 @@
+{
+    "subject": "blog",
+    "laravel": true,
+    "cases": [
+        {"name": "plain", "function": "Blog\\seoTitle", "arguments": ["Fees"], "type": "string", "returns": "Fees - Oakwood Studio"},
+        {"name": "branded", "function": "Blog\\seoTitle", "arguments": ["About Oakwood"], "type": "string", "returns": "About Oakwood"},
+        {"name": "lower-case-brand", "function": "Blog\\seoTitle", "arguments": ["oakwood"], "type": "string", "returns": "oakwood - Oakwood Studio"},
+        {"name": "empty", "function": "Blog\\seoTitle", "arguments": [""], "type": "string", "returns": " - Oakwood Studio"}
+    ]
+}

@@ -1,0 +1,1 @@
+string 20 /storage/posts/1.jpg

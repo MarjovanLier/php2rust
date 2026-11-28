@@ -1,0 +1,9 @@
+{
+    "subject": "catalog",
+    "laravel": true,
+    "cases": [
+        {"name": "no-filter", "function": "Catalog\\matches", "arguments": [null, null, false, null], "type": "int", "returns": 0},
+        {"name": "every-filter", "function": "Catalog\\matches", "arguments": ["lamp", 3, true, "red"], "type": "int", "returns": 0},
+        {"name": "falsy-filters", "function": "Catalog\\matches", "arguments": ["", 0, false, ""], "type": "int", "returns": 0}
+    ]
+}

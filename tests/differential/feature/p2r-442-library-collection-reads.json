@@ -1,0 +1,22 @@
+{
+    "subject": "library",
+    "laravel": true,
+    "cases": [
+        {"name": "count-empty", "function": "Library\\countOn", "arguments": [1], "type": "int", "returns": 0},
+        {"name": "first-empty", "function": "Library\\firstOn", "arguments": [1], "type": "string", "returns": "-"},
+        {"name": "a", "function": "Library\\shelve", "arguments": ["A", 1, null, null], "type": "int", "returns": 1},
+        {"name": "b", "function": "Library\\shelve", "arguments": ["B", 1, null, 3], "type": "int", "returns": 2},
+        {"name": "c", "function": "Library\\shelve", "arguments": ["C", 2, null, null], "type": "int", "returns": 3},
+        {"name": "d", "function": "Library\\shelve", "arguments": ["D", 1, "late", null], "type": "int", "returns": 4},
+        {"name": "count-one", "function": "Library\\countOn", "arguments": [1], "type": "int", "returns": 3},
+        {"name": "count-two", "function": "Library\\countOn", "arguments": [2], "type": "int", "returns": 1},
+        {"name": "any-three", "function": "Library\\anyOn", "arguments": [3], "type": "bool", "returns": false},
+        {"name": "first-one", "function": "Library\\firstOn", "arguments": [1], "type": "string", "returns": "A"},
+        {"name": "titles-one", "function": "Library\\titlesOn", "arguments": [1], "type": "list<string>", "returns": ["A", "B", "D"]},
+        {"name": "unranked-first", "function": "Library\\unranked", "arguments": [1], "type": "string", "returns": "A"},
+        {"name": "unranked-none", "function": "Library\\unranked", "arguments": [5], "type": "string", "returns": "none"},
+        {"name": "noted-late", "function": "Library\\idsNoted", "arguments": ["late"], "type": "list<int>", "returns": [4]},
+        {"name": "noted-none", "function": "Library\\idsNoted", "arguments": ["early"], "type": "list<int>", "returns": []},
+        {"name": "total", "function": "Library\\total", "arguments": [], "type": "int", "returns": 4}
+    ]
+}

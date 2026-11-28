@@ -1,0 +1,25 @@
+{
+    "subject": "accounts",
+    "laravel": true,
+    "cases": [
+        {"name": "ann", "function": "Accounts\\open", "arguments": ["Ann", "ann@example.org", 120], "type": "int", "returns": 1},
+        {"name": "bob", "function": "Accounts\\open", "arguments": ["Bob", null, 30], "type": "int", "returns": 2},
+        {"name": "bob-again", "function": "Accounts\\open", "arguments": ["Bob", "bob@example.org", 500], "type": "int", "returns": 3},
+        {"name": "heading", "function": "Accounts\\heading", "arguments": [1, "May"], "type": "string", "returns": "Statement for Ann (May)"},
+        {"name": "email", "function": "Accounts\\emailOf", "arguments": [1], "type": "?string", "returns": "ann@example.org"},
+        {"name": "no-email", "function": "Accounts\\emailOf", "arguments": [2], "type": "?string", "returns": null},
+        {"name": "sole", "function": "Accounts\\byOwner", "arguments": ["Ann"], "type": "string", "returns": "Ann"},
+        {"name": "sole-none", "function": "Accounts\\byOwner", "arguments": ["Cy"], "type": "string", "returns": "none"},
+        {"name": "sole-several", "function": "Accounts\\byOwner", "arguments": ["Bob"], "type": "string", "returns": "several"},
+        {"name": "runtime-missing", "function": "Accounts\\byRuntime", "arguments": ["Cy"], "type": "string", "returns": "No query results for model [Accounts\\Account]."},
+        {"name": "runtime-doubled", "function": "Accounts\\byRuntime", "arguments": ["Bob"], "type": "string", "returns": "2 records were found."},
+        {"name": "either", "function": "Accounts\\either", "arguments": [2], "type": "string", "returns": "Bob"},
+        {"name": "either-failed", "function": "Accounts\\either", "arguments": [7], "type": "string", "returns": "failed"},
+        {"name": "outer-found", "function": "Accounts\\outer", "arguments": ["Bob"], "type": "string", "returns": "Bob"},
+        {"name": "outer-missing", "function": "Accounts\\outer", "arguments": ["Di"], "type": "string", "returns": "outer: No query results for model [Accounts\\Account]."},
+        {"name": "balance", "function": "Accounts\\balanceOf", "arguments": [3], "type": "int", "returns": 500},
+        {"name": "balance-missing", "function": "Accounts\\balanceOf", "arguments": [4], "type": "int", "returns": -1},
+        {"name": "richest", "function": "Accounts\\richest", "arguments": [100], "type": "string", "returns": "Bob"},
+        {"name": "nobody", "function": "Accounts\\richest", "arguments": [1000], "type": "string", "returns": "nobody"}
+    ]
+}

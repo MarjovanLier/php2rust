@@ -1,0 +1,21 @@
+{
+    "subject": "blog",
+    "laravel": true,
+    "cases": [
+        {"name": "unread-none", "function": "Blog\\unreadCount", "arguments": [], "type": "int", "returns": 0},
+        {"name": "email", "function": "Blog\\submit", "arguments": ["Ann", "ann@example.org", null, "I would like a session.", "email"], "type": "int", "returns": 1},
+        {"name": "whatsapp", "function": "Blog\\submit", "arguments": ["Bea", "bea@example.org", "+31 6 1234 5678", "Can we talk on Monday?", "whatsapp"], "type": "int", "returns": 2},
+        {"name": "preferred-email", "function": "Blog\\preferredOf", "arguments": [1], "type": "string", "returns": "email"},
+        {"name": "preferred-whatsapp", "function": "Blog\\preferredOf", "arguments": [2], "type": "string", "returns": "whatsapp"},
+        {"name": "phone-none", "function": "Blog\\phoneOf", "arguments": [1], "type": "?string", "returns": null},
+        {"name": "phone", "function": "Blog\\phoneOf", "arguments": [2], "type": "?string", "returns": "+31 6 1234 5678"},
+        {"name": "unread-two", "function": "Blog\\unreadCount", "arguments": [], "type": "int", "returns": 2},
+        {"name": "seo-title", "function": "Blog\\seoTitle", "arguments": ["About Sam"], "type": "string", "returns": "About Sam - Oakwood Studio"},
+        {"name": "seo-title-branded", "function": "Blog\\seoTitle", "arguments": ["Oakwood Studio"], "type": "string", "returns": "Oakwood Studio"},
+        {"name": "seo-image-default", "function": "Blog\\seoImage", "arguments": [null], "type": "string", "returns": "/images/og-default.jpg"},
+        {"name": "seo-image-stored", "function": "Blog\\seoImage", "arguments": ["posts/leaf.jpg"], "type": "string", "returns": "/storage/posts/leaf.jpg"},
+        {"name": "seo-image-url", "function": "Blog\\seoImage", "arguments": ["https://example.org/a.jpg"], "type": "string", "returns": "https://example.org/a.jpg"},
+        {"name": "seo-type-article", "function": "Blog\\seoType", "arguments": [true], "type": "string", "returns": "article"},
+        {"name": "seo-type-default", "function": "Blog\\seoType", "arguments": [false], "type": "string", "returns": "website"}
+    ]
+}

@@ -1,0 +1,22 @@
+{
+    "subject": "blog",
+    "laravel": true,
+    "cases": [
+        {"name": "slug", "function": "Blog\\slugFor", "arguments": [" Finding Balance "], "type": "string", "returns": "finding-balance"},
+        {"name": "write-first", "function": "Blog\\write", "arguments": ["Finding Balance", "On rest.", "2026-01-05"], "type": "string", "returns": "finding-balance"},
+        {"name": "write-same-title", "function": "Blog\\write", "arguments": ["Finding Balance", "Again.", null], "type": "string", "returns": "finding-balance-1"},
+        {"name": "write-third", "function": "Blog\\write", "arguments": ["finding balance", "Third.", "2026-02-01"], "type": "string", "returns": "finding-balance-2"},
+        {"name": "write-other", "function": "Blog\\write", "arguments": ["Grief", "Loss.", "2026-03-01"], "type": "string", "returns": "grief"},
+        {"name": "draft", "function": "Blog\\isDraft", "arguments": ["finding-balance-1"], "type": "bool", "returns": true},
+        {"name": "published", "function": "Blog\\isDraft", "arguments": ["grief"], "type": "bool", "returns": false},
+        {"name": "show", "function": "Blog\\show", "arguments": ["grief"], "type": "string", "returns": "Grief: Loss."},
+        {"name": "show-404", "function": "Blog\\show", "arguments": ["missing"], "type": "string", "returns": "404 No query results for model [Blog\\Post]."},
+        {"name": "published-titles", "function": "Blog\\publishedTitles", "arguments": [], "type": "list<string>", "returns": ["Finding Balance", "finding balance", "Grief"]},
+        {"name": "tag-new", "function": "Blog\\tagFor", "arguments": ["Self Care"], "type": "int", "returns": 1},
+        {"name": "tag-existing", "function": "Blog\\tagFor", "arguments": ["self care"], "type": "int", "returns": 1},
+        {"name": "tag-second", "function": "Blog\\tagFor", "arguments": ["Mindfulness"], "type": "int", "returns": 2},
+        {"name": "page", "function": "Blog\\addPage","arguments": ["about", "About Sam", "Hello."], "type": "int", "returns": 1},
+        {"name": "page-title", "function": "Blog\\pageTitle", "arguments": ["about"], "type": "string", "returns": "About Sam"},
+        {"name": "page-missing", "function": "Blog\\pageTitle", "arguments": ["fees"], "type": "string", "returns": "no page"}
+    ]
+}

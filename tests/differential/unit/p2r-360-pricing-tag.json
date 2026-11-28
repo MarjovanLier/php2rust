@@ -1,0 +1,11 @@
+{
+    "subject": "pricing",
+    "laravel": true,
+    "cases": [
+        {"name": "labelled-discounted", "function": "Pricing\\tag", "arguments": [1250, "eur", "Sale", 10], "type": "string", "returns": "1250 eur, labelled, discounted"},
+        {"name": "bare", "function": "Pricing\\tag", "arguments": [99, "usd", null, 0], "type": "string", "returns": "99 usd, unlabelled, full price"},
+        {"name": "empty-label", "function": "Pricing\\tag", "arguments": [5, "zar", "", -3], "type": "string", "returns": "5 zar, labelled, full price"},
+        {"name": "zero-cents", "function": "Pricing\\tag", "arguments": [0, "eur", null, 1], "type": "string", "returns": "0 eur, unlabelled, discounted"},
+        {"name": "negative-cents", "function": "Pricing\\tag", "arguments": [-50, "usd", "Refund", 0], "type": "string", "returns": "-50 usd, labelled, full price"}
+    ]
+}

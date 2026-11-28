@@ -1,0 +1,17 @@
+{
+    "subject": "accounts",
+    "laravel": true,
+    "cases": [
+        {"name": "nobody-yet", "function": "Accounts\\richest", "arguments": [0], "type": "string", "returns": "nobody"},
+        {"name": "open-ann", "function": "Accounts\\open", "arguments": ["Ann", "ann@example.org", 10], "type": "int", "returns": 1},
+        {"name": "open-cy", "function": "Accounts\\open", "arguments": ["Cy", null, 900], "type": "int", "returns": 2},
+        {"name": "open-di", "function": "Accounts\\open", "arguments": ["Di", "di@example.org", 900], "type": "int", "returns": 3},
+        {"name": "heading-ann", "function": "Accounts\\heading", "arguments": [1, "Q1"], "type": "string", "returns": "Statement for Ann (Q1)"},
+        {"name": "heading-empty-period", "function": "Accounts\\heading", "arguments": [2, ""], "type": "string", "returns": "Statement for Cy ()"},
+        {"name": "email-di", "function": "Accounts\\emailOf", "arguments": [3], "type": "?string", "returns": "di@example.org"},
+        {"name": "email-cy", "function": "Accounts\\emailOf", "arguments": [2], "type": "?string", "returns": null},
+        {"name": "richest-last-wins", "function": "Accounts\\richest", "arguments": [900], "type": "string", "returns": "Di"},
+        {"name": "richest-everyone", "function": "Accounts\\richest", "arguments": [-1], "type": "string", "returns": "Di"},
+        {"name": "balance-ann", "function": "Accounts\\balanceOf", "arguments": [1], "type": "int", "returns": 10}
+    ]
+}

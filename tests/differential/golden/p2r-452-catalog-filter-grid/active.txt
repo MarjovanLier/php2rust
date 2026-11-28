@@ -1,0 +1,5 @@
+list<string> 4
+string 4 lamp
+string 4 desk
+string 5 shelf
+string 1 0

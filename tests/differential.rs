@@ -16,9 +16,10 @@ use std::sync::OnceLock;
 use regex::Regex;
 use serde_json::{Map, Value};
 
-const TYPES: [&str; 8] = [
+// No `float`: php2rust converts no float to text, so the Rust driver could not print one
+// (P2R-602).
+const TYPES: [&str; 7] = [
     "int",
-    "float",
     "string",
     "bool",
     "?int",
@@ -43,6 +44,12 @@ fn vendor() -> PathBuf {
 
 fn text(bytes: &[u8]) -> String {
     String::from_utf8_lossy(bytes).into_owned()
+}
+
+/// Writes to stderr past the test runner, which keeps `eprintln!` of a passing test to
+/// itself, so record mode's lines and the skip line show without `--nocapture`.
+fn note(line: &str) {
+    let _ = std::io::stderr().write_all(line.as_bytes());
 }
 
 /// The PHP binary: `PHP2RUST_PHP`, or `php` on PATH (P2R-72).
@@ -325,16 +332,6 @@ fn literal(value: &Value) -> Result<String, String> {
     })
 }
 
-/// PHP's `echo` of a float with the default precision of 14 digits, for the values a
-/// fixture writes; a value it prints otherwise fails on PHP first (P2R-604).
-fn php_float(value: f64) -> String {
-    if value.fract() == 0.0 && value.abs() < 1e15 {
-        format!("{}", value as i64)
-    } else {
-        format!("{value}")
-    }
-}
-
 /// What the driver's helper of `ty` prints for the expected value (P2R-603).
 fn rendered(ty: &str, value: &Value) -> Result<String, String> {
     let wrong = || format!("returns {value} is not a {ty}");
@@ -345,15 +342,6 @@ fn rendered(ty: &str, value: &Value) -> Result<String, String> {
                 .as_i64()
                 .filter(|_| !value.is_f64())
                 .ok_or_else(wrong)?
-        ),
-        "float" => format!(
-            "float {}\n",
-            php_float(
-                value
-                    .as_f64()
-                    .filter(|_| value.is_f64())
-                    .ok_or_else(wrong)?
-            )
         ),
         "string" => {
             let text = value.as_str().ok_or_else(wrong)?;
@@ -389,9 +377,9 @@ fn helper(ty: &str) -> String {
 /// The source of each typed print helper (P2R-603).
 fn helper_source(ty: &str) -> String {
     match ty {
-        "int" | "float" => format!(
-            "function print_{ty}({ty} $v): void\n{{\n    echo '{ty} ', $v, \"\\n\";\n}}\n"
-        ),
+        "int" => {
+            "function print_int(int $v): void\n{\n    echo 'int ', $v, \"\\n\";\n}\n".to_owned()
+        }
         "string" => "function print_string(string $v): void\n{\n    echo 'string ', strlen($v), ' ', $v, \"\\n\";\n}\n".to_owned(),
         "bool" => "function print_bool(bool $v): void\n{\n    echo 'bool ', $v ? 'true' : 'false', \"\\n\";\n}\n".to_owned(),
         "?int" | "?string" => {
@@ -602,7 +590,7 @@ fn calls(fixture: &Fixture, record: bool) -> Result<(), String> {
         .output()
         .map_err(|err| err.to_string())?;
     let php = if record {
-        eprint!("{}", text(&output.stderr));
+        note(&text(&output.stderr));
         if !output.status.success() {
             return Err(format!(
                 "the PHP run fails, exit {:?}",
@@ -683,7 +671,7 @@ fn recorded(fixture: &Fixture, php: &BTreeMap<String, String>) -> Result<(), Str
         fs::create_dir_all(file.parent().expect("a folder")).map_err(|err| err.to_string())?;
         fs::write(&file, php.get(name).cloned().unwrap_or_default())
             .map_err(|err| err.to_string())?;
-        eprintln!("recorded {}", file.display());
+        note(&format!("recorded {}\n", file.display()));
     }
     Ok(())
 }
@@ -968,9 +956,9 @@ fn check_tier(tier: &str) {
         }
     }
     if laravel > 0 {
-        eprintln!(
-            "skipped {laravel} Laravel fixture(s) of {tier}: run composer install in tests/differential/laravel (P2R-606)"
-        );
+        note(&format!(
+            "skipped {laravel} Laravel fixture(s) of {tier}: run composer install in tests/differential/laravel (P2R-606)\n"
+        ));
     }
     assert!(
         failures.is_empty(),
@@ -1077,6 +1065,60 @@ fn the_harness_fails_a_wrong_expectation() {
         false,
     )
     .expect("a right e2e stdout passes");
+}
+
+/// P2R-602, P2R-603: a float stays a float, and `list<int>` and `?string` print through
+/// their helpers, on PHP and on the Rust.
+#[test]
+fn the_harness_prints_each_type_on_both_sides() {
+    let fixture = written(
+        "feature",
+        "p2r-183-each-type",
+        r#"{"subject": "words", "cases": [
+            {"name": "float", "function": "Words\\bigger", "arguments": [2.5], "type": "bool", "returns": true},
+            {"name": "whole-float", "function": "Words\\bigger", "arguments": [1.0], "type": "bool", "returns": false},
+            {"name": "list", "function": "Words\\upTo", "arguments": [2], "type": "list<int>", "returns": [1, 2]},
+            {"name": "empty", "function": "Words\\upTo", "arguments": [0], "type": "list<int>", "returns": []},
+            {"name": "named", "function": "Words\\nameOrNull", "arguments": ["Ann"], "type": "?string", "returns": "Ann"},
+            {"name": "unnamed", "function": "Words\\nameOrNull", "arguments": [""], "type": "?string", "returns": null}
+        ]}"#,
+    );
+    check("feature", &fixture, false).expect("every type passes on both sides");
+    let float_result = written(
+        "unit",
+        "p2r-183-float-result",
+        r#"{"subject": "words", "cases": [{"name": "f", "function": "Words\\bigger", "arguments": [3.0], "type": "float", "returns": 1.5}]}"#,
+    );
+    let why = check("unit", &float_result, false).expect_err("a float result is no type");
+    assert!(why.contains("type float is not one of"), "{why}");
+}
+
+/// P2R-605: a mask applies to both sides and the file, and a golden case without a file
+/// fails.
+#[test]
+fn the_harness_masks_and_needs_golden_files() {
+    let json = r#"{"subject": "words", "masks": [{"pattern": "[0-9]+", "with": "N"}], "cases": [{"name": "nine", "function": "Words\\twice", "arguments": [9], "type": "int"}]}"#;
+    let golden = written("golden", "p2r-183-masked", json);
+    let file = golden.with_extension("").join("nine.txt");
+    let _ = fs::remove_file(&file);
+    let why = check("golden", &golden, false).expect_err("a missing golden file fails");
+    assert!(why.contains("no golden file"), "{why}");
+    fs::create_dir_all(file.parent().expect("a folder")).expect("golden folder");
+    fs::write(&file, "int 5\n").expect("golden file");
+    check("golden", &golden, false).expect("int 18 and int 5 both mask to int N");
+}
+
+/// P2R-604: when the Rust differs from PHP, the message says so, not that the fixture is
+/// wrong.
+#[test]
+fn a_rust_difference_names_rust() {
+    let php = BTreeMap::from([("a".to_owned(), "int 1\n".to_owned())]);
+    let rust = BTreeMap::from([("a".to_owned(), "int 2\n".to_owned())]);
+    let why = compare("Rust", &rust, "PHP", &php).expect_err("a difference fails");
+    assert!(
+        why.starts_with("case a: Rust gives\nint 2\n-- PHP expects\nint 1\n"),
+        "{why}"
+    );
 }
 
 /// P2R-609: an unknown key and a name without a requirement ID fail the fixture.

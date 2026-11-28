@@ -202,7 +202,10 @@ requirement IDs.
 
 - **P2R-01** The tool MUST run as `php2rust <input.php> [-o <output.rs>]`.
   `php2rust --help` and `php2rust --version` MUST print to stdout and exit 0;
-  `--version` prints the crate version.
+  `--version` prints the crate version. The option `--php <version>`, which
+  may be given more than once, names a target PHP version of P2R-10: `8.3`,
+  `8.4`, `8.5` or `8.6`. Any other value is a wrong argument (P2R-04), and
+  a version given twice counts once.
 - **P2R-02** On success the tool MUST write the Rust source to `<output.rs>`
   when `-o` is given, otherwise to stdout, and exit 0.
 - **P2R-03** When the input holds any construct that does not convert
@@ -215,7 +218,12 @@ requirement IDs.
   message, and a repeated line is printed once. When one problem's source
   span contains or equals another's, only one is printed: the outer one;
   for equal spans, a php2rust problem instead of a Mago finding, and
-  otherwise the first by message.
+  otherwise the first by message. With more than one target (P2R-10), the
+  rules above apply to the problems of all targets together, and a problem
+  that some targets give and others do not starts its message with the
+  versions that give it, in ascending order, as in `PHP 8.3 and 8.4: ` or
+  `PHP 8.3, 8.4 and 8.5: `; a problem that every target gives has no
+  such start, and of two problems with equal spans it is the one printed.
 - **P2R-04** The tool MUST print the reason to stderr and exit 2 when the
   arguments are wrong or missing (the usage text goes to stderr), the input
   cannot be read, the input is not valid UTF-8, the input is not valid PHP
@@ -250,9 +258,27 @@ requirement IDs.
 
 ## 2. Analysis
 
-- **P2R-10** The tool MUST analyse input as PHP 8.5. Input that uses PHP 8.5
-  syntax outside the supported subset (the pipe operator `|>`) MUST exit 1,
-  not 2.
+- **P2R-10** The tool MUST analyse and convert the input once for each target
+  PHP version, with Mago's scanner and analyser set to that version: the
+  versions given with `--php` (P2R-01), or 8.3, 8.4, 8.5 and 8.6 when none
+  is given. The input converts only when it converts for every target and
+  every target gives the same Rust. Otherwise the tool exits 1 with the
+  problems of every target (P2R-03), or, when every target converts but
+  two give different Rust, with the one line `<path>: the Rust for PHP
+  <a> differs from the Rust for PHP <b> (P2R-10)`, where `<path>` is the
+  first input file's path as P2R-03 prints it, and `<a>` and `<b>` are
+  the lowest target and the lowest target whose Rust differs from it.
+  Mago's parser takes no version, and its analyser stops few forms that
+  an older PHP refuses, so for each target before the PHP version that
+  added it, the tool MUST stop this syntax that PHP fails to compile:
+  - `final` on a promoted constructor parameter, before PHP 8.5;
+  - a set visibility (`public(set)`, `protected(set)`, `private(set)`),
+    before PHP 8.4;
+  - a property, method, constant or array access on `new C(..)`, or a call
+    of it, without parentheses around the `new` (`new C()->m()`), before
+    PHP 8.4.
+  Input that uses syntax outside the supported subset (the pipe operator
+  `|>`) MUST exit 1, not 2.
 - **P2R-11** Mago analyser findings at error level, and the
   `possibly-undefined-variable` finding at any level, MUST be reported as
   problems.
@@ -590,7 +616,9 @@ requirement IDs.
 - **P2R-71** Each `expected.rs` MUST pass the checks of P2R-50 and P2R-51,
   and MUST start with the P2R-52 line.
 - **P2R-72** For each case with `fn main()`, the PHP run
-  `php -n -d display_errors=stderr -d error_reporting=E_ALL input.php`
+  `$PHP2RUST_PHP -n -d display_errors=stderr -d error_reporting=E_ALL input.php`,
+  where `PHP2RUST_PHP` names the PHP binary (`php` when it is not set) and
+  the tests MUST fail when that binary is not PHP 8.3, 8.4, 8.5 or 8.6,
   (with `-d extension=ctype` added for a PHP build that loads `ctype` as a
   shared extension, which `-n` skips) and
   the Rust program built with `rustc --edition 2024` (debug) MUST print the
@@ -617,7 +645,12 @@ requirement IDs.
   (P2R-350), so PHP and the tool see the same declarations, and the tool
   never reads it. A case or stop folder that holds a directory
   `migrations/` runs the tool with the added option `--migrations`
-  naming that directory (P2R-400).
+  naming that directory (P2R-400). A case, stop or error folder that holds
+  `php.txt`, one target version per line (P2R-10), runs the tool with
+  `--php` for each of them, and a case folder runs the PHP side of P2R-72
+  only when the binary's version is one of them; a folder without
+  `php.txt` runs the tool with the default targets and the PHP side under
+  every binary.
 - **P2R-74** Each error folder `tests/errors/<slug>/` holds `args.txt` (the
   command-line arguments, one per line), an optional `input.php` and
   `expected.txt`. Run from inside the folder, the tool MUST exit 2, its
@@ -630,10 +663,11 @@ requirement IDs.
   and `expected.txt` from the current tool output; CI MUST NOT run it. A
   failing folder MUST be reported by name with its expected and actual
   output, and every folder MUST run when one fails.
-- **P2R-77** CI MUST run on every push and pull request: `cargo fmt --check`,
-  `cargo clippy --all-targets -- -D warnings`, `cargo test` and the
-  `Cargo.lock` check of P2R-81, with the pinned toolchain (P2R-83) and
-  PHP 8.5.
+- **P2R-77** CI MUST run on every push and pull request, with the pinned
+  toolchain (P2R-83): `cargo test`, which holds the `Cargo.lock` check of
+  P2R-81, once for each of PHP 8.3, 8.4, 8.5 and 8.6, so the folders of
+  P2R-72 run under every target's binary, and `cargo fmt --check` and
+  `cargo clippy --all-targets -- -D warnings` once.
 
 ## 9. Repository
 
@@ -642,11 +676,15 @@ requirement IDs.
   exact version: direct dependencies as `=x.y.z`, `Cargo.lock` committed,
   and CI checks every `mago-*` entry in `Cargo.lock`. The pinned version's
   `PHPVersion::LATEST` MUST be PHP 8.5, because Mago always builds its
-  prelude with `LATEST`. Version 1 pins Mago 1.61.0.
+  prelude with `LATEST`, so every target of P2R-10 is analysed against
+  the built-in symbols of PHP 8.5: a function that only PHP 8.6 has is
+  unknown and stops by P2R-11. Version 1 pins Mago 1.61.0.
 - **P2R-82** The README MUST state what the tool does, how to install it
   (`cargo install --locked`), that it needs `rustfmt` on `PATH` (P2R-190),
   which rustup's minimal profile leaves out, how to run it, the supported
-  PHP, the refusal rules in short, the known differences (P2R-60), the
+  PHP versions (8.3 to 8.6) and the option `--php` (P2R-10), how to run
+  the folders under another PHP binary (`PHP2RUST_PHP`), the refusal
+  rules in short, the known differences (P2R-60), the
   `indexmap` dependency of output with a map (P2R-243), the options
   `--include` (P2R-340) and `--migrations` (P2R-400) and the command of
   P2R-76.
@@ -1805,7 +1843,11 @@ converts those forms.
   of type `String`: helpers (P2R-160) that remove the bytes PHP removes by
   default, space, `\t`, `\n`, `\r`, `\0` and `\x0B`, where Rust's `trim`
   also removes `\x0C` and Unicode spaces and keeps `\0`. A second argument
-  converts by P2R-291.
+  converts by P2R-291. PHP 8.6 also removes `\x0C` by default, so for the
+  target 8.6 (P2R-10) a call with one argument MUST stop the conversion,
+  and so MUST `trim(...)`, `ltrim(...)` and `rtrim(...)` as an
+  `array_map()` callback (P2R-301); with the characters given, a call
+  converts by P2R-291 for every target.
 - **P2R-183** `strtolower($s)` and `strtoupper($s)` with a `string` argument
   MUST convert to `s.to_ascii_lowercase()` and `s.to_ascii_uppercase()`,
   which change only ASCII letters, as PHP 8.2 and later do. `ucfirst($s)`

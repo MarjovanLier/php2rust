@@ -5028,8 +5028,10 @@ own tests check them (P2R-609).
   `unit` fixture shares; `arguments`, a list of JSON values in which an
   integer (`1`) and a float (`1.0`) stay distinct, and a string, a boolean,
   `null` and a list of these convert to PHP literals; and `type`, the
-  declared return type, one of `int`, `float`, `string`, `bool`, `?int`,
-  `?string`, `list<int>` and `list<string>`. A `unit` or `feature` case also
+  declared return type, one of `int`, `string`, `bool`, `?int`,
+  `?string`, `list<int>` and `list<string>`. A `float` result is not one
+  of them, because php2rust converts no float to text (P2R-166) and the
+  Rust driver could not print it; a float argument converts. A `unit` or `feature` case also
   gives `returns`, the expected value as JSON, and may give `stdout`, what
   the call itself prints (empty when left out); both are written by hand.
 - **P2R-603** For each such fixture the harness MUST write one PHP driver in
@@ -5037,9 +5039,9 @@ own tests check them (P2R-609).
   print helper per return type, and a function `php2rust_fixture(): void`
   that, for each case in order, prints the line `case <name>`, calls the
   function with the case's arguments and passes the result to the helper of
-  its `type`. A helper prints the type before the value, so `1`, `1.0`,
-  `"1"` and `true` print differently: `int 1`, `float 1`, `string 1 1`
-  (the length, then the bytes) and `bool true`; `null` prints `null`, and a
+  its `type`. A helper prints the type before the value, so `1`, `"1"`
+  and `true` print differently: `int 1`, `string 1 1` (the length, then
+  the bytes) and `bool true`; `null` prints `null`, and a
   list prints its type and length, then each element through its helper.
   The PHP side runs the driver with the subject from a file of its own,
   which php2rust never reads. php2rust converts the subject and the
@@ -5082,7 +5084,8 @@ own tests check them (P2R-609).
   the facade root, and runs the subject's migrations in the order of
   P2R-400. php2rust converts such a subject with `--include` naming that
   `vendor/`. When `vendor/` is missing, the harness MUST skip every Laravel
-  fixture and print one line that names `composer install`; it MUST NOT
+  fixture and print, for each tier, one line that names `composer install`
+  and shows without `--nocapture`, as the lines of record mode do; it MUST NOT
   run a Laravel subject on the stand-ins of `tests/cases`.
 - **P2R-607** An `e2e` case runs the subject, a program with top-level
   statements that converts as one file with `fn main()` (P2R-72), as a

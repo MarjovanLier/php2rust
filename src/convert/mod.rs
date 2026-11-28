@@ -18,6 +18,7 @@ use mago_database::file::{File, FileId, FileType};
 use mago_names::ResolvedNames;
 use mago_names::resolver::NameResolver;
 use mago_php_version::PHPVersion;
+use mago_php_version::feature::Feature;
 use mago_prelude::Prelude;
 use mago_reporting::{AnnotationKind, Issue, Level};
 use mago_span::{HasSpan, Span};
@@ -97,19 +98,28 @@ pub struct Included {
     pub source: Vec<u8>,
 }
 
+/// The target PHP versions of P2R-10, in ascending order, which are also the default.
+pub const TARGETS: [PHPVersion; 4] = [
+    PHPVersion::PHP83,
+    PHPVersion::PHP84,
+    PHPVersion::PHP85,
+    PHPVersion::PHP86,
+];
+
 /// Converts one PHP file. `path` is the input path as given on the command line.
 pub fn convert(
     path: &str,
     source: Vec<u8>,
     included: Vec<Included>,
     migrations: Option<Vec<Migration>>,
+    targets: &[PHPVersion],
 ) -> Result<String, Failure> {
     let input = Input {
         shown: path.to_owned(),
         name: path.to_owned(),
         source,
     };
-    let mut written = analyse(vec![input], false, included, migrations)?;
+    let mut written = analyse(vec![input], false, &included, migrations, targets)?;
     Ok(written.remove(0).1)
 }
 
@@ -119,18 +129,26 @@ pub fn convert_crate(
     inputs: Vec<Input>,
     included: Vec<Included>,
     migrations: Option<Vec<Migration>>,
+    targets: &[PHPVersion],
 ) -> Result<Vec<(String, String)>, Failure> {
-    analyse(inputs, true, included, migrations)
+    analyse(inputs, true, &included, migrations, targets)
 }
 
-/// Parses, analyses and converts the input files together: Mago scans every file into one
-/// codebase, so a class of one file is known in the others (P2R-171). One file converts
-/// to one output file; a `library` converts to the module files of a crate.
+/// `8.3` for PHP 8.3, as `--php` names it (P2R-01).
+pub fn label(version: PHPVersion) -> String {
+    format!("{}.{}", version.major(), version.minor())
+}
+
+/// Parses the input files once, then analyses and converts them once per target (P2R-10):
+/// Mago scans every file into one codebase, so a class of one file is known in the others
+/// (P2R-171). One file converts to one output file; a `library` converts to the module
+/// files of a crate. The Rust is written only when every target gives the same Rust.
 fn analyse(
     inputs: Vec<Input>,
     library: bool,
-    included: Vec<Included>,
+    included: &[Included],
     migrations: Option<Vec<Migration>>,
+    targets: &[PHPVersion],
 ) -> Result<Vec<(String, String)>, Failure> {
     let shown: Vec<String> = inputs.iter().map(|input| input.shown.clone()).collect();
     let files: Vec<File> = inputs
@@ -154,17 +172,55 @@ fn analyse(
     if !errors.is_empty() {
         return Err(Failure::Invalid(problem::render_files(&named, errors)));
     }
-    let mut screened: Vec<Problem> = programs
-        .iter()
-        .flat_map(|program| screen(program))
-        .collect();
     let resolved: Vec<ResolvedNames<'_>> = programs
         .iter()
         .map(|program| NameResolver::new(&arena).resolve(program))
         .collect();
     let flats: Vec<Vec<Statement<'_>>> =
         programs.iter().map(|program| flattened(program)).collect();
-    let mut codebase = Prelude::build().metadata;
+    // Mago builds the prelude with `LATEST` whatever the target (P2R-81), so it is built once.
+    let prelude = Prelude::build().metadata;
+    let mut outcomes: Vec<(PHPVersion, Outcome)> = Vec::new();
+    for &version in targets {
+        let outcome = analyse_for(
+            version,
+            (&arena, &files, &programs, &resolved, &flats, &shown),
+            (library, &prelude),
+            included,
+            migrations.as_deref(),
+        )?;
+        outcomes.push((version, outcome));
+    }
+    merged(&named, outcomes)
+}
+
+/// The Rust files one target writes, or the problems it finds.
+type Outcome = Result<Vec<(String, String)>, Vec<Problem>>;
+
+/// The parsed input: its arena, files, programs, resolved names, flattened statements and
+/// the paths its problems print.
+type Parsed<'p, 'a> = (
+    &'a LocalArena,
+    &'p [File],
+    &'p [&'a Program<'a>],
+    &'p [ResolvedNames<'a>],
+    &'p [Vec<Statement<'a>>],
+    &'p [String],
+);
+
+/// Scans, analyses and converts the parsed input for one target `version` (P2R-10).
+fn analyse_for(
+    version: PHPVersion,
+    (arena, files, programs, resolved, flats, shown): Parsed<'_, '_>,
+    (library, prelude): (bool, &CodebaseMetadata),
+    included: &[Included],
+    migrations: Option<&[Migration]>,
+) -> Result<Outcome, Failure> {
+    let mut screened: Vec<Problem> = programs
+        .iter()
+        .flat_map(|program| screen(program, version))
+        .collect();
+    let mut codebase = prelude.clone();
     // An enum or class may not take the fully qualified name of a class-like PHP has built
     // in, and once the files are scanned the two cannot be told apart (P2R-111, P2R-131,
     // P2R-151).
@@ -172,7 +228,7 @@ fn analyse(
     // PHP rejects a function named like one it has built in; Mago does not. Inside a
     // namespace PHP accepts it, and the tool still refuses it (P2R-31, P2R-151).
     let mut built_in_functions: HashSet<Vec<u8>> = HashSet::new();
-    for (statements, names) in flats.iter().zip(&resolved) {
+    for (statements, names) in flats.iter().zip(resolved) {
         for statement in statements {
             match statement {
                 Statement::Enum(Enum { name, .. })
@@ -193,24 +249,18 @@ fn analyse(
             }
         }
     }
-    for ((file, program), names) in files.iter().zip(&programs).zip(&resolved) {
-        codebase.extend(scan_program(
-            &arena,
-            file,
-            program,
-            names,
-            PHPVersion::PHP85,
-        ));
+    for ((file, program), names) in files.iter().zip(programs).zip(resolved) {
+        codebase.extend(scan_program(arena, file, program, names, version));
     }
     // Each included file enters the codebase as vendored code, which never replaces a
     // built-in or an input symbol; its own arena goes once it is scanned (P2R-340).
     let mut included_ids: HashSet<FileId> = HashSet::new();
     for included in included {
         let file = File::new(
-            Cow::Owned(included.name.into_bytes()),
+            Cow::Owned(included.name.clone().into_bytes()),
             FileType::Vendored,
             None,
-            Cow::Owned(included.source),
+            Cow::Owned(included.source.clone()),
         );
         included_ids.insert(file.id);
         let arena = LocalArena::new();
@@ -219,13 +269,7 @@ fn analyse(
             continue;
         }
         let names = NameResolver::new(&arena).resolve(program);
-        codebase.extend(scan_program(
-            &arena,
-            &file,
-            program,
-            &names,
-            PHPVersion::PHP85,
-        ));
+        codebase.extend(scan_program(&arena, &file, program, &names, version));
     }
     // Mago learns the columns of each model before it populates the codebase (P2R-403).
     let units: Vec<(&[Statement<'_>], &ResolvedNames<'_>)> = flats
@@ -233,7 +277,7 @@ fn analyse(
         .map(Vec::as_slice)
         .zip(resolved.iter())
         .collect();
-    let models = models::find(&units, &mut codebase, migrations.as_deref(), &included_ids);
+    let models = models::find(&units, &mut codebase, migrations, &included_ids, version);
     populate_codebase(
         &mut codebase,
         &mut SymbolReferences::new(),
@@ -244,14 +288,14 @@ fn analyse(
     // Each Mago finding with its code, which P2R-380 reads.
     let mut found: Vec<(Problem, Option<&str>)> = Vec::new();
     let mut analysed: Vec<Analysed<'_>> = Vec::new();
-    for (((file, program), names), path) in files.iter().zip(&programs).zip(&resolved).zip(&shown) {
+    for (((file, program), names), path) in files.iter().zip(programs).zip(resolved).zip(shown) {
         let analyzer = Analyzer::new(
-            &arena,
+            arena,
             file,
             names,
             &codebase,
             &plugins,
-            Settings::new(PHPVersion::PHP85),
+            Settings::new(version),
         );
         let mut result = AnalysisResult::new(SymbolReferences::new());
         let Ok(artifacts) = analyzer.analyze_with_artifacts(program, &mut result) else {
@@ -288,7 +332,7 @@ fn analyse(
     }
     let units: Vec<Program<'_>> = flats
         .iter()
-        .zip(&programs)
+        .zip(programs)
         .map(|(statements, program)| Program {
             statements: Sequence { nodes: statements },
             ..(*program).clone()
@@ -301,6 +345,7 @@ fn analyse(
     converter.built_in_classes = built_in_classes;
     converter.built_in_functions = built_in_functions;
     converter.library = library;
+    converter.php = version;
     let written = converter.program(&units);
     let mut problems: Vec<Problem> = found
         .into_iter()
@@ -316,19 +361,98 @@ fn analyse(
         .collect();
     problems.append(&mut converter.problems);
     problems.append(&mut screened);
-    if problems.is_empty() {
+    Ok(if problems.is_empty() {
         Ok(written)
     } else {
-        Err(Failure::Refused(problem::render_files(&named, problems)))
+        Err(problems)
+    })
+}
+
+/// The outcomes of every target as one result (P2R-03, P2R-10). A problem that only some
+/// targets find starts with their versions; when every target converts, each must give
+/// the Rust of the lowest one.
+fn merged(
+    named: &[(&str, &File)],
+    outcomes: Vec<(PHPVersion, Outcome)>,
+) -> Result<Vec<(String, String)>, Failure> {
+    let total = outcomes.len();
+    let mut problems: Vec<(Problem, Vec<PHPVersion>)> = Vec::new();
+    let mut written: Vec<(PHPVersion, Vec<(String, String)>)> = Vec::new();
+    for (version, outcome) in outcomes {
+        let found = match outcome {
+            Ok(files) => {
+                written.push((version, files));
+                continue;
+            }
+            Err(found) => found,
+        };
+        for problem in found {
+            let seen = problems.iter_mut().find(|(seen, _)| {
+                (seen.file, seen.start, seen.end, seen.origin, &seen.message)
+                    == (
+                        problem.file,
+                        problem.start,
+                        problem.end,
+                        problem.origin,
+                        &problem.message,
+                    )
+            });
+            match seen {
+                Some((_, versions)) if versions.contains(&version) => {}
+                Some((_, versions)) => versions.push(version),
+                None => problems.push((problem, vec![version])),
+            }
+        }
+    }
+    if !problems.is_empty() {
+        // Of equal spans, the problem of every target is printed, not one of some.
+        let spans: Vec<(FileId, u32, u32)> = problems
+            .iter()
+            .filter(|(_, versions)| versions.len() == total)
+            .map(|(problem, _)| (problem.file, problem.start, problem.end))
+            .collect();
+        let problems = problems
+            .into_iter()
+            .filter(|(problem, versions)| {
+                versions.len() == total
+                    || !spans.contains(&(problem.file, problem.start, problem.end))
+            })
+            .map(|(mut problem, versions)| {
+                if versions.len() < total {
+                    problem.message = format!("PHP {}: {}", listed(&versions), problem.message);
+                }
+                problem
+            })
+            .collect();
+        return Err(Failure::Refused(problem::render_files(named, problems)));
+    }
+    let (lowest, rust) = &written[0];
+    if let Some((other, _)) = written.iter().find(|(_, files)| files != rust) {
+        return Err(Failure::Refused(format!(
+            "{}: the Rust for PHP {} differs from the Rust for PHP {} (P2R-10)\n",
+            named[0].0,
+            label(*lowest),
+            label(*other)
+        )));
+    }
+    Ok(written.swap_remove(0).1)
+}
+
+/// `8.3`, `8.3 and 8.4`, `8.3, 8.4 and 8.5` (P2R-03).
+fn listed(versions: &[PHPVersion]) -> String {
+    let labels: Vec<String> = versions.iter().copied().map(label).collect();
+    match labels.split_last() {
+        Some((last, rest)) if !rest.is_empty() => format!("{} and {last}", rest.join(", ")),
+        _ => labels.concat(),
     }
 }
 
 /// The input that PHP refuses and Mago lets through: forms that PHP fails to parse and
-/// Mago parses, and a comment that makes Mago drop a finding PHP may enforce (P2R-500 to
-/// P2R-503).
-fn screen(program: &Program<'_>) -> Vec<Problem> {
+/// Mago parses, also those that only PHP `version` fails to compile, and a comment that
+/// makes Mago drop a finding PHP may enforce (P2R-10, P2R-500 to P2R-503).
+fn screen(program: &Program<'_>, version: PHPVersion) -> Vec<Problem> {
     let mut found: Vec<(Span, &str)> = Vec::new();
-    Unparsed.walk_program(program, &mut found);
+    Unparsed { version }.walk_program(program, &mut found);
     let pragma = |text: &[u8]| {
         [&b"@mago-expect"[..], b"@mago-ignore"]
             .iter()
@@ -351,11 +475,85 @@ fn screen(program: &Program<'_>) -> Vec<Problem> {
     unparsed.chain(comments).collect()
 }
 
-/// Collects each form that PHP fails to parse and Mago parses, with its problem (P2R-500,
-/// P2R-502, P2R-503).
-struct Unparsed;
+/// Collects each form that PHP `version` fails to parse or compile and Mago parses, with its
+/// problem (P2R-10, P2R-500, P2R-502, P2R-503).
+struct Unparsed {
+    version: PHPVersion,
+}
 
 impl<'ast, 'arena> Walker<'ast, 'arena, Vec<(Span, &'static str)>> for Unparsed {
+    // PHP 8.5 added `final` as a promotion modifier; Mago's parser takes no version.
+    fn walk_in_function_like_parameter(
+        &self,
+        parameter: &'ast FunctionLikeParameter<'arena>,
+        found: &mut Vec<(Span, &'static str)>,
+    ) {
+        if self.version >= PHPVersion::PHP85 {
+            return;
+        }
+        let form = parameters::ParameterForm::of(parameter);
+        if let Some(modifier) = form
+            .modifiers
+            .iter()
+            .find(|modifier| modifier.kind == members::ModifierKind::Final)
+        {
+            found.push((
+                modifier.span,
+                "PHP before 8.5 fails to compile final on a promoted constructor parameter, which Mago accepts (P2R-10)",
+            ));
+        }
+    }
+
+    // PHP 8.4 added a set visibility; Mago's analyser reads that version only to decide
+    // where a readonly property may be written, and reports no `private(set)` before it.
+    fn walk_in_modifier(
+        &self,
+        modifier: &'ast Modifier<'arena>,
+        found: &mut Vec<(Span, &'static str)>,
+    ) {
+        let set = matches!(
+            members::kind(modifier),
+            members::ModifierKind::PublicSet
+                | members::ModifierKind::ProtectedSet
+                | members::ModifierKind::PrivateSet
+        );
+        if set && !self.version.is_supported(Feature::AsymmetricVisibility) {
+            found.push((
+                modifier.span(),
+                "PHP before 8.4 fails to parse a set visibility such as private(set), which Mago accepts (P2R-10)",
+            ));
+        }
+    }
+
+    // PHP 8.4 added an access or call on `new C()` without parentheses around it.
+    fn walk_in_expression(
+        &self,
+        expression: &'ast Expression<'arena>,
+        found: &mut Vec<(Span, &'static str)>,
+    ) {
+        if self.version.is_supported(Feature::NewWithoutParentheses) {
+            return;
+        }
+        let base = match expression {
+            Expression::Call(Call::Method(call)) => call.object,
+            Expression::Call(Call::NullSafeMethod(call)) => call.object,
+            Expression::Call(Call::StaticMethod(call)) => call.class,
+            Expression::Call(Call::Function(call)) => call.function,
+            Expression::Access(Access::Property(access)) => access.object,
+            Expression::Access(Access::NullSafeProperty(access)) => access.object,
+            Expression::Access(Access::StaticProperty(access)) => access.class,
+            Expression::Access(Access::ClassConstant(access)) => access.class,
+            Expression::ArrayAccess(access) => access.array,
+            _ => return,
+        };
+        if matches!(base, Expression::Instantiation(_)) {
+            found.push((
+                base.span(),
+                "PHP before 8.4 fails to parse an access or call on new C(..) without parentheses around the new, which Mago accepts (P2R-10)",
+            ));
+        }
+    }
+
     fn walk_in_attribute_list(
         &self,
         list: &'ast AttributeList<'arena>,
@@ -773,6 +971,8 @@ struct Converter<'c> {
     models: Vec<models::Model>,
     /// The store functions each model's code calls, by class index (P2R-410).
     store_uses: HashMap<usize, BTreeSet<models::StoreOp>>,
+    /// The target PHP version this conversion is for (P2R-10).
+    php: PHPVersion,
 }
 
 impl<'c> Converter<'c> {
@@ -824,6 +1024,7 @@ impl<'c> Converter<'c> {
             used_traits: HashSet::new(),
             models: Vec::new(),
             store_uses: HashMap::new(),
+            php: PHPVersion::LATEST,
         }
     }
 
@@ -1234,5 +1435,97 @@ impl<'c> Converter<'c> {
             items.insert(0, vec![crates::INDEX_MAP_USE.to_owned()]);
         }
         vec![(String::new(), assemble(items, main))]
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn file() -> File {
+        File::ephemeral(Cow::Borrowed(&b"t.php"[..]), Cow::Borrowed(&b"abcdef"[..]))
+    }
+
+    fn problem(file: &File, start: u32, message: &str) -> Problem {
+        Problem {
+            file: file.id,
+            start,
+            end: start + 1,
+            origin: Origin::Tool,
+            message: message.to_owned(),
+        }
+    }
+
+    fn rust(text: &str) -> Outcome {
+        Ok(vec![(String::new(), text.to_owned())])
+    }
+
+    fn refused(result: Result<Vec<(String, String)>, Failure>) -> String {
+        match result {
+            Err(Failure::Refused(lines)) => lines,
+            _ => panic!("expected a refusal"),
+        }
+    }
+
+    #[test]
+    fn versions_are_listed_in_order() {
+        assert_eq!(listed(&TARGETS[..1]), "8.3");
+        assert_eq!(listed(&TARGETS[..2]), "8.3 and 8.4");
+        assert_eq!(listed(&TARGETS[..3]), "8.3, 8.4 and 8.5");
+    }
+
+    #[test]
+    fn a_problem_of_some_targets_names_them() {
+        let f = file();
+        let outcomes = vec![
+            (
+                TARGETS[0],
+                Err(vec![problem(&f, 0, "all"), problem(&f, 2, "old")]),
+            ),
+            (
+                TARGETS[1],
+                Err(vec![problem(&f, 0, "all"), problem(&f, 2, "old")]),
+            ),
+            (TARGETS[2], Err(vec![problem(&f, 0, "all")])),
+        ];
+        let lines = refused(merged(&[("t.php", &f)], outcomes));
+        assert_eq!(lines, "t.php:1:1: all\nt.php:1:3: PHP 8.3 and 8.4: old\n");
+    }
+
+    #[test]
+    fn an_equal_span_prints_the_problem_of_every_target() {
+        let f = file();
+        let outcomes = vec![
+            (
+                TARGETS[0],
+                Err(vec![problem(&f, 0, "z all"), problem(&f, 0, "a old")]),
+            ),
+            (TARGETS[1], Err(vec![problem(&f, 0, "z all")])),
+        ];
+        let lines = refused(merged(&[("t.php", &f)], outcomes));
+        assert_eq!(lines, "t.php:1:1: z all\n");
+    }
+
+    #[test]
+    fn the_same_rust_for_every_target_converts() {
+        let f = file();
+        let outcomes = vec![(TARGETS[0], rust("a")), (TARGETS[3], rust("a"))];
+        let written = merged(&[("t.php", &f)], outcomes).ok().expect("converts");
+        assert_eq!(written, vec![(String::new(), "a".to_owned())]);
+    }
+
+    #[test]
+    fn different_rust_for_two_targets_stops() {
+        let f = file();
+        let outcomes = vec![
+            (TARGETS[0], rust("a")),
+            (TARGETS[1], rust("a")),
+            (TARGETS[2], rust("b")),
+        ];
+        let lines = refused(merged(&[("t.php", &f)], outcomes));
+        assert_eq!(
+            lines,
+            "t.php: the Rust for PHP 8.3 differs from the Rust for PHP 8.5 (P2R-10)\n"
+        );
     }
 }

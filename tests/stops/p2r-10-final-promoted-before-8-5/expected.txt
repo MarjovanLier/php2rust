@@ -1,0 +1,2 @@
+input.php:9:33: PHP 8.3 and 8.4: PHP before 8.5 fails to compile final on a promoted constructor parameter, which Mago accepts (P2R-10)
+input.php:9:54: PHP 8.3 and 8.4: PHP before 8.5 fails to compile final on a promoted constructor parameter, which Mago accepts (P2R-10)

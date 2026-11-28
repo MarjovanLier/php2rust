@@ -1,0 +1,6 @@
+input.php:9:12: PHP 8.6: trim() with one argument also removes a form feed (\x0C) under PHP 8.6, which 8.3 to 8.5 keep, so give the characters to remove as its second argument (P2R-182)
+input.php:9:23: PHP 8.6: ltrim() with one argument also removes a form feed (\x0C) under PHP 8.6, which 8.3 to 8.5 keep, so give the characters to remove as its second argument (P2R-182)
+input.php:9:35: PHP 8.6: rtrim() with one argument also removes a form feed (\x0C) under PHP 8.6, which 8.3 to 8.5 keep, so give the characters to remove as its second argument (P2R-182)
+input.php:18:22: PHP 8.6: trim(...) also removes a form feed (\x0C) under PHP 8.6, which 8.3 to 8.5 keep, so use a closure that gives the characters to remove (P2R-182)
+input.php:24:12: PHP 8.6: trim() with one argument also removes a form feed (\x0C) under PHP 8.6, which 8.3 to 8.5 keep, so give the characters to remove as its second argument (P2R-182)
+input.php:24:17: trim() is supported only on strings (P2R-182, P2R-291)

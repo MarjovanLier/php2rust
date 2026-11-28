@@ -1087,6 +1087,7 @@ pub(super) fn find(
     codebase: &mut CodebaseMetadata,
     migrations: Option<&[Migration]>,
     included: &HashSet<FileId>,
+    version: PHPVersion,
 ) -> Vec<Model> {
     // A Model the input declares makes no class a model.
     let parent_included = codebase
@@ -1206,8 +1207,8 @@ pub(super) fn find(
         }
     }
     if !models.is_empty() {
-        tell_static_forms(codebase);
-        tell_when(codebase, included);
+        tell_static_forms(codebase, version);
+        tell_when(codebase, included, version);
     }
     models
 }
@@ -1216,7 +1217,7 @@ pub(super) fn find(
 /// value leaves without a type, so Mago types the chain as mixed. A patch of the vendored
 /// trait keeps its parameters and template and returns `$this`, as `when()` does for the
 /// callbacks a store chain takes (P2R-450).
-fn tell_when(codebase: &mut CodebaseMetadata, included: &HashSet<FileId>) {
+fn tell_when(codebase: &mut CodebaseMetadata, included: &HashSet<FileId>, version: PHPVersion) {
     let vendored = codebase
         .get_class_like(CONDITIONABLE)
         .is_some_and(|conditionable| {
@@ -1239,7 +1240,7 @@ fn tell_when(codebase: &mut CodebaseMetadata, included: &HashSet<FileId>) {
     let arena = LocalArena::new();
     let program = parse_file(&arena, &file);
     let names = NameResolver::new(&arena).resolve(program);
-    let mut patch = scan_program(&arena, &file, program, &names, PHPVersion::PHP85);
+    let mut patch = scan_program(&arena, &file, program, &names, version);
     patch.convert_partial_to_patch();
     codebase.extend(patch);
     codebase.apply_patches_pass();
@@ -2325,7 +2326,7 @@ fn plain_literal(expression: &Expression<'_>) -> bool {
 /// `__callStatic`, which Mago types as mixed. A patch of Eloquent's model gives them to Mago
 /// as `@method static`, typed as the forms of sections 42 and 43 convert them; a model of an
 /// include that declares one of them for real keeps its own (P2R-411, P2R-412, P2R-421).
-fn tell_static_forms(codebase: &mut CodebaseMetadata) {
+fn tell_static_forms(codebase: &mut CodebaseMetadata, version: PHPVersion) {
     let Some(model) = codebase.get_class_like(MODEL) else {
         return;
     };
@@ -2348,7 +2349,7 @@ fn tell_static_forms(codebase: &mut CodebaseMetadata) {
     let arena = LocalArena::new();
     let program = parse_file(&arena, &file);
     let names = NameResolver::new(&arena).resolve(program);
-    let mut patch = scan_program(&arena, &file, program, &names, PHPVersion::PHP85);
+    let mut patch = scan_program(&arena, &file, program, &names, version);
     patch.convert_partial_to_patch();
     codebase.extend(patch);
     codebase.apply_patches_pass();

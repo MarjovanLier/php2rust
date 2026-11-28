@@ -7,6 +7,7 @@
 //! parameter are a `&str` in Rust (P2R-24); every other string value is an owned
 //! `String`. `owned` and `borrowed` convert a value to the form a place needs.
 
+use mago_php_version::PHPVersion;
 use mago_span::Span;
 use mago_syntax::cst::*;
 
@@ -363,6 +364,16 @@ impl Converter<'_> {
             (1, 2),
             &format!("{name}() converts with one or two string arguments only (P2R-182, P2R-291)"),
         )?;
+        // The helper keeps the form feed that PHP 8.6 trims by default. The name alone is
+        // refused, so the span leaves out the arguments and their problems still print.
+        if arguments.len() == 1 && self.php >= PHPVersion::PHP86 {
+            self.refuse(
+                call.function,
+                format!(
+                    "{name}() with one argument also removes a form feed (\\x0C) under PHP 8.6, which 8.3 to 8.5 keep, so give the characters to remove as its second argument (P2R-182)"
+                ),
+            );
+        }
         let message = format!("{name}() is supported only on strings (P2R-182, P2R-291)");
         // Both convert first, so problems in both are reported.
         let converted: Vec<Option<RExpr>> = arguments

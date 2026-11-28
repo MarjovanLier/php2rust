@@ -1,0 +1,6 @@
+error: invalid value '8.2' for '--php <VERSION>'
+  [possible values: 8.3, 8.4, 8.5, 8.6]
+
+  tip: a similar value exists: '8.6'
+
+For more information, try '--help'.

@@ -3432,11 +3432,14 @@ fn positional<'l, 'a, const N: usize>(
     positional_list(list).try_into().ok()
 }
 
-/// The text of a string literal without interpolation.
+/// The text of a string literal without interpolation, when P2R-49 accepts it.
 fn string_literal(expression: &Expression<'_>) -> Option<String> {
     match expression {
         Expression::Literal(Literal::String(string)) => {
-            String::from_utf8(string.value?.to_vec()).ok()
+            let double_quoted = matches!(string.kind, LiteralStringKind::DoubleQuoted);
+            expressions::literal_text(double_quoted, string.raw, string.value)
+                .ok()
+                .map(str::to_owned)
         }
         _ => None,
     }

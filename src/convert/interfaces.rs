@@ -8,6 +8,7 @@ use mago_syntax::cst::*;
 use super::classes::MethodInfo;
 use super::control::emit;
 use super::members::{MemberForm, ModifierKind};
+use super::parameters::{DefaultValue, ParameterList};
 use super::{Converter, Mode, Signature};
 use crate::types::RustType;
 
@@ -180,10 +181,10 @@ impl Converter<'_> {
                 }
                 Some(_) => {}
             }
-            for parameter in method.parameter_list.parameters.iter() {
-                if let Some(attributes) = parameter.attribute_lists.first() {
+            for parameter in &ParameterList::of(&method.parameter_list).parameters {
+                if let Some(attributes) = parameter.attribute_groups.first() {
                     self.refuse(attributes, "attributes are not supported (P2R-07)");
-                } else if parameter.default_value.is_some()
+                } else if parameter.default != DefaultValue::None
                     || parameter.ampersand.is_some()
                     || parameter.ellipsis.is_some()
                 {

@@ -5098,9 +5098,11 @@ own tests check them (P2R-609).
   exit code and the written files, first PHP against the expectation, then
   Rust against PHP (P2R-604).
 - **P2R-608** CI MUST run the harness with the tests of P2R-77, once per PHP
-  version. [NEEDS CLARIFICATION: may CI run `composer install` for the
-  Laravel fixtures? ADR 0010 leaves it to the owner; until then CI skips
-  them by P2R-606.]
+  version, after `composer install` in `tests/differential/laravel`, so
+  the Laravel fixtures run in CI as well (the owner's decision of 28 Nov
+  2026, ADR 0010). The PHP runs load each extension that php2rust's
+  built-ins and Laravel need and `-n` leaves out, as P2R-72 does for
+  `ctype`.
 - **P2R-609** The harness's own tests MUST feed each tier a fixture whose
   expectation is wrong (a `returns` or `stdout` of `unit` and `feature`, a
   golden file, an e2e `stdout`), on a subject without Laravel so it runs in
@@ -5111,8 +5113,7 @@ own tests check them (P2R-609).
 
 ## Spec checklist
 
-- [ ] No `[NEEDS CLARIFICATION]` markers left: P2R-608 waits for the
-  owner's decision on `composer install` in CI (ADR 0010). Decided in review: problems
+- [x] No `[NEEDS CLARIFICATION]` markers left. Decided in review: problems
   inside or equal to a reported span are not reported (P2R-03); exit 2 wins
   over exit 1 (P2R-04); comments are not copied in version 1 (P2R-52); `[]`
   takes its element type from the same variable or the declared type it

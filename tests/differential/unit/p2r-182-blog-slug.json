@@ -1,0 +1,12 @@
+{
+    "subject": "blog",
+    "laravel": true,
+    "cases": [
+        {"name": "words", "function": "Blog\\slugFor", "arguments": ["Finding Balance"], "type": "string", "returns": "finding-balance"},
+        {"name": "padded", "function": "Blog\\slugFor", "arguments": ["  Grief  "], "type": "string", "returns": "grief"},
+        {"name": "many-words", "function": "Blog\\slugFor", "arguments": ["Life After Loss Today"], "type": "string", "returns": "life-after-loss-today"},
+        {"name": "double-space", "function": "Blog\\slugFor", "arguments": ["a  b"], "type": "string", "returns": "a--b"},
+        {"name": "non-ascii-kept", "function": "Blog\\slugFor", "arguments": ["Été Notes"], "type": "string", "returns": "Été-notes"},
+        {"name": "empty", "function": "Blog\\slugFor", "arguments": [""], "type": "string", "returns": ""}
+    ]
+}

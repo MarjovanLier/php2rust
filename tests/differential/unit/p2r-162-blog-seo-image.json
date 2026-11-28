@@ -1,0 +1,12 @@
+{
+    "subject": "blog",
+    "laravel": true,
+    "cases": [
+        {"name": "none", "function": "Blog\\seoImage", "arguments": [null], "type": "string", "returns": "/images/og-default.jpg"},
+        {"name": "stored", "function": "Blog\\seoImage", "arguments": ["a.jpg"], "type": "string", "returns": "/storage/a.jpg"},
+        {"name": "http", "function": "Blog\\seoImage", "arguments": ["http://x"], "type": "string", "returns": "http://x"},
+        {"name": "https", "function": "Blog\\seoImage", "arguments": ["https://x"], "type": "string", "returns": "https://x"},
+        {"name": "httpish", "function": "Blog\\seoImage", "arguments": ["httpfiles/a.jpg"], "type": "string", "returns": "httpfiles/a.jpg"},
+        {"name": "empty", "function": "Blog\\seoImage", "arguments": [""], "type": "string", "returns": "/storage/"}
+    ]
+}

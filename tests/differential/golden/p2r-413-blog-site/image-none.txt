@@ -1,0 +1,1 @@
+string 22 /images/og-default.jpg

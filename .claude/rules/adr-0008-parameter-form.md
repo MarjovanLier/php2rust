@@ -11,4 +11,4 @@ Rationale: `docs/adr/0008-parameter-form-read-in-one-module.md`. The ADR wins on
 - A rule that PHP applies to every parameter is a fact of the module. Every kind of callable reads it from there; no kind keeps its own copy.
 - Each kind of callable turns the facts into its own stop messages, in its own order and with its own ID. For example, a superglobal's name is P2R-380 in a hook and P2R-31 elsewhere. Do not add one function that returns the first problem of a parameter.
 - The type and default value of a parameter still convert in the caller (P2R-23, P2R-24, P2R-168). Read the attribute names that a kind accepts (`#[SensitiveParameter]`, laravel-data's attributes) where that kind accepts them.
-- The exception constructor in `exceptions.rs` and `fields` in `classes.rs` still read parameters from the syntax tree. They are the next to move; do not add a third place.
+- No form check reads a parameter's modifiers, attribute lists, `&`, `...`, default or hooks from the syntax tree. A modifier PHP rejects comes from `ParameterForm::modifier_fault` as a value; the caller picks the message.

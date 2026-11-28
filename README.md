@@ -32,7 +32,17 @@ php2rust input.php -o out.rs  # Rust in out.rs
 php2rust src -o crate         # every .php file under src as one library crate in crate/
 php2rust app -o crate --include vendor  # also read vendor/ for its types, not converted
 php2rust app -o crate --include vendor --migrations database/migrations  # Eloquent models
+php2rust input.php --php 8.4 --php 8.5  # only for PHP 8.4 and 8.5
 ```
+
+`--php <version>`, which may be given more than once, names a PHP version the Rust must
+behave on as the PHP does: `8.3`, `8.4`, `8.5` or `8.6`. Without it, the versions are all
+four. php2rust analyses the input once per version and writes Rust only when every version
+converts to the same Rust. A stop that only some versions give starts with them, as in
+`input.php:9:33: PHP 8.3 and 8.4: ...`. So a form that only a newer PHP accepts, such as
+`new C()->m()` (PHP 8.4) or `final` on a promoted parameter (PHP 8.5), converts only
+when `--php` leaves the older versions out, and `trim($s)` with one argument, which PHP
+8.6 changed, converts only without 8.6.
 
 `--include <path>`, which may be given more than once, reads every `.php` file under the
 path (such as Composer's `vendor/`) for its classes, functions and constants only, so the
@@ -126,8 +136,9 @@ comment that points to the known differences below.
 
 ## Supported PHP
 
-php2rust reads PHP 8.5. The file must start with `declare(strict_types=1);`. Version 1
-converts:
+php2rust reads PHP 8.3, 8.4, 8.5 and 8.6 (see `--php` above). Mago, which php2rust
+reads PHP with, knows the built-in functions of PHP 8.5, so a function that only PHP 8.6
+has stops. The file must start with `declare(strict_types=1);`. Version 1 converts:
 
 - the types `int` (`i64`), `float` (`f64`), `bool`, `string` (`String`) and `list<T>`
   (`Vec<T>`), and `void` as a return type. Narrower types such as literal values,
@@ -654,8 +665,16 @@ php2rust refuses some valid PHP that version 1 converts in other forms:
 
 ## Development
 
-The tests need PHP 8.5 on `PATH` and the Rust toolchain pinned in
-`rust-toolchain.toml` (`rustup toolchain install` installs it). Each folder under
+The tests need PHP 8.3, 8.4, 8.5 or 8.6 and the Rust toolchain pinned in
+`rust-toolchain.toml` (`rustup toolchain install` installs it). The case folders run
+their PHP side with `php` on `PATH`, or with the binary that `PHP2RUST_PHP` names; CI
+runs them once per version. A folder with `php.txt` (one version per line) converts for
+those versions only and runs its PHP side only under them:
+
+```sh
+PHP2RUST_PHP=/opt/homebrew/opt/php@8.3/bin/php cargo test --test folders cases
+```
+ Each folder under
 `tests/cases`, `tests/stops` and `tests/errors` is one test, and `cargo test` also checks
 that each requirement from P2R-07 to P2R-49 and from P2R-100 to P2R-510 starts the name of
 a case or stop folder.

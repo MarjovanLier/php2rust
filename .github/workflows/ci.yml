@@ -23,6 +23,8 @@ jobs:
       - name: Install the toolchain pinned in rust-toolchain.toml
         run: rustup toolchain install
       - uses: Swatinem/rust-cache@v2
+      # The harness runs its Laravel fixtures on the packages the lock pins (P2R-606, P2R-608).
+      - run: composer install --no-interaction --no-progress --working-dir tests/differential/laravel
       - run: cargo test --locked
 
   # Branch protection requires a check named test. It runs after the versions and fails

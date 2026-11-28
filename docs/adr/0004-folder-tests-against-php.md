@@ -4,5 +4,5 @@ The main tests are folders, not unit tests (P2R-70 to P2R-73). A case folder hol
 
 ## Consequences
 
-- The folder test needs PHP 8.5, rustc and rustfmt on the machine, and takes about six minutes.
+- The folder test needs PHP 8.3, 8.4, 8.5 or 8.6 (`PHP2RUST_PHP`, ADR 0009), rustc and rustfmt on the machine, and takes about six minutes per PHP version.
 - Unit tests cover helpers with a small interface of their own, such as the pattern converter (`patterns.rs`) and the member form (`members.rs`, ADR 0007); they do not replace a folder for a converted or refused form.

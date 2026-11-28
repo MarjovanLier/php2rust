@@ -7,7 +7,7 @@ paths:
 
 Rationale: `docs/adr/0010-one-differential-harness-for-php-and-rust.md`. The ADR wins on conflict; change this file in the same commit as the ADR.
 
-Not implemented yet: these checks apply to the change that builds the harness and to work after it.
+The harness is `tests/differential.rs`, specified in section 53 of the spec (P2R-600 to P2R-609).
 
 - A fixture is one JSON file, `tests/differential/<unit|feature|golden|e2e>/<id>-<slug>.json`. Write unit, feature and e2e expectations by hand; never record them from a tool run.
 - A golden fixture lists inputs only. Record its files with `PHP2RUST_RECORD=1` on your machine, read every recorded file in the diff before you commit it, and never record in CI. `PHP2RUST_BLESS` must not write a golden file.

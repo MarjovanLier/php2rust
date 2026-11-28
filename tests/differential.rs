@@ -938,26 +938,46 @@ fn check_tier(tier: &str) {
         })
         .unwrap_or_default();
     paths.sort();
-    let mut failures = Vec::new();
-    let mut laravel = 0;
-    for path in paths {
-        let name = path
-            .file_name()
+    let name = |path: &Path| {
+        path.file_name()
             .and_then(|n| n.to_str())
             .unwrap_or_default()
-            .to_owned();
-        if !name.contains(&only) {
-            continue;
-        }
-        if let Ok(fixture) = load(tier, &path)
-            && skipped(&fixture).as_deref() == Some("Laravel")
-        {
-            laravel += 1;
-        }
-        if let Err(why) = check(tier, &path, record) {
-            failures.push(format!("{tier}/{name}: {why}"));
-        }
-    }
+            .to_owned()
+    };
+    paths.retain(|path| name(path).contains(&only));
+    let laravel = paths
+        .iter()
+        .filter_map(|path| load(tier, path).ok())
+        .filter(|fixture| skipped(fixture).as_deref() == Some("Laravel"))
+        .count();
+    // Each fixture spends most of its time in PHP, php2rust and rustc processes that share
+    // nothing but their own scratch directory, so a few run at once.
+    let next = std::sync::atomic::AtomicUsize::new(0);
+    let workers = std::thread::available_parallelism().map_or(1, |n| n.get().min(4));
+    let mut results: Vec<(usize, String)> = std::thread::scope(|scope| {
+        let handles: Vec<_> = (0..workers)
+            .map(|_| {
+                scope.spawn(|| {
+                    let mut found = Vec::new();
+                    loop {
+                        let at = next.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                        let Some(path) = paths.get(at) else {
+                            return found;
+                        };
+                        if let Err(why) = check(tier, path, record) {
+                            found.push((at, format!("{tier}/{}: {why}", name(path))));
+                        }
+                    }
+                })
+            })
+            .collect();
+        handles
+            .into_iter()
+            .flat_map(|handle| handle.join().expect("a fixture thread"))
+            .collect()
+    });
+    results.sort();
+    let failures: Vec<String> = results.into_iter().map(|(_, why)| why).collect();
     if laravel > 0 {
         note(&format!(
             "skipped {laravel} Laravel fixture(s) of {tier}: run composer install in tests/differential/laravel (P2R-606)\n"

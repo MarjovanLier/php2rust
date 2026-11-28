@@ -1076,7 +1076,7 @@ impl Converter<'_> {
                 .all(|attribute| self.data_attribute(attribute))
             {
                 Some("attributes are not supported (P2R-07)")
-            } else if data && DATA_PROPERTIES.contains(&&parameter.variable.name[1..]) {
+            } else if data && DATA_PROPERTIES.contains(&written.php_name.as_slice()) {
                 Some(DATA_PROPERTY)
             } else {
                 None
@@ -1097,29 +1097,35 @@ impl Converter<'_> {
             return;
         };
         let mut fields: Vec<ParameterSignature> = Vec::new();
-        for parameter in constructor.parameter_list.parameters.iter() {
-            if !parameter.is_promoted_property() || parameter.hint.is_none() {
+        let list = ParameterList::of(&constructor.parameter_list);
+        for (parameter, form) in constructor
+            .parameter_list
+            .parameters
+            .iter()
+            .zip(&list.parameters)
+        {
+            if !form.promoted || !form.typed {
                 continue;
             }
             if !is_readonly(declaration)
-                && !parameter
+                && !form
                     .modifiers
                     .iter()
-                    .any(|m| matches!(m, Modifier::Readonly(_)))
+                    .any(|m| m.kind == ModifierKind::Readonly)
             {
                 self.classes[index].writable = true;
             }
-            let php_name = &parameter.variable.name[1..];
-            let Some(rust_name) = self.rust_name(php_name, &parameter.variable) else {
+            let php_name = form.php_name.as_slice();
+            let Some(rust_name) = self.rust_name(php_name, &form.variable) else {
                 continue;
             };
             if helpers::is_helper(&rust_name) {
-                self.refuse(&parameter.variable, helpers::HELPER_NAME);
+                self.refuse(&form.variable, helpers::HELPER_NAME);
                 continue;
             }
             if fields.iter().any(|f| f.rust_name == rust_name) {
                 self.refuse(
-                    &parameter.variable,
+                    &form.variable,
                     format!("{rust_name} is already the Rust name of another property (P2R-131)"),
                 );
                 continue;

@@ -246,17 +246,17 @@ impl Converter<'_> {
         };
         let mut converted = self.defaults_last(&constructor.parameter_list);
         let mut parameters: Vec<ParameterSignature> = Vec::new();
-        for (parameter, meta) in constructor
+        let list = ParameterList::of(&constructor.parameter_list);
+        for ((parameter, form), meta) in constructor
             .parameter_list
             .parameters
             .iter()
+            .zip(&list.parameters)
             .zip(metadata.parameters.iter())
         {
-            if parameter.is_promoted_property()
-                && EXCEPTION_PROPERTIES.contains(&&parameter.variable.name[1..])
-            {
+            if form.promoted && EXCEPTION_PROPERTIES.contains(&form.php_name.as_slice()) {
                 self.refuse(
-                    parameter,
+                    form,
                     "PHP's Exception already declares a property of this name (P2R-391)",
                 );
                 converted = false;

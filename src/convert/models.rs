@@ -25,6 +25,7 @@ use mago_syntax::walker::Walker;
 
 use super::lists::unparenthesized;
 use super::members::{MemberForm, ModifierKind};
+use super::parameters::{DefaultValue, ParameterForm};
 use super::{Converter, Mode, ParameterSignature, classes, filters, nulls, throws};
 use crate::names;
 use crate::printer::{self, BinOp, RExpr};
@@ -2955,11 +2956,14 @@ impl Reader<'_> {
         let parameter = match closure.parameter_list.parameters.as_slice() {
             [parameter]
                 if form
-                    && parameter.modifiers.is_empty()
-                    && parameter.attribute_lists.is_empty()
-                    && parameter.ampersand.is_none()
-                    && parameter.ellipsis.is_none()
-                    && parameter.default_value.is_none()
+                    && {
+                        let written = ParameterForm::of(parameter);
+                        written.modifiers.is_empty()
+                            && written.attribute_groups.is_empty()
+                            && written.ampersand.is_none()
+                            && written.ellipsis.is_none()
+                            && written.default == DefaultValue::None
+                    }
                     && matches!(&parameter.hint, Some(Hint::Identifier(identifier))
                         if self.resolved(identifier) == b"illuminate\\database\\schema\\blueprint") =>
             {

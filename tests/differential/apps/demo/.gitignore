@@ -1,0 +1,4 @@
+/vendor/
+/bootstrap/cache/*.php
+/storage/
+/database/*.sqlite

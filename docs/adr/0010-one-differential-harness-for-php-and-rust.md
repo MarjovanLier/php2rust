@@ -40,7 +40,7 @@ Facts this rests on, checked on 28 Nov 2026 with Composer 2.10.3:
 
 Not checked: Laravel under PHP 8.6; which extensions PHP from `setup-php` on Ubuntu loads with `-n`, where they may be shared modules that only a configuration file loads; and how long a full harness run takes with Laravel booted once per case.
 
-Open decision for the owner: whether CI may run `composer install` and so fetch the Laravel packages from Packagist on every run. ADR 0011 rejected Composer for WordPress, because there it would add a package manager for one download of code that must stay out of the repository anyway; for Laravel, Composer is how the packages are published, and the lock file pins them. Until the owner decides, the Laravel fixtures run on a machine where `composer install` was run, and CI runs the harness without them.
+Decided by the owner on 28 Nov 2026: CI runs `composer install` and so fetches the Laravel packages from Packagist on every run (P2R-608). ADR 0011 rejected Composer for WordPress, because there it would add a package manager for one download of code that must stay out of the repository anyway; for Laravel, Composer is how the packages are published, and the lock file pins them.
 
 ## Considered Options
 
@@ -52,7 +52,7 @@ Open decision for the owner: whether CI may run `composer install` and so fetch 
 - Run Laravel subjects on the folder tests' stand-ins: rejected, because a stand-in has only what one test names, and a fixture that passes on it says nothing about Laravel.
 - Commit `vendor/`, or Laravel's application skeleton with `orchestra/testbench`: rejected. `vendor/` is 43 MB of code that the lock file already pins, and an application or Testbench boots routes, config and service providers that Eloquent on SQLite and laravel-data's constructors do not need. A subject that needs more of Laravel adds it to the bootstrap.
 
-Implemented on 28 Nov 2026 by section 53 of the spec (P2R-600 to P2R-609), except the open decision on Composer in CI (P2R-608). Found while implementing it:
+Implemented on 28 Nov 2026 by section 53 of the spec (P2R-600 to P2R-609). Found while implementing it:
 
 - With the real `vendor/` given as `--include` in place of the stand-ins, php2rust converted `p2r-350-data-struct`, `p2r-360-optional`, `p2r-410-model-store`, `p2r-412-find-forms` and `p2r-441-collection-store` to the same bytes as their `expected.rs`.
 - A Laravel subject and its driver, converted as one crate and built with a one-line `main`, printed what PHP printed on real Eloquent, under Homebrew's PHP 8.3, 8.4, 8.5 and 8.6. The committed lock holds 84 packages; the probe above, with caret constraints, held 83.
@@ -68,8 +68,8 @@ Implemented on 28 Nov 2026 by section 53 of the spec (P2R-600 to P2R-609), excep
 - Global state and starting globals need the converted driver to set them, which php2rust does not convert today, so a fixture that needs them stops until it does.
 - The harness runs PHP once and rustc once per fixture and version; it needs PHP, rustc and rustfmt as the folders do, and `PHP2RUST_FIXTURE=<text>` keeps only the fixtures whose name holds the text, as `PHP2RUST_FOLDER` does.
 - How the driver prints a map with keys that Rust orders differently, and whether a case may expect a stop instead of a result, are open questions for the change that implements this.
-- A Laravel fixture needs Composer and network access to Packagist once per machine. When `tests/differential/laravel/vendor/` is missing, the runner skips the Laravel fixtures and prints one line that names `composer install`, as a corpus fixture is skipped without the corpus (ADR 0011); whether CI installs the packages waits for the open decision above.
+- A Laravel fixture needs Composer and network access to Packagist once per machine. When `tests/differential/laravel/vendor/` is missing, the runner skips the Laravel fixtures and prints one line that names `composer install`, as a corpus fixture is skipped without the corpus (ADR 0011); CI installs them (P2R-608).
 - A Laravel upgrade is a change of the lock file, made on purpose and reviewed like the Mago pin (ADR 0002); a golden file that changes with it is reviewed again.
 ## Spec changes for the change that implements this
 
-New requirements for the fixture format, the driver, the tiers, golden files and record mode, masks, the Laravel bootstrap and the runner, next to P2R-70 to P2R-76; P2R-75 (whether a fixture counts as cover for a requirement ID); P2R-76 (the rewrite command does not touch fixtures or golden files); P2R-77 (CI runs the harness, and installs the Laravel packages if the owner decides so); P2R-82 (the README names the harness, its filter, record mode and `composer install`).
+New requirements for the fixture format, the driver, the tiers, golden files and record mode, masks, the Laravel bootstrap and the runner, next to P2R-70 to P2R-76; P2R-75 (whether a fixture counts as cover for a requirement ID); P2R-76 (the rewrite command does not touch fixtures or golden files); P2R-77 and P2R-608 (CI installs the Laravel packages and runs the harness); P2R-82 (the README names the harness, its filter, record mode and `composer install`).

@@ -31,6 +31,11 @@ mago-word = "=1.61.0"
 regex = "=1.13.1"
 regex-syntax = "=0.8.11"
 
+[dev-dependencies]
+# The differential harness reads its JSON fixtures (P2R-601); it was already in the
+# lockfile through Mago.
+serde_json = "=1.0.152"
+
 # The Kani proofs sit behind cfg(kani); see scripts/prove.sh.
 [lints.rust]
 unexpected_cfgs = { level = "warn", check-cfg = ['cfg(kani)'] }

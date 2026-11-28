@@ -1,0 +1,14 @@
+{
+    "subject": "posts",
+    "laravel": true,
+    "cases": [
+        {"name": "none-yet", "function": "App\\titles", "arguments": [], "type": "list<string>", "returns": []},
+        {"name": "create-a", "function": "App\\created", "arguments": ["a", 3], "type": "int", "returns": 1},
+        {"name": "create-b", "function": "App\\created", "arguments": ["b", 5], "type": "int", "returns": 2},
+        {"name": "titles", "function": "App\\titles", "arguments": [], "type": "list<string>", "returns": ["a", "b"]},
+        {"name": "title-found", "function": "App\\titleOf", "arguments": [2], "type": "string", "returns": "b"},
+        {"name": "title-missing", "function": "App\\titleOf", "arguments": [9], "type": "string", "returns": "none"},
+        {"name": "views-found", "function": "App\\viewsOf", "arguments": [1], "type": "?int", "returns": 3},
+        {"name": "views-missing", "function": "App\\viewsOf", "arguments": [9], "type": "?int", "returns": null}
+    ]
+}

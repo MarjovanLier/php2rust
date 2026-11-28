@@ -1,0 +1,9 @@
+{
+    "subject": "contacts",
+    "laravel": true,
+    "cases": [
+        {"name": "all-given", "function": "App\\described", "arguments": ["Ann", "ann@example.org", 2], "type": "string", "returns": "Ann: email, seen"},
+        {"name": "none-given", "function": "App\\described", "arguments": ["Bob", null, 0], "type": "string", "returns": "Bob: no email, never"},
+        {"name": "visits", "function": "App\\hasVisits", "arguments": [1], "type": "bool", "returns": true}
+    ]
+}

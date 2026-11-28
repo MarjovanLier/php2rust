@@ -1,0 +1,9 @@
+{
+    "subject": "contacts",
+    "laravel": true,
+    "cases": [
+        {"name": "given", "function": "App\\hasVisits", "arguments": [4], "type": "bool", "returns": true},
+        {"name": "optional", "function": "App\\hasVisits", "arguments": [0], "type": "bool", "returns": false},
+        {"name": "negative", "function": "App\\hasVisits", "arguments": [-2], "type": "bool", "returns": false}
+    ]
+}

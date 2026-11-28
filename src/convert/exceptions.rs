@@ -9,6 +9,7 @@ use mago_syntax::walker::Walker;
 
 use super::control::emit;
 use super::members::{MemberForm, ModifierKind};
+use super::parameters::ParameterList;
 use super::{Converter, ParameterSignature, Signature, classes, helpers, throws};
 use crate::names;
 use crate::printer::{self, RExpr};
@@ -435,20 +436,16 @@ impl Converter<'_> {
             } else if let Some(modifier) = form.doubled() {
                 self.refuse(modifier, classes::DOUBLED_MODIFIER);
             }
-            for parameter in constructor.parameter_list.parameters.iter() {
-                if let Some((_, problem)) = classes::parameter_modifier(&parameter.modifiers) {
-                    self.refuse(parameter, problem);
+            let parameters = ParameterList::of(&constructor.parameter_list).parameters;
+            for parameter in &parameters {
+                if let Some((fault, _)) = parameter.modifier_fault() {
+                    self.refuse(parameter, classes::modifier_problem(fault));
                 }
             }
             if let Some(hint) = &constructor.return_type_hint {
                 self.refuse(hint, "PHP rejects a return type on a constructor (P2R-391)");
             }
-            if let Some(parameter) = constructor
-                .parameter_list
-                .parameters
-                .iter()
-                .find(|parameter| parameter.hooks.is_some())
-            {
+            if let Some(parameter) = parameters.iter().find(|parameter| parameter.hooks) {
                 self.refuse(
                     parameter,
                     "a property hook runs when the constructor sets the property, which the function does not do (P2R-391)",

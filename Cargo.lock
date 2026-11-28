@@ -1035,6 +1035,7 @@ dependencies = [
  "mago-word",
  "regex",
  "regex-syntax",
+ "serde_json",
 ]
 
 [[package]]

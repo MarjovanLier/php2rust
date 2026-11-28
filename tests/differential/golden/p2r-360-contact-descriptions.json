@@ -1,0 +1,13 @@
+{
+    "subject": "contacts",
+    "laravel": true,
+    "cases": [
+        {"name": "both", "function": "App\\described", "arguments": ["Ann", "ann@example.org", 1], "type": "string"},
+        {"name": "no-email", "function": "App\\described", "arguments": ["Bob", null, 3], "type": "string"},
+        {"name": "no-visits", "function": "App\\described", "arguments": ["Cy", "cy@example.org", 0], "type": "string"},
+        {"name": "neither", "function": "App\\described", "arguments": ["", null, -1], "type": "string"},
+        {"name": "empty-email", "function": "App\\described", "arguments": ["Di", "", 5], "type": "string"},
+        {"name": "visits-big", "function": "App\\hasVisits", "arguments": [1000000], "type": "bool"},
+        {"name": "visits-zero", "function": "App\\hasVisits", "arguments": [0], "type": "bool"}
+    ]
+}

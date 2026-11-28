@@ -1,0 +1,17 @@
+{
+    "subject": "posts",
+    "laravel": true,
+    "cases": [
+        {"name": "create-1", "function": "App\\created", "arguments": ["first", 10], "type": "int"},
+        {"name": "create-2", "function": "App\\created", "arguments": ["second", 0], "type": "int"},
+        {"name": "create-3", "function": "App\\created", "arguments": ["café", -4], "type": "int"},
+        {"name": "title-1", "function": "App\\titleOf", "arguments": [1], "type": "string"},
+        {"name": "title-3", "function": "App\\titleOf", "arguments": [3], "type": "string"},
+        {"name": "title-0", "function": "App\\titleOf", "arguments": [0], "type": "string"},
+        {"name": "title-4", "function": "App\\titleOf", "arguments": [4], "type": "string"},
+        {"name": "views-2", "function": "App\\viewsOf", "arguments": [2], "type": "?int"},
+        {"name": "views-3", "function": "App\\viewsOf", "arguments": [3], "type": "?int"},
+        {"name": "views-4", "function": "App\\viewsOf", "arguments": [4], "type": "?int"},
+        {"name": "titles", "function": "App\\titles", "arguments": [], "type": "list<string>"}
+    ]
+}

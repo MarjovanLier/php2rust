@@ -1,2 +1,4 @@
 /target
 /graphify-out
+# The Laravel packages of the differential harness, from composer install (P2R-606).
+/tests/differential/laravel/vendor/

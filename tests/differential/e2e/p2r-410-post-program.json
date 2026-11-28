@@ -1,0 +1,7 @@
+{
+    "subject": "post-program",
+    "laravel": true,
+    "cases": [
+        {"name": "run", "stdout": "1 2\nfirst 3\nsecond 5\n", "exit": 0}
+    ]
+}

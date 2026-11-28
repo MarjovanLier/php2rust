@@ -1,0 +1,12 @@
+{
+    "description": "The Laravel packages the harness runs Laravel subjects on (ADR 0010, P2R-606).",
+    "require": {
+        "laravel/framework": "13.44.1",
+        "spatie/laravel-data": "4.23.1"
+    },
+    "config": {
+        "platform": {
+            "php": "8.3.0"
+        }
+    }
+}

@@ -1,0 +1,7 @@
+{
+    "subject": "missing-post",
+    "laravel": true,
+    "cases": [
+        {"name": "uncaught", "stdout": "only\n", "exit": 255}
+    ]
+}

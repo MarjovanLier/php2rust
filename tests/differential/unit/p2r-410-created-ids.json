@@ -1,0 +1,9 @@
+{
+    "subject": "posts",
+    "laravel": true,
+    "cases": [
+        {"name": "first", "function": "App\\created", "arguments": ["a", 3], "type": "int", "returns": 1},
+        {"name": "second", "function": "App\\created", "arguments": ["b", 5], "type": "int", "returns": 2},
+        {"name": "no-views", "function": "App\\created", "arguments": ["", 0], "type": "int", "returns": 3}
+    ]
+}

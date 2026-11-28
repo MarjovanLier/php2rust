@@ -1,0 +1,10 @@
+{
+    "subject": "catalog",
+    "laravel": true,
+    "cases": [
+        {"name": "lamp", "function": "Catalog\\stockedName", "arguments": ["lamp", 3], "type": "string", "returns": "lamp x3"},
+        {"name": "zero", "function": "Catalog\\stockedName", "arguments": ["chair", 0], "type": "string", "returns": "chair x0"},
+        {"name": "negative", "function": "Catalog\\stockedName", "arguments": ["desk", -2], "type": "string", "returns": "desk x-2"},
+        {"name": "unicode", "function": "Catalog\\stockedName", "arguments": ["Stuhl ü", 1], "type": "string", "returns": "Stuhl ü x1"}
+    ]
+}

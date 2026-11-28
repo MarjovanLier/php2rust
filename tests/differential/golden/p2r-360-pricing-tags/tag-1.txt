@@ -1,0 +1,1 @@
+string 27 1 eur, labelled, discounted

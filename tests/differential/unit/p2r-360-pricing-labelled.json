@@ -1,0 +1,9 @@
+{
+    "subject": "pricing",
+    "laravel": true,
+    "cases": [
+        {"name": "word", "function": "Pricing\\isLabelled", "arguments": ["Sale"], "type": "bool", "returns": true},
+        {"name": "empty", "function": "Pricing\\isLabelled", "arguments": [""], "type": "bool", "returns": true},
+        {"name": "null", "function": "Pricing\\isLabelled", "arguments": [null], "type": "bool", "returns": false}
+    ]
+}

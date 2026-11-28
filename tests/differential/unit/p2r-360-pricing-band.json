@@ -1,0 +1,12 @@
+{
+    "subject": "pricing",
+    "laravel": true,
+    "cases": [
+        {"name": "negative", "function": "Pricing\\band", "arguments": [-1], "type": "string", "returns": "free"},
+        {"name": "zero", "function": "Pricing\\band", "arguments": [0], "type": "string", "returns": "free"},
+        {"name": "one", "function": "Pricing\\band", "arguments": [1], "type": "string", "returns": "cheap"},
+        {"name": "edge-cheap", "function": "Pricing\\band", "arguments": [999], "type": "string", "returns": "cheap"},
+        {"name": "edge-mid", "function": "Pricing\\band", "arguments": [1000], "type": "string", "returns": "mid"},
+        {"name": "edge-dear", "function": "Pricing\\band", "arguments": [10000], "type": "string", "returns": "dear"}
+    ]
+}

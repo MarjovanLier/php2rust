@@ -1,0 +1,30 @@
+{
+    "subject": "accounts",
+    "laravel": true,
+    "cases": [
+        {"name": "sole-empty", "function": "Accounts\\byOwner", "arguments": ["Ann"], "type": "string"},
+        {"name": "runtime-empty", "function": "Accounts\\byRuntime", "arguments": ["Ann"], "type": "string"},
+        {"name": "outer-empty", "function": "Accounts\\outer", "arguments": ["Ann"], "type": "string"},
+        {"name": "open-1", "function": "Accounts\\open", "arguments": ["Ann", "ann@example.org", 100], "type": "int"},
+        {"name": "open-2", "function": "Accounts\\open", "arguments": ["Bob", null, 50], "type": "int"},
+        {"name": "open-3", "function": "Accounts\\open", "arguments": ["Bob", "b@example.org", 75], "type": "int"},
+        {"name": "open-4", "function": "Accounts\\open", "arguments": ["Élise", null, 0], "type": "int"},
+        {"name": "sole-ann", "function": "Accounts\\byOwner", "arguments": ["Ann"], "type": "string"},
+        {"name": "sole-bob", "function": "Accounts\\byOwner", "arguments": ["Bob"], "type": "string"},
+        {"name": "sole-elise", "function": "Accounts\\byOwner", "arguments": ["Élise"], "type": "string"},
+        {"name": "runtime-bob", "function": "Accounts\\byRuntime", "arguments": ["Bob"], "type": "string"},
+        {"name": "runtime-cy", "function": "Accounts\\byRuntime", "arguments": ["Cy"], "type": "string"},
+        {"name": "either-1", "function": "Accounts\\either", "arguments": [1], "type": "string"},
+        {"name": "either-0", "function": "Accounts\\either", "arguments": [0], "type": "string"},
+        {"name": "doubled-bob", "function": "Accounts\\onlyDoubled", "arguments": ["Bob"], "type": "string"},
+        {"name": "outer-bob", "function": "Accounts\\outer", "arguments": ["Bob"], "type": "string"},
+        {"name": "outer-cy", "function": "Accounts\\outer", "arguments": ["Cy"], "type": "string"},
+        {"name": "heading-4", "function": "Accounts\\heading", "arguments": [4, "2026"], "type": "string"},
+        {"name": "email-3", "function": "Accounts\\emailOf", "arguments": [3], "type": "?string"},
+        {"name": "email-4", "function": "Accounts\\emailOf", "arguments": [4], "type": "?string"},
+        {"name": "balance-2", "function": "Accounts\\balanceOf", "arguments": [2], "type": "int"},
+        {"name": "balance-9", "function": "Accounts\\balanceOf", "arguments": [9], "type": "int"},
+        {"name": "richest-60", "function": "Accounts\\richest", "arguments": [60], "type": "string"},
+        {"name": "richest-101", "function": "Accounts\\richest", "arguments": [101], "type": "string"}
+    ]
+}

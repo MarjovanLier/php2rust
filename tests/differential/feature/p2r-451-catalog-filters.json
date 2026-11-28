@@ -1,0 +1,26 @@
+{
+    "subject": "catalog",
+    "laravel": true,
+    "cases": [
+        {"name": "none-yet", "function": "Catalog\\names", "arguments": [null, null, false, null], "type": "list<string>", "returns": []},
+        {"name": "lamp", "function": "Catalog\\stock", "arguments": ["lamp", 3, true, "red"], "type": "int", "returns": 1},
+        {"name": "chair", "function": "Catalog\\stock", "arguments": ["chair", 0, false, null], "type": "int", "returns": 2},
+        {"name": "desk", "function": "Catalog\\stock", "arguments": ["desk", 3, true, "oak"], "type": "int", "returns": 3},
+        {"name": "lamp-again", "function": "Catalog\\stock", "arguments": ["lamp", 1, false, "red"], "type": "int", "returns": 4},
+        {"name": "all", "function": "Catalog\\names", "arguments": [null, null, false, null], "type": "list<string>", "returns": ["lamp", "chair", "desk", "lamp"]},
+        {"name": "by-name", "function": "Catalog\\ids", "arguments": ["lamp", null, false, null], "type": "list<int>", "returns": [1, 4]},
+        {"name": "by-qty", "function": "Catalog\\names", "arguments": [null, 3, false, null], "type": "list<string>", "returns": ["lamp", "desk"]},
+        {"name": "qty-zero-is-no-filter", "function": "Catalog\\matches", "arguments": [null, 0, false, null], "type": "int", "returns": 4},
+        {"name": "empty-name-is-no-filter", "function": "Catalog\\matches", "arguments": ["", null, false, null], "type": "int", "returns": 4},
+        {"name": "active-only", "function": "Catalog\\names", "arguments": [null, null, true, null], "type": "list<string>", "returns": ["lamp", "desk"]},
+        {"name": "active-red", "function": "Catalog\\ids", "arguments": [null, null, true, "red"], "type": "list<int>", "returns": [1]},
+        {"name": "all-filters", "function": "Catalog\\matches", "arguments": ["lamp", 1, false, "red"], "type": "int", "returns": 1},
+        {"name": "nothing", "function": "Catalog\\noneMatch", "arguments": ["sofa", null, false, null], "type": "bool", "returns": true},
+        {"name": "something", "function": "Catalog\\noneMatch", "arguments": [null, null, true, "oak"], "type": "bool", "returns": false},
+        {"name": "cast-true", "function": "Catalog\\isActive", "arguments": [1], "type": "bool", "returns": true},
+        {"name": "cast-false", "function": "Catalog\\isActive", "arguments": [2], "type": "bool", "returns": false},
+        {"name": "colour", "function": "Catalog\\colourOf", "arguments": [3], "type": "?string", "returns": "oak"},
+        {"name": "no-colour", "function": "Catalog\\colourOf", "arguments": [2], "type": "?string", "returns": null},
+        {"name": "missing-colour", "function": "Catalog\\colourOf", "arguments": [9], "type": "?string", "returns": null}
+    ]
+}

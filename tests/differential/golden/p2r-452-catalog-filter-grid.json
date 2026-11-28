@@ -1,0 +1,32 @@
+{
+    "subject": "catalog",
+    "laravel": true,
+    "cases": [
+        {"name": "stock-1", "function": "Catalog\\stock", "arguments": ["lamp", 3, true, "red"], "type": "int"},
+        {"name": "stock-2", "function": "Catalog\\stock", "arguments": ["chair", 0, false, null], "type": "int"},
+        {"name": "stock-3", "function": "Catalog\\stock", "arguments": ["desk", 3, true, "oak"], "type": "int"},
+        {"name": "stock-4", "function": "Catalog\\stock", "arguments": ["lamp", 1, false, "red"], "type": "int"},
+        {"name": "stock-5", "function": "Catalog\\stock", "arguments": ["shelf", 2, true, "oak"], "type": "int"},
+        {"name": "stock-6", "function": "Catalog\\stock", "arguments": ["0", 1, true, "0"], "type": "int"},
+        {"name": "none", "function": "Catalog\\names", "arguments": [null, null, false, null], "type": "list<string>"},
+        {"name": "name-lamp", "function": "Catalog\\ids", "arguments": ["lamp", null, false, null], "type": "list<int>"},
+        {"name": "name-zero-string", "function": "Catalog\\ids", "arguments": ["0", null, false, null], "type": "list<int>"},
+        {"name": "name-empty", "function": "Catalog\\matches", "arguments": ["", null, false, null], "type": "int"},
+        {"name": "qty-3", "function": "Catalog\\names", "arguments": [null, 3, false, null], "type": "list<string>"},
+        {"name": "qty-1", "function": "Catalog\\names", "arguments": [null, 1, false, null], "type": "list<string>"},
+        {"name": "qty-0", "function": "Catalog\\matches", "arguments": [null, 0, false, null], "type": "int"},
+        {"name": "qty-negative", "function": "Catalog\\matches", "arguments": [null, -1, false, null], "type": "int"},
+        {"name": "active", "function": "Catalog\\names", "arguments": [null, null, true, null], "type": "list<string>"},
+        {"name": "colour-oak", "function": "Catalog\\names", "arguments": [null, null, false, "oak"], "type": "list<string>"},
+        {"name": "colour-zero-string", "function": "Catalog\\matches", "arguments": [null, null, false, "0"], "type": "int"},
+        {"name": "lamp-active", "function": "Catalog\\ids", "arguments": ["lamp", null, true, null], "type": "list<int>"},
+        {"name": "oak-qty-2", "function": "Catalog\\names", "arguments": [null, 2, true, "oak"], "type": "list<string>"},
+        {"name": "everything", "function": "Catalog\\matches", "arguments": ["desk", 3, true, "oak"], "type": "int"},
+        {"name": "none-match", "function": "Catalog\\noneMatch", "arguments": ["desk", 1, false, null], "type": "bool"},
+        {"name": "some-match", "function": "Catalog\\noneMatch", "arguments": [null, null, true, "red"], "type": "bool"},
+        {"name": "active-4", "function": "Catalog\\isActive", "arguments": [4], "type": "bool"},
+        {"name": "colour-6", "function": "Catalog\\colourOf", "arguments": [6], "type": "?string"},
+        {"name": "colour-missing", "function": "Catalog\\colourOf", "arguments": [99], "type": "?string"},
+        {"name": "stocked", "function": "Catalog\\stockedName", "arguments": ["vase", 12], "type": "string"}
+    ]
+}

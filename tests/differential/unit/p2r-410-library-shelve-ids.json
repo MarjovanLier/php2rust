@@ -1,0 +1,11 @@
+{
+    "subject": "library",
+    "laravel": true,
+    "cases": [
+        {"name": "first", "function": "Library\\shelve", "arguments": ["Dune", 1, "sand", 2], "type": "int", "returns": 1},
+        {"name": "no-note", "function": "Library\\shelve", "arguments": ["Emma", 1, null, null], "type": "int", "returns": 2},
+        {"name": "same-title", "function": "Library\\shelve", "arguments": ["Dune", 2, null, 1], "type": "int", "returns": 3},
+        {"name": "empty-title", "function": "Library\\shelve", "arguments": ["", 0, "", 0], "type": "int", "returns": 4},
+        {"name": "negative", "function": "Library\\shelve", "arguments": ["Ulysses", -1, "x", -5], "type": "int", "returns": 5}
+    ]
+}

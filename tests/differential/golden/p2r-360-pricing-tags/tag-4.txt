@@ -1,0 +1,1 @@
+string 28 42 eur, labelled, full price

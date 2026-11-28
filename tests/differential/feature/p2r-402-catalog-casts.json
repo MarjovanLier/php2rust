@@ -1,0 +1,15 @@
+{
+    "subject": "catalog",
+    "laravel": true,
+    "cases": [
+        {"name": "on", "function": "Catalog\\stock", "arguments": ["on", 1, true, "blue"], "type": "int", "returns": 1},
+        {"name": "off", "function": "Catalog\\stock", "arguments": ["off", 1, false, null], "type": "int", "returns": 2},
+        {"name": "read-on", "function": "Catalog\\isActive", "arguments": [1], "type": "bool", "returns": true},
+        {"name": "read-off", "function": "Catalog\\isActive", "arguments": [2], "type": "bool", "returns": false},
+        {"name": "colour-on", "function": "Catalog\\colourOf", "arguments": [1], "type": "?string", "returns": "blue"},
+        {"name": "colour-off", "function": "Catalog\\colourOf", "arguments": [2], "type": "?string", "returns": null},
+        {"name": "stocked", "function": "Catalog\\stockedName", "arguments": ["new", 7], "type": "string", "returns": "new x7"},
+        {"name": "active-now", "function": "Catalog\\ids", "arguments": [null, null, true, null], "type": "list<int>", "returns": [1, 3]},
+        {"name": "blue-only", "function": "Catalog\\names", "arguments": [null, null, false, "blue"], "type": "list<string>", "returns": ["on"]}
+    ]
+}

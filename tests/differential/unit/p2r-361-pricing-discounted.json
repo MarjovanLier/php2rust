@@ -1,0 +1,10 @@
+{
+    "subject": "pricing",
+    "laravel": true,
+    "cases": [
+        {"name": "one", "function": "Pricing\\isDiscounted", "arguments": [1], "type": "bool", "returns": true},
+        {"name": "many", "function": "Pricing\\isDiscounted", "arguments": [99], "type": "bool", "returns": true},
+        {"name": "zero", "function": "Pricing\\isDiscounted", "arguments": [0], "type": "bool", "returns": false},
+        {"name": "negative", "function": "Pricing\\isDiscounted", "arguments": [-1], "type": "bool", "returns": false}
+    ]
+}

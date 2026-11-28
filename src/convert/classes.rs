@@ -12,7 +12,9 @@ use mago_syntax::walker::Walker;
 use super::control::emit;
 use super::functions::BodyOf;
 use super::members::{self, MemberForm, ModifierKind};
-use super::parameters::{DefaultValue, Name, ParameterForm, ParameterList, SUPERGLOBALS};
+use super::parameters::{
+    DefaultValue, ModifierFault, Name, ParameterForm, ParameterList, SUPERGLOBALS,
+};
 use super::variables::THIS;
 use super::{Converter, Mode, ParameterSignature, Signature, helpers, laravel_data, lists, nulls};
 use crate::names;
@@ -1061,8 +1063,8 @@ impl Converter<'_> {
                 )
             } else if written.ampersand.is_some() || written.ellipsis.is_some() {
                 Some("a promoted property cannot be by reference or variadic (P2R-130)")
-            } else if let Some((_, problem)) = parameter_modifier(&parameter.modifiers) {
-                Some(problem)
+            } else if let Some((fault, _)) = written.modifier_fault() {
+                Some(modifier_problem(fault))
             } else if written.name == Name::This {
                 Some("a parameter cannot be named $this, which PHP rejects (P2R-135)")
             } else if written.name == Name::Superglobal {
@@ -2435,33 +2437,16 @@ pub(super) fn doubled_modifier<'m, 'a>(
 pub(super) const WIDER_SET: &str =
     "PHP rejects a set visibility wider than the property's own visibility (P2R-130)";
 
-/// The first modifier of a constructor parameter that PHP rejects, with its problem: one
-/// written twice, `static` or `abstract`, or a set visibility wider than the read one.
-/// Mago's parser accepts each of them and its analyser reports none (P2R-130).
-pub(super) fn parameter_modifier<'m, 'a>(
-    modifiers: &'m Sequence<'a, Modifier<'a>>,
-) -> Option<(&'m Modifier<'a>, &'static str)> {
-    if let Some(modifier) = doubled_modifier(modifiers) {
-        return Some((modifier, DOUBLED_MODIFIER));
+/// The problem of a modifier PHP rejects on a constructor parameter, which the class and the
+/// exception class constructors print alike (P2R-130).
+pub(super) fn modifier_problem(fault: ModifierFault) -> &'static str {
+    match fault {
+        ModifierFault::Doubled => DOUBLED_MODIFIER,
+        ModifierFault::StaticOrAbstract => {
+            "PHP rejects static and abstract on a parameter (P2R-130)"
+        }
+        ModifierFault::WiderSet => WIDER_SET,
     }
-    if let Some(modifier) = modifiers
-        .iter()
-        .find(|m| matches!(m, Modifier::Static(_) | Modifier::Abstract(_)))
-    {
-        return Some((
-            modifier,
-            "PHP rejects static and abstract on a parameter (P2R-130)",
-        ));
-    }
-    wider_set(modifiers).map(|modifier| (modifier, WIDER_SET))
-}
-
-/// A set visibility wider than the read visibility, which is public when none is written.
-pub(super) fn wider_set<'m, 'a>(
-    modifiers: &'m Sequence<'a, Modifier<'a>>,
-) -> Option<&'m Modifier<'a>> {
-    let kinds: Vec<_> = modifiers.iter().map(members::kind).collect();
-    members::wider_set_at(&kinds).and_then(|at| modifiers.iter().nth(at))
 }
 
 /// The problem of a hook signature outside the forms that P2R-380 leaves out.

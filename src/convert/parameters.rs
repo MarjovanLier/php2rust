@@ -45,6 +45,17 @@ pub(super) enum DefaultValue {
     Other,
 }
 
+/// A modifier that PHP rejects on a parameter when it compiles the file, and that Mago's
+/// parser accepts and its analyser does not report (P2R-130).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum ModifierFault {
+    /// A modifier written twice, or a second visibility or set visibility.
+    Doubled,
+    StaticOrAbstract,
+    /// A set visibility wider than the visibility the property is read with.
+    WiderSet,
+}
+
 /// How a parameter is written.
 #[derive(Debug, PartialEq, Eq)]
 pub(super) struct ParameterForm {
@@ -52,6 +63,8 @@ pub(super) struct ParameterForm {
     pub(super) span: Span,
     /// The parameter's variable, `$x`.
     pub(super) variable: Span,
+    /// The variable's name without `$`, as written.
+    pub(super) php_name: Vec<u8>,
     pub(super) name: Name,
     /// `static` as the type, which Mago's parser reads as a modifier when it stands alone,
     /// or inside `?`, `(...)` or a union; PHP allows `static` only as a return type.
@@ -87,6 +100,7 @@ impl ParameterForm {
         ParameterForm {
             span: parameter.span(),
             variable: parameter.variable.span(),
+            php_name: name[1..].to_vec(),
             name: if name == b"$this" {
                 Name::This
             } else if SUPERGLOBALS.contains(&name) {
@@ -123,6 +137,25 @@ impl ParameterForm {
                 .modifiers
                 .iter()
                 .all(|m| m.kind == members::ModifierKind::Static)
+    }
+
+    /// The first modifier PHP rejects on this parameter, with its fault: one written twice
+    /// first, then `static` or `abstract`, then a set visibility wider than the read one.
+    pub(super) fn modifier_fault(&self) -> Option<(ModifierFault, Span)> {
+        let kinds: Vec<members::ModifierKind> = self.modifiers.iter().map(|m| m.kind).collect();
+        let at = |at: usize| self.modifiers[at].span;
+        if let Some(found) = members::doubled_at(kinds.iter().copied()) {
+            return Some((ModifierFault::Doubled, at(found)));
+        }
+        if let Some(found) = kinds.iter().position(|kind| {
+            matches!(
+                kind,
+                members::ModifierKind::Static | members::ModifierKind::Abstract
+            )
+        }) {
+            return Some((ModifierFault::StaticOrAbstract, at(found)));
+        }
+        members::wider_set_at(&kinds).map(|found| (ModifierFault::WiderSet, at(found)))
     }
 }
 
@@ -288,6 +321,60 @@ mod tests {
         assert!(!found.typed);
         assert!(form("int $x").attribute_groups.is_empty());
         assert!(form("int $x").typed);
+    }
+
+    #[test]
+    fn the_name_is_read_without_its_dollar() {
+        assert_eq!(form("int $message").php_name, b"message");
+        assert_eq!(form("public int $fooBar").php_name, b"fooBar");
+    }
+
+    #[test]
+    fn a_modifier_fault_names_its_kind_and_modifier() {
+        let fault = |parameter: &str| {
+            form(parameter)
+                .modifier_fault()
+                .map(|(fault, span)| (fault, offset(span)))
+        };
+        assert_eq!(
+            fault("public public int $x"),
+            Some((ModifierFault::Doubled, 7))
+        );
+        assert_eq!(
+            fault("public private int $x"),
+            Some((ModifierFault::Doubled, 7))
+        );
+        assert_eq!(
+            fault("public static int $x"),
+            Some((ModifierFault::StaticOrAbstract, 7))
+        );
+        assert_eq!(
+            fault("abstract int $x"),
+            Some((ModifierFault::StaticOrAbstract, 0))
+        );
+        assert_eq!(
+            fault("private public(set) int $x"),
+            Some((ModifierFault::WiderSet, 8))
+        );
+        assert_eq!(fault("public private(set) readonly int $x"), None);
+        assert_eq!(fault("int $x"), None);
+    }
+
+    #[test]
+    fn a_doubled_modifier_comes_before_static_and_static_before_a_wider_set() {
+        let fault = |parameter: &str| {
+            form(parameter)
+                .modifier_fault()
+                .map(|(fault, span)| (fault, offset(span)))
+        };
+        assert_eq!(
+            fault("static public public int $x"),
+            Some((ModifierFault::Doubled, 14))
+        );
+        assert_eq!(
+            fault("private public(set) static int $x"),
+            Some((ModifierFault::StaticOrAbstract, 20))
+        );
     }
 
     #[test]

@@ -660,7 +660,8 @@ requirement IDs.
   P2R-510 MUST appear in the name of at least one case or stop folder. A
   test MUST check this from the folder names.
 - **P2R-76** One command named in the README MUST rewrite every `expected.rs`
-  and `expected.txt` from the current tool output; CI MUST NOT run it. A
+  and `expected.txt` from the current tool output, and no fixture or golden
+  file of the harness (P2R-605); CI MUST NOT run it. A
   failing folder MUST be reported by name with its expected and actual
   output, and every folder MUST run when one fails.
 - **P2R-77** CI MUST run on every push and pull request, with the pinned
@@ -4995,9 +4996,120 @@ Laravel app and the hooks of P2R-380's case folder write.
   inside the list. A hook that stops is not left out, so the Mago
   findings that P2R-380 drops inside a left-out hook print as well.
 
+## 53. The differential harness (ADR 0010)
+
+The case folders of section 8 pin one program and its Rust. The harness
+runs many inputs through a function or a program, once on PHP and once on
+the Rust that php2rust writes, from one fixture file, so the test is written
+once and PHP is the oracle. Its requirements are about the tests, not the
+tool, so P2R-75 does not ask for a folder per requirement; the harness's
+own tests check them (P2R-609).
+
+- **P2R-600** The harness MUST run as `cargo test --test differential`, with
+  one test per tier (`unit`, `feature`, `golden`, `e2e`), so `cargo test
+  --test differential golden` runs one tier. A fixture is the file
+  `tests/differential/<tier>/<id>-<slug>.json`, where `<id>` is the lowercase
+  requirement ID it exercises (`p2r-410-created-ids.json`), and the harness
+  MUST fail a fixture whose name starts with no requirement ID that
+  docs/spec.md defines. `PHP2RUST_FIXTURE=<text>` keeps only the fixtures
+  whose file name holds the text. A failure names the tier, the fixture and
+  the case, and every fixture runs when one fails.
+- **P2R-601** A fixture is a JSON object with `subject`, the name of a
+  hand-written file `tests/differential/subjects/<subject>.php` or directory
+  `tests/differential/subjects/<subject>/` that holds no WordPress code
+  (ADR 0011); optional `php`, a list of target versions (P2R-10) it applies
+  to; optional `laravel: true` for a subject that uses Laravel (P2R-606); and
+  `cases`, a non-empty list of objects with a unique `name`. Any other key
+  MUST fail the fixture, so a misspelt key is not a silent no-op. A
+  directory subject may hold `migrations/`, which php2rust reads with
+  `--migrations` (P2R-400) and the PHP side runs (P2R-606).
+- **P2R-602** A `unit`, `feature` or `golden` case calls one function of the
+  subject: `function`, its fully qualified PHP name, which every case of a
+  `unit` fixture shares; `arguments`, a list of JSON values in which an
+  integer (`1`) and a float (`1.0`) stay distinct, and a string, a boolean,
+  `null` and a list of these convert to PHP literals; and `type`, the
+  declared return type, one of `int`, `float`, `string`, `bool`, `?int`,
+  `?string`, `list<int>` and `list<string>`. A `unit` or `feature` case also
+  gives `returns`, the expected value as JSON, and may give `stdout`, what
+  the call itself prints (empty when left out); both are written by hand.
+- **P2R-603** For each such fixture the harness MUST write one PHP driver in
+  the namespace `Php2rustFixture`, with `declare(strict_types=1);`, a typed
+  print helper per return type, and a function `php2rust_fixture(): void`
+  that, for each case in order, prints the line `case <name>`, calls the
+  function with the case's arguments and passes the result to the helper of
+  its `type`. A helper prints the type before the value, so `1`, `1.0`,
+  `"1"` and `true` print differently: `int 1`, `float 1`, `string 1 1`
+  (the length, then the bytes) and `bool true`; `null` prints `null`, and a
+  list prints its type and length, then each element through its helper.
+  The PHP side runs the driver with the subject from a file of its own,
+  which php2rust never reads. php2rust converts the subject and the
+  driver together as one directory (P2R-170), and the harness builds that
+  crate with a one-line `main` that calls the converted
+  `php2rust_fixture()`, then runs it.
+- **P2R-604** The harness MUST check the PHP output of each case against
+  its expectation first, then the Rust output against the PHP output, and
+  MUST fail with a message that says which of the two differed, so a wrong
+  fixture and a wrong conversion fail differently. A subject or driver that
+  php2rust refuses and a Rust build that fails fail the fixture with the
+  output of the step that failed, and so does a `unit`, `feature` or
+  `golden` run of either side that exits other than 0 or writes to stderr;
+  an `e2e` run compares its exit code instead (P2R-607), and its stderr,
+  which names paths, is not compared. A fixture with `php` passes `--php` for each of
+  its versions to php2rust and runs only under a PHP binary (P2R-72) of one
+  of them; without it, php2rust gets the default targets and the fixture
+  runs under every binary.
+- **P2R-605** A `golden` case gives no `returns` or `stdout`: its expected
+  output is the file `tests/differential/golden/<id>-<slug>/<case>.txt`.
+  `PHP2RUST_RECORD=1` runs the PHP side only and writes that file from the
+  PHP output of each golden case that the filter keeps; with `CI` set in the
+  environment it MUST refuse to record, and `PHP2RUST_BLESS` MUST NOT write
+  a golden file. A normal run MUST fail a golden case that has no file, and
+  compares the PHP output and the Rust output with the file. A golden
+  fixture may give `masks`, a list of objects with a regular expression
+  `pattern` and its replacement `with`, which the harness applies to the PHP
+  output, the Rust output and the recorded file alike before it compares,
+  for a value that changes from run to run and cannot be passed as an
+  argument. While it records, the harness MUST run PHP with Xdebug's code
+  coverage when the binary can load Xdebug, and print each line of the
+  subject that Xdebug reports as executable and not run; without Xdebug it
+  prints one line that says so and records anyway. A recorded file is
+  reviewed by hand before it is committed (review concern).
+- **P2R-606** For a fixture with `laravel: true`, the PHP side MUST run the
+  real packages that `tests/differential/laravel/composer.lock` pins, from
+  `tests/differential/laravel/vendor/`, which is never committed and which
+  `composer install` in that directory writes: a bootstrap there, given with
+  `auto_prepend_file`, boots Eloquent on an in-memory SQLite database, sets
+  the facade root, and runs the subject's migrations in the order of
+  P2R-400. php2rust converts such a subject with `--include` naming that
+  `vendor/`. When `vendor/` is missing, the harness MUST skip every Laravel
+  fixture and print one line that names `composer install`; it MUST NOT
+  run a Laravel subject on the stand-ins of `tests/cases`.
+- **P2R-607** An `e2e` case runs the subject, a program with top-level
+  statements that converts as one file with `fn main()` (P2R-72), as a
+  process: `stdin`, a string; `arguments`, a list of strings; `files`, an
+  object of relative paths and the text each starting file holds; and the
+  expected `stdout`, `exit` (an integer) and `written`, an object of the
+  relative paths and text of each file the run creates or changes. The
+  harness MUST run PHP and the built Rust program each in a new temporary
+  directory that holds only the starting files, and compare stdout, the
+  exit code and the written files, first PHP against the expectation, then
+  Rust against PHP (P2R-604).
+- **P2R-608** CI MUST run the harness with the tests of P2R-77, once per PHP
+  version. [NEEDS CLARIFICATION: may CI run `composer install` for the
+  Laravel fixtures? ADR 0010 leaves it to the owner; until then CI skips
+  them by P2R-606.]
+- **P2R-609** The harness's own tests MUST feed each tier a fixture whose
+  expectation is wrong (a `returns` or `stdout` of `unit` and `feature`, a
+  golden file, an e2e `stdout`), on a subject without Laravel so it runs in
+  CI, and assert that the run fails it and names it, so a harness that
+  passes everything fails its own tests. They MUST also check that a
+  fixture with an unknown key or a name without a requirement ID fails
+  (P2R-600, P2R-601).
+
 ## Spec checklist
 
-- [x] No `[NEEDS CLARIFICATION]` markers left. Decided in review: problems
+- [ ] No `[NEEDS CLARIFICATION]` markers left: P2R-608 waits for the
+  owner's decision on `composer install` in CI (ADR 0010). Decided in review: problems
   inside or equal to a reported span are not reported (P2R-03); exit 2 wins
   over exit 1 (P2R-04); comments are not copied in version 1 (P2R-52); `[]`
   takes its element type from the same variable or the declared type it
